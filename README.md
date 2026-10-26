@@ -1,102 +1,57 @@
-# Claude Switcher
+# Claude Switcher · 本地维护版
 
-A tiny macOS menu bar app for people with more than one Claude account (say, Personal and Business). One click swaps both the Claude desktop app and the `claude` CLI in your terminal between accounts, and a panel shows how much usage each account has left before you pick one.
+一个菜单栏应用管理 Claude 桌面账号、终端登录同步和网络地区守护。基于 [l2succes/claude-switcher](https://github.com/l2succes/claude-switcher) 的 MIT 代码开发；上游说明保存在 [UPSTREAM-README](docs/UPSTREAM-README.md)。
 
-<p align="center"><img src="docs/panel.png" width="480" alt="Claude Switcher panel"></p>
+当前是本地开发候选，**没有替换已安装应用，也没有部署新的守卫**。真实账号切换及异常网络急停还需要真机验收。
 
-## What it does
+![虚构账号界面预览](docs/panel-local.png)
 
-- **Switch accounts in one click.** Each account keeps its own login, settings and Claude Code threads. No signing out and back in.
-- **Terminal follows along.** Switching also moves the `claude` CLI's login, so desktop and terminal are on the same account. The terminal row shows which account the CLI is on and offers to move it if they ever differ.
-- **See your limits at a glance.** For every account: 5-hour session left, weekly limit left, and when each one resets.
-- **Menu bar readout.** The icon shows the active account and its remaining session, e.g. `✦ P · 72%`.
-- **Add as many accounts as you like.** Click "Add another account", give it a name, switch to it and sign in.
-- **Bring your Claude Code threads along.** The copy button in the footer opens a window where you pick threads from one account and copy them to another, so you can keep working on a project after switching. Full history comes with them.
-- **Open at login.** Toggle it with the sunrise button in the footer.
+*截图使用虚构账号，不代表已部署保护。*
 
-## Install
+## 本轮功能
 
-Requires macOS 13+ (Apple Silicon or Intel).
+- 桌面账号切换与终端凭据同步，保留原来的用量面板。
+- 打开、切换前检查代理、TUN 和出口国家；未知也不放行。完成切换后，打开 Claude 前再检查一次。
+- 用户级独立守卫每 10 秒执行一次。检测到网络异常或国家不符时关闭 Claude，退出界面后仍继续运行。
+- 明确区分“退出界面，保留后台保护”和“停止保护”。不会自动更改系统语言、时区、IPv6 或代理规则。
+- 账号移动失败时还原原目录；终端同步失败时报告部分完成，不冒充两端成功。
 
-### Download
+**会话复制/迁移本轮不启用。** 已有索引原型，但需先回查过去的订阅到订阅、订阅与 API 模式迁移脚本。桌面会话索引与 `~/.claude/projects` 的会话历史是不同层次，不能把索引复制当作完整数据迁移。
 
-1. Grab **ClaudeSwitcher.dmg** from the [latest release](https://github.com/l2succes/claude-switcher/releases/latest).
-2. Open it and drag **Claude Switcher** into **Applications**.
-3. Open it. The app isn't notarized by Apple, so macOS will block the first launch. Go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway**. (Or run `xattr -dr com.apple.quarantine "/Applications/Claude Switcher.app"` in Terminal.)
-4. Click the sunrise button in the footer if you want it to open at login.
+## 构建与测试
 
-### Build from source
-
-Needs the Xcode Command Line Tools (`xcode-select --install`).
+需要 macOS 13+、Swift/Xcode 命令行工具。本地验证使用临时目录、假网络和假进程动作，不使用真实账号或钥匙串。
 
 ```sh
-git clone https://github.com/l2succes/claude-switcher.git
-cd claude-switcher
-./build.sh install
+swift test
+./build.sh
 ```
 
-That builds the app, copies it to `/Applications`, adds it to Login Items and launches it. Use `./build.sh` on its own to just build it in place, or `./build.sh dmg` to package a universal `dist/ClaudeSwitcher.dmg`.
-
-The first time it reads usage, macOS asks whether **Claude Switcher** may access **Claude Safe Storage** in your keychain. Click **Always Allow** (see [How usage works](#how-usage-works) for why).
-
-## How switching works
-
-Claude Desktop keeps everything (login, cookies, threads) in `~/Library/Application Support/Claude`. Claude Switcher keeps the inactive accounts next to it:
-
-```
-~/Library/Application Support/
-├── Claude/                 ← whichever account is active
-└── Claude-Profiles/
-    ├── Business/           ← parked accounts
-    ├── .current            ← name of the active one
-    └── .cache/             ← last-known usage per account
-```
-
-Switching quits Claude, renames the folders (instant, even for many GB) and reopens Claude. A new account starts as an empty folder, so Claude opens signed out and you log in once.
-
-Safety rails: if Claude doesn't quit within 15 seconds, nothing is moved. It never overwrites a parked profile that has data in it.
-
-## How the terminal switch works
-
-The `claude` CLI keeps its login in two places: the keychain item **Claude Code-credentials** (the `claudeAiOauth` entry) and `oauthAccount` in `~/.claude.json`. When you switch, Claude Switcher:
-
-1. Saves the terminal's current login to its own keychain item (**Claude Switcher**, one entry per profile).
-2. Puts the target profile's saved login in its place. If that profile has never been used in the terminal, the CLI is logged out instead: run `claude /login` once with that account and it's remembered from then on.
-
-Only the Claude login moves. MCP server logins (Figma, Notion, Linear…) stored in the same keychain item stay put and are shared by every profile, as are your projects and history in `~/.claude`.
-
-**Restart running `claude` sessions after switching.** A session that was already open keeps using the old account and may save its login back. Before filing a login away, the switcher checks that it really belongs to the profile you're leaving, and stops with a warning if not.
-
-## How copying threads works
-
-Each Claude Code thread in the desktop app is a small JSON file in `claude-code-sessions/<account>/<org>/` inside the profile. The conversation itself lives in `~/.claude/projects`, which every account shares, so copying that JSON file is enough for the other account to resume the thread. A few account-specific fields (connectors, remote-control links, armed scheduled tasks) are stripped on copy. Threads that already exist in the destination are skipped, and nothing is deleted from the source.
-
-If the destination is the active account, Claude restarts so the new threads show up. The destination account must have opened the Code tab at least once.
-
-## How usage works
-
-Claude Desktop stores each account's login token in that account's `config.json`, encrypted with a key in your macOS keychain. Claude Switcher decrypts the token locally and calls the same usage endpoint the Claude apps use (`api.anthropic.com/api/oauth/usage`). Tokens never leave your Mac except in requests to `api.anthropic.com`. Usage refreshes when you open the panel and every 5 minutes.
-
-## Caveats
-
-- **Unofficial.** This isn't made by or affiliated with Anthropic. The usage endpoint is undocumented and could change; if it does, cards fall back to the last known numbers ("as of 2h ago").
-- **Terminal sessions don't switch mid-flight.** Open `claude` sessions stay on the old account until restarted.
-- **Switching quits Claude.** Let running sessions finish first.
-- Claude Code transcripts live in the shared `~/.claude/projects`. Only the desktop thread lists are split per account, which is what makes copying threads possible.
-- The app is ad-hoc signed, so after rebuilding you'll get the keychain prompt again.
-
-## Uninstall
-
-Turn off "open at login" (sunrise button), quit it from the panel (power button), then delete `/Applications/Claude Switcher.app`. Saved terminal logins live in Keychain Access under **Claude Switcher** and can be deleted there. To merge back to one account, switch to the one you want to keep and delete `~/Library/Application Support/Claude-Profiles`.
-
-## Development
-
-Everything is in [`main.swift`](main.swift) (SwiftUI in an `NSPopover`, no Xcode project). To regenerate the screenshot with fake data:
+产物：`build/Claude Switcher.app`，包含 `Contents/Helpers/ClaudeGuard`。构建不会安装 App、注册登录项或启动守卫。
 
 ```sh
-./build.sh && "./Claude Switcher.app/Contents/MacOS/ClaudeSwitcher" --snapshot docs/panel.png --demo
+./build.sh dmg       # 当前架构 DMG，输出到 dist/
+./build.sh install   # 明确安装；要求先退出 Claude 和旧切换器，保留原 App 备份
 ```
+
+安装前请先读 [安装与迁移](docs/安装与迁移.md)，尤其是已安装旧保镖的机器。
+
+## 保护边界
+
+目标国家由用户保存，例如 `SG`。当前支持 Shadowrocket VPN 与 `198.18.*` TUN 识别；“自动识别 TUN”仅检查同类 TUN。国家通过 claude.ai、api.anthropic.com、claude.com 三个域名的无认证 HTTPS trace 并行确认，彼此不一致、超时、错误响应或字段不明确时拒绝启动。
+
+这是**启动门禁和进程急停**，不是防火墙。轮询间隔、网络探测和终止过程存在延迟；从 Finder 直接打开 Claude 也不经过启动门禁。三个主要域名的探测仍不能证明所有子域和每条连接采用同一出口，仍需代理路由正确。
+
+后台急停只针对 Claude 桌面客户端；终端凭据同步不代表任意终端或 IDE 中的 Claude Code 进程也受急停保护。配置与回执只保存必要状态，不记录公网 IP、代理地址、账号或会话内容。
+
+## 文档
+
+- [整合设计与验收边界](docs/整合设计.md)
+- [开发与验证](docs/开发与验证.md)
+- [安装、旧守卫迁移和停止保护](docs/安装与迁移.md)
+
+Git 只在本地维护，分支为 `codex/network-region-guard`，`upstream` 指向原项目；不推送上游或建立远端仓库。
 
 ## License
 
-MIT
+MIT，保留上游 LICENSE。
