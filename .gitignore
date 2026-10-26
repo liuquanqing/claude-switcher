@@ -1,3 +1,7 @@
 *.app
 .DS_Store
 dist/
+.build/
+build/
+_qa/
+*.log
