@@ -60,6 +60,7 @@ swift test
 
 - [账号存储、3P 与迁移方案分析](docs/存储与迁移方案分析.md)
 - [CCSwitcher 的 CLI 登录保存与权限比较](docs/CLI登录保存方案调研.md)
+- [Claude 独立审查与索引重置案例](research/R-20261027-003-improvement-review.md)
 - [整合设计与验收边界](docs/整合设计.md)
 - [开发与验证](docs/开发与验证.md)
 - [安装、旧守卫迁移和停止保护](docs/安装与迁移.md)
