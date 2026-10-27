@@ -26,8 +26,12 @@ done_when：Runner完整性与来源范围verify通过，主会话逐项回核�
 ## 仍未完成
 
 - 新迁移引擎、格式适配、事务写入、故障与恢复测试：NOT_IMPLEMENTED / NOT_RUN。
-- Kimi交互HTML：本次因五小时限额未产出，服务返回19:48 UTC+8可重试；用户已确认等Kimi恢复，安排19:50在本聊天续办一次；不换其他前端作者。
+- Kimi交互HTML：初次五小时限额记录保留。原约19:50的续办实际22:41触发；额度恢复后Kimi完成并修正原型，29项浏览器交互检查通过。见交互交付附记；不等于新引擎完成。
 - 真实会话：未读写；复制入口仍false。守卫真实故障注入依用户最新要求不安排。
 - 正式交付profile未登记，方案保留draft，不伪造lint通过。
 
 冻结源包清单：[manifest](assets/R-20261027-005-session-transfer-design-source-manifest.json)。主方案：[会话迁移方案](../docs/会话迁移方案.md)。
+
+## 交互交付附记
+
+Kimi原型及交互说明已完成，主会话实际浏览器复核与源基线同屏对照完成；首轮发现的问题由Kimi修正，29项有效检查通过。没有重新调用Claude把此结果冒充新外审。源码入口仍关闭，真实会话未触及，守卫交接不在本次续办范围。见[交互稿](../docs/prototypes/session-transfer.html)、[QA报告](../design-qa.md)和[检查记录](../docs/prototypes/session-transfer-validation.json)。

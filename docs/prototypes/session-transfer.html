@@ -1,0 +1,1422 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>复制会话 · 离线交互演示</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1C1B19;
+      --card: #262522;
+      --card-hi: #2D2A26;
+      --stroke: #3A3833;
+      --txt: #F2EFE8;
+      --sub: #A39D92;
+      --claude: #D97757;
+      --good: #6CC57C;
+      --warn: #E5B454;
+      --bad: #E5675A;
+      --outside: #141311;
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 280px; background: var(--outside); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px 20px 22px;
+      color: var(--txt);
+      background: var(--outside);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    button, input, select { font: inherit; }
+    button, select, input { -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; }
+    button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .46; }
+    button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible {
+      outline: 2px solid var(--claude);
+      outline-offset: 2px;
+    }
+    h2[tabindex="-1"]:focus { outline: none; }
+    .prototype-shell { width: min(760px, 100%); margin: 0 auto; }
+    .prototype-window {
+      overflow: hidden;
+      min-height: 620px;
+      background: var(--bg);
+      border: 1px solid var(--stroke);
+      border-radius: 15px;
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .34);
+    }
+    .titlebar {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 15px;
+      background: var(--card);
+      border-bottom: 1px solid var(--stroke);
+    }
+    .traffic { display: flex; gap: 6px; flex: 0 0 auto; }
+    .traffic i { width: 10px; height: 10px; border-radius: 50%; background: #625E56; }
+    .traffic i:first-child { background: #87534A; }
+    .traffic i:nth-child(2) { background: #867147; }
+    .traffic i:last-child { background: #4E7354; }
+    .window-title { min-width: 0; flex: 1; text-align: center; }
+    .window-title strong { display: block; font-size: 13px; font-weight: 650; }
+    .window-title span { display: block; color: var(--sub); font-size: 10px; }
+    .receipt-entry { min-width: 74px; text-align: right; }
+    .window-body { padding: 18px; }
+    .view-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 15px; }
+    .view-heading > div { min-width: 0; flex: 1; }
+    h1, h2, h3, p { margin: 0; }
+    h2 { font-size: 18px; line-height: 1.35; font-weight: 650; letter-spacing: -.01em; }
+    h3 { font-size: 12px; font-weight: 650; }
+    .subtle { color: var(--sub); }
+    .small { font-size: 11px; }
+    .heading-note { margin-top: 3px; color: var(--sub); font-size: 11px; }
+    .demo-tag, .status-tag, .project-tag {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      border-radius: 5px;
+      white-space: nowrap;
+      font-size: 10px;
+      font-weight: 600;
+    }
+    .demo-tag { padding: 3px 7px; color: var(--claude); background: rgba(217, 119, 87, .12); border: 1px solid rgba(217, 119, 87, .25); }
+    .endpoint-grid { display: grid; grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr); gap: 9px; align-items: end; }
+    .endpoint { min-width: 0; }
+    .field-label { display: block; margin-bottom: 5px; color: var(--sub); font-size: 11px; font-weight: 600; }
+    select, .search-input, .namespace-static {
+      width: 100%;
+      min-height: 36px;
+      color: var(--txt);
+      background: var(--card);
+      border: 1px solid var(--stroke);
+      border-radius: 7px;
+    }
+    select { padding: 7px 28px 7px 10px; }
+    .namespace-static { padding: 8px 10px; color: var(--sub); font-size: 11px; overflow-wrap: anywhere; }
+    .namespace-static strong { color: var(--txt); font-weight: 550; }
+    .space-field { margin-top: 8px; }
+    .direction { align-self: center; padding-top: 17px; color: var(--claude); text-align: center; font-size: 19px; }
+    .notice {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border: 1px solid var(--stroke);
+      border-radius: 8px;
+      color: var(--sub);
+      background: rgba(38, 37, 34, .66);
+      font-size: 11px;
+    }
+    .notice strong { color: var(--txt); font-weight: 600; }
+    .notice.warn { color: #D9C18D; border-color: rgba(229, 180, 84, .35); background: rgba(229, 180, 84, .07); }
+    .notice.bad { color: #ECA098; border-color: rgba(229, 103, 90, .38); background: rgba(229, 103, 90, .07); }
+    .notice.good { color: #A4D8AE; border-color: rgba(108, 197, 124, .32); background: rgba(108, 197, 124, .06); }
+    .notice p + p { margin-top: 5px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+    .search-wrap { position: relative; flex: 1 1 250px; min-width: 0; }
+    .search-input { display: block; padding: 8px 11px; }
+    .search-input::placeholder { color: #7F796F; }
+    .project-filter { flex: 0 1 138px; min-width: 118px; }
+    .list-options { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 12px 0 8px; }
+    .switch-label { display: inline-flex; align-items: center; gap: 8px; min-height: 30px; cursor: pointer; }
+    .switch-label input { width: 16px; height: 16px; margin: 0; accent-color: var(--claude); }
+    .switch-label span { font-size: 12px; font-weight: 550; }
+    .default-note { color: var(--sub); font-size: 10px; }
+    .list-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 29px; margin-bottom: 6px; }
+    .list-meta .counts { margin-left: auto; color: var(--sub); font-size: 11px; }
+    .link-button { padding: 2px 0; color: var(--claude); background: none; border: 0; font-size: 11px; font-weight: 600; }
+    .link-button:hover { text-decoration: underline; }
+    .thread-list, .preview-list { overflow: auto; border: 1px solid var(--stroke); border-radius: 9px; background: rgba(38, 37, 34, .55); }
+    .thread-list { min-height: 238px; max-height: 310px; }
+    .thread-row {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      padding: 11px 12px;
+      border-bottom: 1px solid rgba(58, 56, 51, .7);
+    }
+    .thread-row:last-child { border-bottom: 0; }
+    .thread-row:not(.disabled):hover { background: rgba(217, 119, 87, .035); }
+    .thread-row.disabled .thread-main { opacity: .68; }
+    .thread-check { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--claude); }
+    .thread-main { min-width: 0; }
+    .thread-title-line { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+    .thread-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
+    .project-tag { padding: 1px 6px; color: var(--sub); background: var(--stroke); }
+    .thread-meta { margin-top: 2px; color: var(--sub); font-size: 11px; overflow-wrap: anywhere; }
+    .row-detail { margin-top: 5px; color: var(--sub); font-size: 11px; }
+    .row-detail summary { width: fit-content; color: var(--sub); cursor: pointer; }
+    .row-detail[open] summary { color: var(--claude); }
+    .row-detail p { margin-top: 4px; max-width: 560px; }
+    .status-tag { margin-top: 2px; padding: 3px 7px; color: var(--sub); background: var(--card-hi); }
+    .status-tag.new { color: #A4D8AE; background: rgba(108, 197, 124, .09); }
+    .status-tag.update { color: #E7B39F; background: rgba(217, 119, 87, .10); }
+    .status-tag.blocked { color: #D7B77B; }
+    .empty-state { min-height: 238px; display: grid; place-content: center; padding: 28px; text-align: center; color: var(--sub); }
+    .empty-state strong { display: block; margin-bottom: 5px; color: var(--txt); font-size: 13px; }
+    .empty-state p { max-width: 390px; font-size: 11px; }
+    .learn { margin-top: 10px; color: var(--sub); font-size: 11px; }
+    .learn summary { width: fit-content; cursor: pointer; }
+    .learn[open] summary { color: var(--claude); }
+    .learn ul { margin: 7px 0 0; padding-left: 18px; }
+    .learn li + li { margin-top: 3px; }
+    .actionbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 15px; padding-top: 13px; border-top: 1px solid var(--stroke); }
+    .action-status { flex: 1 1 210px; min-width: 0; color: var(--sub); font-size: 11px; }
+    .button {
+      min-height: 36px;
+      padding: 7px 13px;
+      color: var(--txt);
+      background: var(--card-hi);
+      border: 1px solid var(--stroke);
+      border-radius: 7px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .button:hover:not(:disabled) { border-color: #5B554C; background: #34312C; }
+    .button.primary { color: #211712; background: var(--claude); border-color: var(--claude); }
+    .button.primary:hover:not(:disabled) { background: #E38665; border-color: #E38665; }
+    .button.quiet { color: var(--sub); background: transparent; }
+    .button.danger { color: #F0A49B; border-color: rgba(229, 103, 90, .42); background: rgba(229, 103, 90, .08); }
+    .summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .summary-item { padding: 10px 12px; background: var(--card); border: 1px solid var(--stroke); border-radius: 8px; }
+    .summary-item span { display: block; color: var(--sub); font-size: 10px; }
+    .summary-item strong { display: block; margin-top: 2px; font-size: 20px; line-height: 1.2; }
+    .summary-item.update strong { color: var(--claude); }
+    .summary-item.new strong { color: var(--good); }
+    .binding { margin-bottom: 12px; color: var(--sub); font-size: 11px; overflow-wrap: anywhere; }
+    .binding strong { color: var(--txt); font-weight: 550; }
+    .preview-groups { max-height: 320px; overflow: auto; padding-right: 2px; }
+    .preview-group { margin-bottom: 12px; }
+    .preview-group h3 { margin-bottom: 6px; color: var(--sub); }
+    .preview-list { max-height: none; overflow: visible; }
+    .preview-row { padding: 9px 11px; border-bottom: 1px solid rgba(58, 56, 51, .7); }
+    .preview-row:last-child { border-bottom: 0; }
+    .preview-row-title { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; font-weight: 600; }
+    .preview-row p { margin-top: 3px; color: var(--sub); font-size: 11px; overflow-wrap: anywhere; }
+    .backup-details { margin-top: 4px; border: 1px solid var(--stroke); border-radius: 8px; background: rgba(38, 37, 34, .45); }
+    .backup-details summary { padding: 10px 12px; cursor: pointer; color: var(--txt); font-size: 11px; font-weight: 600; }
+    .backup-body { padding: 0 12px 11px; color: var(--sub); font-size: 11px; }
+    .backup-body ul { margin: 7px 0 0; padding-left: 18px; }
+    .result-hero { padding: 17px; border: 1px solid var(--stroke); border-radius: 10px; background: var(--card); }
+    .result-hero.good { border-color: rgba(108, 197, 124, .32); }
+    .result-hero.warn { border-color: rgba(229, 180, 84, .38); }
+    .result-hero.bad { border-color: rgba(229, 103, 90, .42); }
+    .result-kicker { margin-bottom: 4px; color: var(--sub); font-size: 10px; font-weight: 650; letter-spacing: .04em; }
+    .result-hero h2 { font-size: 20px; }
+    .result-hero.good h2 { color: var(--good); }
+    .result-hero.warn h2 { color: var(--warn); }
+    .result-hero.bad h2 { color: var(--bad); }
+    .result-hero p { margin-top: 7px; color: var(--sub); font-size: 12px; }
+    .result-detail { margin-top: 12px; padding: 12px; border: 1px solid var(--stroke); border-radius: 8px; color: var(--sub); font-size: 11px; }
+    .result-detail strong { color: var(--txt); }
+    .result-detail ul { margin: 7px 0 0; padding-left: 18px; }
+    .demo-controls { margin: 14px 4px 0; padding: 11px 12px; color: #817B72; border: 1px dashed #35322D; border-radius: 8px; font-size: 11px; }
+    .demo-controls label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .demo-controls select { width: auto; min-width: 220px; min-height: 31px; padding-top: 4px; padding-bottom: 4px; color: #A39D92; background: #1D1C1A; }
+    .demo-controls p { margin-top: 5px; }
+    .outside-note { margin: 7px 5px 0; color: #6F6961; font-size: 10px; text-align: center; }
+    .modal-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; background: rgba(0, 0, 0, .64); }
+    .modal { width: min(510px, 100%); max-height: min(680px, calc(100vh - 36px)); overflow: auto; padding: 18px; background: var(--bg); border: 1px solid var(--stroke); border-radius: 12px; box-shadow: 0 20px 70px rgba(0, 0, 0, .5); }
+    .modal h2 { font-size: 17px; }
+    .modal-body { margin-top: 10px; color: var(--sub); font-size: 12px; }
+    .modal-body p + p { margin-top: 8px; }
+    .modal-body ul { margin: 8px 0 0; padding-left: 18px; }
+    .modal-body li + li { margin-top: 5px; }
+    .modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 17px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    @media (max-width: 560px) {
+      body { padding: 10px 8px 16px; }
+      .prototype-window { min-height: calc(100vh - 110px); border-radius: 11px; }
+      .window-body { padding: 14px; }
+      .titlebar { padding: 9px 11px; gap: 8px; }
+      .traffic { gap: 4px; }
+      .traffic i { width: 8px; height: 8px; }
+      .window-title { text-align: left; }
+      .endpoint-grid { grid-template-columns: minmax(0, 1fr); gap: 7px; }
+      .direction { display: none; }
+      .endpoint + .endpoint { border-top: 1px solid rgba(58, 56, 51, .55); padding-top: 8px; }
+      .thread-row { grid-template-columns: 20px minmax(0, 1fr); padding: 10px; }
+      .thread-row > .status-tag { grid-column: 2; margin-top: -3px; }
+      .thread-title { white-space: normal; }
+      .action-status { flex-basis: 100%; }
+      .actionbar .button.primary { flex: 1 1 auto; }
+      .summary-item { padding: 9px; }
+      .summary-item strong { font-size: 18px; }
+      .demo-controls select { min-width: 0; flex: 1; }
+    }
+    @media (prefers-reduced-motion: no-preference) {
+      .button, .thread-row { transition: background-color .12s ease, border-color .12s ease; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-shell">
+    <section class="prototype-window" aria-label="复制会话应用窗口演示">
+      <header class="titlebar">
+        <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+        <div class="window-title">
+          <strong>复制会话</strong>
+          <span>离线交互原型 · 不操作真实数据</span>
+        </div>
+        <div id="receipt-entry" class="receipt-entry"></div>
+      </header>
+      <div id="app" class="window-body"></div>
+    </section>
+
+    <section class="demo-controls" aria-label="演示情形测试控件">
+      <label for="scenario-select"><strong>演示情形</strong>
+        <select id="scenario-select" data-focus="scenario-select"></select>
+      </label>
+      <p>仅重置虚构内存状态；这些控件不是产品真实 UI。</p>
+    </section>
+    <p class="outside-note">无网络、文件、Keychain 或浏览器存储访问 · 所有“写入”仅指本页目标内存索引</p>
+  </main>
+  <div id="modal-root"></div>
+
+  <script id="fixture-data" type="application/json">
+{
+  "schema": "session-transfer-interaction/v1",
+  "notice": "All records and continuation proof are fictional UI fixtures, not an official Claude index schema. No backend/filesystem access.",
+  "defaultSource": "business",
+  "defaultTarget": "personal",
+  "updateExistingDefault": false,
+  "endpoints": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "mode": "subscription",
+      "label": "订阅档案",
+      "spaces": [
+        {
+          "id": "personal-main",
+          "name": "个人空间"
+        }
+      ]
+    },
+    {
+      "id": "business",
+      "name": "Business",
+      "mode": "subscription",
+      "label": "订阅档案",
+      "spaces": [
+        {
+          "id": "business-main",
+          "name": "团队空间"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "name": "API 工作区",
+      "mode": "api",
+      "label": "配置匹配 Magpie",
+      "spaces": [
+        {
+          "id": "api-main",
+          "name": "默认工作区"
+        },
+        {
+          "id": "api-other",
+          "name": "另一个工作区"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "id": "new-one",
+      "title": "接口重构",
+      "project": "atlas",
+      "kind": "new",
+      "sourceTurns": 18,
+      "targetTurns": null,
+      "reason": "目标没有这条索引，原文可用。"
+    },
+    {
+      "id": "same-update",
+      "title": "测试覆盖整理",
+      "project": "atlas",
+      "kind": "same-session-update",
+      "sourceTurns": 28,
+      "targetTurns": 12,
+      "reason": "指向同一份原文，仅列表进度较旧。"
+    },
+    {
+      "id": "continued",
+      "title": "长任务续接",
+      "project": "worker",
+      "kind": "continuation",
+      "sourceTurns": 2,
+      "targetTurns": 120,
+      "reason": "合成证据已确认接续点，目标未在接续点之后继续；新段轮数少不代表落后。",
+      "fixtureProof": {
+        "kind": "join-point-evidence-for-ui-only",
+        "targetHasNoProgressAfterJoin": true
+      }
+    },
+    {
+      "id": "target-ahead",
+      "title": "发布脚本",
+      "project": "deploy",
+      "kind": "target-ahead",
+      "sourceTurns": 5,
+      "targetTurns": 13,
+      "reason": "目标已更新，保留目标。"
+    },
+    {
+      "id": "fork",
+      "title": "分支实验",
+      "project": "lab",
+      "kind": "conflict",
+      "sourceTurns": 40,
+      "targetTurns": 15,
+      "reason": "同名但没有可确认的续接关系，不覆盖。"
+    },
+    {
+      "id": "missing",
+      "title": "旧项目记录",
+      "project": "archive",
+      "kind": "missing-transcript",
+      "sourceTurns": 16,
+      "targetTurns": null,
+      "reason": "找不到引用的原文，不能仅复制空索引。"
+    }
+  ],
+  "scenarios": [
+    "normal",
+    "target-uninitialized",
+    "multi-space",
+    "desktop-running",
+    "stale-plan",
+    "backup-failed",
+    "write-failed-rollback-ok",
+    "write-failed-rollback-incomplete",
+    "undo-conflict",
+    "continuation-without-join-proof",
+    "interrupted-operation"
+  ]
+}
+  </script>
+
+  <script>
+    "use strict";
+
+    const fixture = JSON.parse(document.getElementById("fixture-data").textContent);
+    const app = document.getElementById("app");
+    const receiptEntry = document.getElementById("receipt-entry");
+    const scenarioSelect = document.getElementById("scenario-select");
+    const modalRoot = document.getElementById("modal-root");
+    const scenarioNames = {
+      "normal": "正常",
+      "target-uninitialized": "目标未初始化",
+      "multi-space": "多空间",
+      "desktop-running": "桌面运行中",
+      "stale-plan": "预览后变化",
+      "backup-failed": "备份失败",
+      "write-failed-rollback-ok": "写失败 · 恢复完成",
+      "write-failed-rollback-incomplete": "写失败 · 恢复未确认",
+      "undo-conflict": "撤销冲突",
+      "continuation-without-join-proof": "续接无接续证明",
+      "interrupted-operation": "中断收据 · 上次未完成"
+    };
+    let state;
+    let memory;
+    let planSequence = 0;
+    let modalReturnFocus = null;
+    let modalConfirm = null;
+
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function deepFreeze(value) {
+      if (value && typeof value === "object" && !Object.isFrozen(value)) {
+        Object.freeze(value);
+        Object.values(value).forEach(deepFreeze);
+      }
+      return value;
+    }
+
+    function esc(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function endpoint(id) {
+      return fixture.endpoints.find(item => item.id === id);
+    }
+
+    function space(id) {
+      for (const item of fixture.endpoints) {
+        const found = item.spaces.find(candidate => candidate.id === id);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function endpointName(id) {
+      const item = endpoint(id);
+      return item ? `${item.name} · ${item.label}` : "未选择";
+    }
+
+    function spaceLabel(id) {
+      const item = space(id);
+      return item ? `${item.name}（${item.id}）` : "未选择空间";
+    }
+
+    function baselineIndex() {
+      const target = {};
+      fixture.rows.forEach(row => {
+        if (row.targetTurns !== null) {
+          target[row.id] = {
+            id: row.id,
+            title: row.title,
+            project: row.project,
+            turns: row.targetTurns,
+            cliSegment: row.kind === "continuation" ? "fixture-old-segment" : "fixture-same-segment",
+            demoRevision: "baseline"
+          };
+        }
+      });
+      return target;
+    }
+
+    function createMemory() {
+      const targets = {};
+      fixture.endpoints.forEach(item => {
+        item.spaces.forEach(namespace => {
+          targets[namespace.id] = baselineIndex();
+        });
+      });
+      const transcripts = {};
+      fixture.rows.forEach(row => {
+        transcripts[row.id] = row.kind === "missing-transcript" ? null : `fixture-transcript:${row.id}`;
+      });
+      return {
+        source: deepFreeze(clone(fixture.rows)),
+        transcripts: deepFreeze(transcripts),
+        targets
+      };
+    }
+
+    function resetDemo(scenario) {
+      const sourceId = fixture.defaultSource;
+      const targetId = scenario === "multi-space" ? "api" : fixture.defaultTarget;
+      const sourceEndpoint = endpoint(sourceId);
+      const targetEndpoint = endpoint(targetId);
+      planSequence = 0;
+      memory = createMemory();
+      state = {
+        scenario,
+        view: scenario === "interrupted-operation" ? "result" : "select",
+        sourceId,
+        targetId,
+        sourceSpaceId: sourceEndpoint.spaces.length === 1 ? sourceEndpoint.spaces[0].id : "",
+        targetSpaceId: scenario === "multi-space" ? "" : (targetEndpoint.spaces.length === 1 ? targetEndpoint.spaces[0].id : ""),
+        picked: new Set(),
+        query: "",
+        project: "all",
+        updateExisting: fixture.updateExistingDefault,
+        preview: null,
+        invalidatedIds: [],
+        targetRunning: scenario === "desktop-running",
+        targetExited: false,
+        staleApplied: false,
+        staleTargetKey: "",
+        recoveryBlocked: scenario === "interrupted-operation",
+        receipts: [],
+        result: null,
+        toast: scenario === "continuation-without-join-proof" ? "已注入：仅有历史 ID 包含，没有安全接续证明。" : ""
+      };
+      if (scenario === "interrupted-operation") seedInterruptedReceipt();
+      scenarioSelect.value = scenario;
+      closeModal(false);
+      render("view-title");
+    }
+
+    function targetIndex(key = state.targetSpaceId) {
+      if (!memory.targets[key]) memory.targets[key] = {};
+      return memory.targets[key];
+    }
+
+    function targetInitialized() {
+      return !(state.scenario === "target-uninitialized" && state.targetSpaceId === "personal-main");
+    }
+
+    function sameSpace() {
+      return Boolean(state.sourceSpaceId && state.targetSpaceId &&
+        state.sourceId === state.targetId && state.sourceSpaceId === state.targetSpaceId);
+    }
+
+    function selectionReady() {
+      return Boolean(state.sourceSpaceId && state.targetSpaceId && !sameSpace() && targetInitialized() && !state.recoveryBlocked);
+    }
+
+    function classify(row) {
+      const current = targetIndex()[row.id];
+      if (row.id === "new-one" && state.staleApplied && state.staleTargetKey === state.targetSpaceId) {
+        return {
+          action: null,
+          label: "目标冲突",
+          tone: "blocked",
+          reason: "预览后目标出现同名但身份不同的索引；不能覆盖，需重新核对。"
+        };
+      }
+      if (row.kind === "new") {
+        if (current) {
+          if (current.cliSegment === "fixture-source-segment") {
+            return { action: null, label: "已新增 · 无需重复", tone: "blocked", reason: "当前目标空间已有相同逻辑记录，保留目标现状，不重复新增。" };
+          }
+          return { action: null, label: "目标冲突", tone: "blocked", reason: "目标已存在同名但身份不同的索引，不能覆盖。" };
+        }
+        return { action: "new", label: "可新增", tone: "new", reason: row.reason };
+      }
+      if (row.kind === "same-session-update") {
+        if (!current) {
+          return { action: null, label: "目标状态需核对", tone: "blocked", reason: "原目标记录已不存在，不能按旧的同段更新依据处理。" };
+        }
+        if (current.cliSegment !== "fixture-same-segment") {
+          return { action: null, label: "目标冲突", tone: "blocked", reason: "当前目标的 CLI 段与已核实记录不一致，不能覆盖。" };
+        }
+        if (current.turns === row.sourceTurns) {
+          return { action: null, label: "已同步 · 无需更新", tone: "blocked", reason: "当前目标空间的同段进度已与来源一致，无需更新。" };
+        }
+        if (current.turns > row.sourceTurns) {
+          return { action: null, label: "目标领先", tone: "blocked", reason: `目标同段进度 ${current.turns}，领先来源 ${row.sourceTurns}，保留目标。` };
+        }
+        if (!state.updateExisting) {
+          return { action: null, label: "已有 · 默认跳过", tone: "blocked", reason: "默认仅新增。开启“更新已有会话”后，才可选择这项同段进度更新。" };
+        }
+        return {
+          action: "update",
+          label: "可更新",
+          tone: "update",
+          reason: `同一 CLI 会话段、同一原文；目标进度 ${current.turns}，来源进度 ${row.sourceTurns}，仅更新已核实字段。`
+        };
+      }
+      if (row.kind === "continuation") {
+        if (state.scenario === "continuation-without-join-proof") {
+          return {
+            action: null,
+            label: "接续未证实",
+            tone: "blocked",
+            reason: "仅 priorCliSessionIds 包含目标 ID 不构成安全续接；没有可验证接续点及目标未越过该点的证据，禁止更新。"
+          };
+        }
+        if (current && current.cliSegment === "fixture-new-segment") {
+          if (current.turns === row.sourceTurns) {
+            return { action: null, label: "接续已同步", tone: "blocked", reason: "当前目标空间已指向本次来源续接段，无需再次更新。" };
+          }
+          if (current.turns > row.sourceTurns) {
+            return { action: null, label: "目标领先", tone: "blocked", reason: "目标已在本次续接段上继续，保留目标新进展。" };
+          }
+          return { action: null, label: "目标状态需核对", tone: "blocked", reason: "目标续接段状态与已确认计划不一致，不能按旧接续证明覆盖。" };
+        }
+        if (!current) {
+          return { action: null, label: "目标状态需核对", tone: "blocked", reason: "原目标续接记录已不存在，不能按旧接续依据处理。" };
+        }
+        if (!state.updateExisting) {
+          return { action: null, label: "已有 · 默认跳过", tone: "blocked", reason: "默认仅新增。开启更新后，仍需接续点与目标未越过该点的证据。" };
+        }
+        return { action: "update", label: "已证实续接", tone: "update", reason: row.reason };
+      }
+      if (row.kind === "target-ahead") {
+        return { action: null, label: "目标领先", tone: "blocked", reason: row.reason };
+      }
+      if (row.kind === "conflict") {
+        return { action: null, label: "分支冲突", tone: "blocked", reason: "源 40 轮、目标 15 轮，但没有可确认续接关系；轮数更多也不能覆盖目标。" };
+      }
+      return { action: null, label: "原文缺失", tone: "blocked", reason: row.reason };
+    }
+
+    function rowMeta(row) {
+      const current = targetIndex()[row.id];
+      if (row.kind === "new") {
+        if (!current) return `${row.sourceTurns} 轮 · 目标无此索引`;
+        return current.cliSegment === "fixture-source-segment" ? `${row.sourceTurns} 轮 · 目标已有相同逻辑记录` : "目标存在同名不同身份索引";
+      }
+      if (row.kind === "continuation") {
+        if (current && current.cliSegment === "fixture-new-segment") return `当前续接段 ${current.turns} 轮 · 已与来源同步`;
+        return `跨 CLI 段：来源 ${row.sourceTurns} 轮 / 目标 ${current ? current.turns : row.targetTurns} 轮 · 不直接比较`;
+      }
+      if (row.kind === "missing-transcript") return `${row.sourceTurns} 轮 · 引用原文不可用`;
+      return `来源 ${row.sourceTurns} 轮 / 目标 ${current ? current.turns : row.targetTurns} 轮`;
+    }
+
+    function visibleRows() {
+      const query = state.query.trim().toLocaleLowerCase();
+      return memory.source.filter(row => {
+        const projectMatches = state.project === "all" || row.project === state.project;
+        const queryMatches = !query || `${row.title} ${row.project}`.toLocaleLowerCase().includes(query);
+        return projectMatches && queryMatches;
+      });
+    }
+
+    function renderEndpoint(side) {
+      const idKey = side === "source" ? "sourceId" : "targetId";
+      const spaceKey = side === "source" ? "sourceSpaceId" : "targetSpaceId";
+      const label = side === "source" ? "来源" : "目标";
+      const selectedEndpoint = endpoint(state[idKey]);
+      const options = fixture.endpoints.map(item =>
+        `<option value="${esc(item.id)}" ${item.id === state[idKey] ? "selected" : ""}>${esc(item.name)} · ${esc(item.label)}</option>`
+      ).join("");
+      let namespace;
+      if (selectedEndpoint.spaces.length === 1) {
+        const item = selectedEndpoint.spaces[0];
+        namespace = `<div class="namespace-static" aria-label="${label}空间"><strong>${esc(item.name)}</strong> · ${esc(item.id)}<br>唯一空间，已自动选择</div>`;
+      } else {
+        const spaceOptions = [`<option value="">请选择${label}空间</option>`].concat(selectedEndpoint.spaces.map(item =>
+          `<option value="${esc(item.id)}" ${item.id === state[spaceKey] ? "selected" : ""}>${esc(item.name)} · ${esc(item.id)}</option>`
+        )).join("");
+        namespace = `<select id="${side}-space" data-role="${side}-space" data-focus="${side}-space" aria-label="${label}空间">${spaceOptions}</select>`;
+      }
+      return `<div class="endpoint">
+        <label class="field-label" for="${side}-endpoint">${label}</label>
+        <select id="${side}-endpoint" data-role="${side}-endpoint" data-focus="${side}-endpoint">${options}</select>
+        <div class="space-field"><span class="field-label">${label}账号 / 组织空间</span>${namespace}</div>
+      </div>`;
+    }
+
+    function renderRow(row) {
+      const classification = classify(row);
+      const checked = state.picked.has(row.id);
+      const enabled = Boolean(classification.action && selectionReady());
+      let extra = "";
+      if (row.kind === "same-session-update") {
+        extra = "轮数只在相同 CLI 会话段内比较；保留目标标题、未知字段与连接配置。";
+      } else if (row.kind === "continuation" && state.scenario !== "continuation-without-join-proof") {
+        extra = "合成 fixtureProof 只表达“接续点已确认且目标未越过”，不是官方 Claude 索引字段；跨段不按轮数大小决定更新。";
+      } else if (row.kind === "target-ahead") {
+        extra = "无论是否开启更新，都不回退目标已有进展。";
+      }
+      return `<div class="thread-row ${enabled ? "" : "disabled"}" data-row="${esc(row.id)}">
+        <input class="thread-check" type="checkbox" data-pick="${esc(row.id)}" data-focus="pick-${esc(row.id)}" aria-label="选择 ${esc(row.title)}" ${checked ? "checked" : ""} ${enabled ? "" : "disabled"}>
+        <div class="thread-main">
+          <div class="thread-title-line"><span class="thread-title">${esc(row.title)}</span><span class="project-tag">${esc(row.project)}</span></div>
+          <div class="thread-meta">${esc(rowMeta(row))}</div>
+          <details class="row-detail"><summary>详情与原因</summary><p>${esc(classification.reason)}${extra ? ` ${esc(extra)}` : ""}</p></details>
+        </div>
+        <span class="status-tag ${esc(classification.tone)}">${esc(classification.label)}</span>
+      </div>`;
+    }
+
+    function renderSelection() {
+      const rows = visibleRows();
+      const actionable = rows.filter(row => classify(row).action && selectionReady());
+      const allPicked = actionable.length > 0 && actionable.every(row => state.picked.has(row.id));
+      const hiddenPicked = memory.source.filter(row => state.picked.has(row.id) && !rows.some(visible => visible.id === row.id)).length;
+      const projects = [...new Set(memory.source.map(row => row.project))];
+      const ready = selectionReady();
+      let notice = "";
+      if (state.recoveryBlocked) {
+        notice = `<div class="notice bad"><strong>恢复未确认，已暂停新的复制。</strong> 请通过“上次复制”查看恢复信息，或重置演示。</div>`;
+      } else if (sameSpace()) {
+        notice = `<div class="notice bad"><strong>来源与目标是同一空间。</strong> 请选择不同空间；当前不能预览或复制。</div>`;
+      } else if (!state.sourceSpaceId || !state.targetSpaceId) {
+        notice = `<div class="notice warn"><strong>需要显式选择空间。</strong> 多个账号 / 组织空间不会按名称、目录顺序或条目数自动猜测。</div>`;
+      } else if (!targetInitialized()) {
+        notice = "";
+      } else if (state.sourceId === "api" || state.targetId === "api") {
+        notice = `<div class="notice">API 可作为来源或目标；不会自动切换 Magpie 模式、读取凭据或更改 provider。</div>`;
+      }
+      const listContent = !targetInitialized() && state.targetSpaceId ?
+        `<div class="empty-state"><strong>目标尚未初始化 Code 会话空间</strong><p>请先在 ${esc(endpoint(state.targetId).name)} 的 Code 页完成初始化，再回来复制。本演示不会替你切模式、登录或创建目录。</p></div>` :
+        !state.sourceSpaceId ?
+        `<div class="empty-state"><strong>请选择来源空间</strong><p>选择后才会显示该空间的虚构会话列表。</p></div>` :
+        rows.length ? rows.map(renderRow).join("") :
+        `<div class="empty-state"><strong>没有匹配的会话</strong><p>调整搜索或项目筛选。筛选不会清除已隐藏的选择。</p></div>`;
+      return `<div class="view-heading"><div><h2 id="view-title" tabindex="-1" data-focus="view-title">选择会话</h2><p class="heading-note">第 1 步，共 2 步 · 默认只新增，先预览再复制</p></div><span class="demo-tag">虚构数据</span></div>
+        <div class="endpoint-grid">${renderEndpoint("source")}<div class="direction" aria-hidden="true">→</div>${renderEndpoint("target")}</div>
+        ${notice}
+        ${state.toast ? `<div class="notice" role="status">${esc(state.toast)}</div>` : ""}
+        <div class="toolbar">
+          <div class="search-wrap"><label class="sr-only" for="thread-search">搜索会话或项目</label><input id="thread-search" class="search-input" type="search" placeholder="搜索会话或项目" value="${esc(state.query)}" data-role="search" data-focus="search" autocomplete="off"></div>
+          <label class="sr-only" for="project-filter">按项目筛选</label><select id="project-filter" class="project-filter" data-role="project" data-focus="project"><option value="all">全部项目</option>${projects.map(project => `<option value="${esc(project)}" ${state.project === project ? "selected" : ""}>${esc(project)}</option>`).join("")}</select>
+        </div>
+        <div class="list-options">
+          <label class="switch-label"><input type="checkbox" data-role="update-existing" data-focus="update-existing" ${state.updateExisting ? "checked" : ""}><span>更新已有会话</span></label>
+          <span class="default-note">${state.updateExisting ? "仅解锁有充分证据的更新" : "默认关闭 · 保留原版只新增行为"}</span>
+        </div>
+        <div class="list-meta">
+          <button class="link-button" data-action="select-all" data-focus="select-all" ${actionable.length ? "" : "disabled"}>${allPicked ? "取消全选当前结果" : "全选当前结果"}</button>
+          <span class="counts">已选 ${state.picked.size} · 显示 ${rows.length}${hiddenPicked ? ` · 筛选外仍选 ${hiddenPicked}` : ""}</span>
+        </div>
+        <div class="thread-list" aria-label="会话列表">${listContent}</div>
+        <details class="learn"><summary>了解复制</summary><ul><li>只演示本机列表索引变化，不复制或改写聊天原文，不改账号与 API 配置。</li><li>同段才能比较进度；跨段续接必须有已确认接续点，且目标未越过该点。</li><li>目标领先、分支冲突、原文缺失始终不可选；备份由流程自动处理。</li></ul></details>
+        <div class="actionbar"><span class="action-status">${ready ? "不自动写入；搜索和筛选不会丢失选择。" : "完成来源、目标与空间检查后才能预览。"}</span><button class="button quiet" data-action="cancel">取消</button><button class="button primary" data-action="preview" data-focus="preview" ${ready && state.picked.size ? "" : "disabled"}>预览复制 ${state.picked.size} 项</button></div>`;
+    }
+
+    function changeReason(row, classification) {
+      if (classification.action === "new") return row.reason;
+      if (row.kind === "continuation") return "已确认接续点且目标未越过；更新续接引用与必要字段，不比较跨段轮数。";
+      return classification.reason;
+    }
+
+    function makePreview() {
+      planSequence += 1;
+      const id = `PLAN-${String(planSequence).padStart(3, "0")}`;
+      const target = targetIndex();
+      const changes = [];
+      memory.source.forEach(row => {
+        if (!state.picked.has(row.id)) return;
+        const classification = classify(row);
+        if (!classification.action) return;
+        const before = target[row.id] ? clone(target[row.id]) : null;
+        let after;
+        if (classification.action === "new") {
+          after = { id: row.id, title: row.title, project: row.project, turns: row.sourceTurns, cliSegment: "fixture-source-segment", demoRevision: id };
+        } else {
+          after = Object.assign({}, before, {
+            turns: row.sourceTurns,
+            demoRevision: id
+          });
+          if (row.kind === "continuation") after.cliSegment = "fixture-new-segment";
+        }
+        changes.push({
+          rowId: row.id,
+          title: row.title,
+          project: row.project,
+          action: classification.action,
+          reason: changeReason(row, classification),
+          before,
+          after
+        });
+      });
+      const skipped = memory.source.filter(row => state.picked.has(row.id) && !changes.some(change => change.rowId === row.id)).map(row => {
+        const classification = classify(row);
+        return {
+          rowId: row.id,
+          title: row.title,
+          project: row.project,
+          reason: classification.reason
+        };
+      });
+      const others = memory.source.filter(row => !state.picked.has(row.id)).map(row => {
+        const classification = classify(row);
+        return {
+          rowId: row.id,
+          title: row.title,
+          project: row.project,
+          reason: classification.action ? "未选择，本次不变。" : classification.reason
+        };
+      });
+      return {
+        id,
+        sourceId: state.sourceId,
+        targetId: state.targetId,
+        sourceSpaceId: state.sourceSpaceId,
+        targetSpaceId: state.targetSpaceId,
+        selectedCount: state.picked.size,
+        changes,
+        skipped,
+        others,
+        invalid: false,
+        afterDesktopExit: false,
+        exitAffected: []
+      };
+    }
+
+    function previewRow(change, action) {
+      return `<div class="preview-row"><div class="preview-row-title">${esc(change.title)}<span class="project-tag">${esc(change.project)}</span>${action ? `<span class="status-tag ${action === "new" ? "new" : "update"}">${action === "new" ? "新增" : "更新"}</span>` : ""}</div><p>${esc(change.reason)}</p></div>`;
+    }
+
+    function previewGroup(title, rows, action) {
+      if (!rows.length) return "";
+      return `<section class="preview-group"><h3>${esc(title)} · ${rows.length}</h3><div class="preview-list">${rows.map(row => previewRow(row, action)).join("")}</div></section>`;
+    }
+
+    function renderPreview() {
+      const plan = state.preview;
+      const added = plan.changes.filter(change => change.action === "new");
+      const updated = plan.changes.filter(change => change.action === "update");
+      const updateCount = updated.length;
+      let primary = "";
+      if (plan.invalid) {
+        primary = `<button class="button primary" data-action="refresh-preview">重新预览</button>`;
+      } else if (plan.changes.length) {
+        primary = state.targetRunning ?
+          `<button class="button primary" data-action="exit-target">退出目标并重新预览</button>` :
+          `<button class="button primary" data-action="copy">复制 ${plan.changes.length} 项</button>`;
+      }
+      const invalidRows = plan.invalid && state.invalidatedIds.length ? `<ul>${state.invalidatedIds.map(id => {
+        const change = plan.changes.find(item => item.rowId === id);
+        return `<li>${esc(change ? change.title : id)}：目标前提已变化，本项不能按旧预览执行。</li>`;
+      }).join("")}</ul>` : "<p>受影响项会在重新预览后列出；其他会话的新增不会使本批失效。</p>";
+      return `<div class="view-heading"><div><h2 id="view-title" tabindex="-1" data-focus="view-title">预览复制</h2><p class="heading-note">第 2 步，共 2 步 · 已选 ${plan.selectedCount} 项，实际变更 ${plan.changes.length} 项</p></div><span class="demo-tag">尚未写入</span></div>
+        <div class="binding"><strong>${esc(endpointName(plan.sourceId))}</strong> / ${esc(spaceLabel(plan.sourceSpaceId))}<br>→ <strong>${esc(endpointName(plan.targetId))}</strong> / ${esc(spaceLabel(plan.targetSpaceId))}</div>
+        ${plan.invalid ? `<div class="notice bad"><strong>预览已失效，零写入。</strong><p>检测到已选项的目标前提发生变化。保留当前选择，请重新预览；不会静默执行剩余子集。</p>${invalidRows}</div>` : ""}
+        ${plan.afterDesktopExit ? `<div class="notice warn"><strong>桌面已退出，请确认更新后的预览。</strong><p>退出动作没有执行复制。${plan.exitAffected.length ? `本批有 ${plan.exitAffected.length} 项因退出回写而重新计算。` : "本批已选项没有因退出回写而失去处理条件。"} 外部 CLI 未被主动停止。</p></div>` : ""}
+        ${state.targetRunning ? `<div class="notice warn"><strong>目标桌面正在使用待写索引。</strong><p>需先正常退出目标并重新预览。退出可能影响桌面内的 Code 任务；本工具不主动停止外部终端 / IDE 的 CLI，但不保证桌面子任务继续运行。</p></div>` : ""}
+        ${state.toast ? `<div class="notice" role="status">${esc(state.toast)}</div>` : ""}
+        <div class="summary-grid"><div class="summary-item new"><span>新增</span><strong>${added.length}</strong></div><div class="summary-item update"><span>更新</span><strong>${updated.length}</strong></div><div class="summary-item"><span>已选但跳过</span><strong>${plan.skipped.length}</strong></div></div>
+        <div class="preview-groups">
+          ${previewGroup("新增", added, "new")}
+          ${previewGroup("更新", updated, "update")}
+          ${previewGroup("已选但本次不执行", plan.skipped, null)}
+          ${!plan.changes.length ? `<div class="notice">没有可执行变更。可返回修改选择；当前不会提供复制按钮。</div>` : ""}
+        </div>
+        <details class="backup-details"><summary>其他未纳入 ${plan.others.length} 项（未选或不可用）</summary><div class="backup-body"><p>这些项目不属于已选跳过，也不计入实际变更。</p><div class="preview-list">${plan.others.map(row => previewRow(row, null)).join("")}</div></div></details>
+        <details class="backup-details"><summary>查看备份内容 · ${updateCount ? `将备份 ${updateCount} 条旧索引` : "没有旧索引需备份"}</summary><div class="backup-body">
+          <p>${updateCount ? `自动备份 ${updateCount} 条将覆盖的旧索引及本次收据，无需勾选。` : "零覆盖：没有旧索引需备份。"} 新增项只记录“原先不存在”，不复制聊天原文。</p>
+          ${updated.length ? `<ul>${updated.map(change => `<li>${esc(change.title)}：覆盖前旧索引的演示快照；复制后可按本次收据核对。</li>`).join("")}</ul>` : ""}
+          ${added.length ? `<p>新增记录：${added.map(change => esc(change.title)).join("、")}（原先不存在）。</p>` : ""}
+        </div></details>
+        ${plan.sourceId !== plan.targetId ? `<div class="notice">跨账号 / 模式：本次只改本机列表；后续续聊由目标账号 / 服务处理，不在复制中发送原文。</div>` : ""}
+        <div class="actionbar"><span class="action-status">备份自动进行；任何失败都会如实分类，不显示真实复制成功。</span><button class="button quiet" data-action="cancel">取消</button><button class="button" data-action="back">返回修改</button>${primary}</div>`;
+    }
+
+    function latestReceipt() {
+      return state.receipts.length ? state.receipts[state.receipts.length - 1] : null;
+    }
+
+    function resultForReceipt(receipt) {
+      if (!receipt) return { type: "cancelled" };
+      if (receipt.status === "completed") return { type: "completed", receipt };
+      if (receipt.status === "backup-failed") return { type: "backup-failed", receipt };
+      if (receipt.status === "rolled-back") return { type: "rolled-back", receipt };
+      if (receipt.status === "recovery-incomplete") return { type: "recovery-incomplete", receipt };
+      if (receipt.status === "interrupted") return { type: "interrupted", receipt };
+      if (receipt.status === "undo-conflict") return { type: "undo-conflict", receipt, conflicts: receipt.undoConflicts || [] };
+      if (receipt.status === "undone") return { type: "undone", receipt };
+      return { type: "cancelled" };
+    }
+
+    function receiptCounts(receipt) {
+      return {
+        added: receipt.changes.filter(change => change.action === "new").length,
+        updated: receipt.changes.filter(change => change.action === "update").length,
+        skipped: receipt.skippedCount || 0,
+        others: receipt.otherCount || 0
+      };
+    }
+
+    function renderResult() {
+      const result = state.result || { type: "cancelled" };
+      const receipt = result.receipt;
+      const counts = receipt ? receiptCounts(receipt) : { added: 0, updated: 0, skipped: 0, others: 0 };
+      let tone = "";
+      let title = "已取消，未执行复制";
+      let description = "没有请求写入或生成备份，来源与目标均未改变。";
+      let detail = "可以返回选择重新开始；本页所有操作都只是虚构数据演示。";
+      let actions = `<button class="button primary" data-action="result-close">返回选择</button>`;
+      if (result.type === "completed") {
+        tone = "good";
+        title = "演示复制完成";
+        description = "仅目标内存索引已变化；没有执行真实复制，也不表示目标已经能够续聊。";
+        detail = `<strong>新增 ${counts.added} · 更新 ${counts.updated} · 已选跳过 ${counts.skipped}</strong><br>其他未纳入 ${counts.others} 项。收据 ${esc(receipt.id)} 已保留。未自动切号、切 API 模式或重新打开目标，未主动停止外部 CLI。`;
+        actions = `<button class="button" data-action="show-backup">查看本次备份</button><button class="button" data-action="undo">撤销本次</button><button class="button primary" data-action="result-close">关闭结果</button>`;
+      } else if (result.type === "backup-failed") {
+        tone = "bad";
+        title = "备份失败，复制未开始";
+        description = "备份无法完整写入或回读；目标写入 0 项，来源与聊天原文未改。";
+        detail = `<strong>目标未改。</strong><br>收据 ${esc(receipt.id)} 标记为“未开始”。可返回预览重试，或取消；不会绕过备份直接复制。`;
+        actions = `<button class="button" data-action="result-close">返回选择</button><button class="button primary" data-action="return-preview">返回预览</button>`;
+      } else if (result.type === "rolled-back") {
+        tone = "warn";
+        title = "写入失败，已完整恢复";
+        description = "本次新增已撤回，覆盖项的旧索引已恢复；这不是复制成功。";
+        detail = `<strong>最终新增 0 · 更新 0</strong><br>收据 ${esc(receipt.id)} 与恢复材料保留供核对。目标回到本次复制前状态。`;
+        actions = `<button class="button" data-action="show-backup">查看本次备份</button><button class="button primary" data-action="result-close">关闭结果</button>`;
+      } else if (result.type === "recovery-incomplete" || result.type === "interrupted") {
+        tone = "bad";
+        title = result.type === "interrupted" ? "上次操作未完成" : "写入失败，恢复未确认";
+        description = result.type === "interrupted" ? "发现中断收据。不会自动恢复、重试或开始新的复制。" : "无法确认目标已完整恢复，已保留现场与备份；这不是复制成功。";
+        detail = `<strong>该目标已暂停新的复制。</strong><br>现在只能查看恢复信息或重置演示。不会把未确认恢复显示为绿色完成。`;
+        actions = `<button class="button" data-action="view-recovery">查看恢复信息</button><button class="button danger" data-action="reset-demo">重置演示</button>`;
+      } else if (result.type === "undo-conflict") {
+        tone = "bad";
+        title = "撤销冲突，零写入";
+        description = "至少一项在复制后被继续或编辑；整批预检未通过，没有恢复任何项目。";
+        detail = `<strong>已保留全部新进展，不做自动部分撤销。</strong><ul>${(result.conflicts || []).map(item => `<li>${esc(item.title)}：${esc(item.reason)}</li>`).join("")}</ul>`;
+        actions = `<button class="button" data-action="show-backup">查看本次备份</button><button class="button primary" data-action="result-close">关闭结果</button>`;
+      } else if (result.type === "undone") {
+        tone = "good";
+        title = "演示撤销完成";
+        description = "整批预检通过；本次新增已撤回，覆盖项已恢复旧索引。未操作真实会话。";
+        detail = `<strong>整批撤销 ${receipt.changes.length} 项</strong><br>收据 ${esc(receipt.id)} 保留为“已撤销”，本次备份仍可只读查看。`;
+        actions = `<button class="button" data-action="show-backup">查看本次备份</button><button class="button primary" data-action="result-close">关闭结果</button>`;
+      }
+      return `<div class="result-hero ${tone}"><div class="result-kicker">演示结果 · 非真实操作回执</div><h2 id="view-title" tabindex="-1" data-focus="view-title">${esc(title)}</h2><p>${esc(description)}</p></div>
+        <div class="result-detail">${detail}</div>
+        <div class="actionbar"><span class="action-status">来源索引与 transcript 内存数据始终不改写。</span>${actions}</div>`;
+    }
+
+    function renderUndo() {
+      const receipt = state.result.receipt;
+      return `<div class="view-heading"><div><h2 id="view-title" tabindex="-1" data-focus="view-title">撤销本次 · 恢复预览</h2><p class="heading-note">先整批预检，再决定是否还原</p></div><span class="demo-tag">尚未撤销</span></div>
+        <div class="notice warn"><strong>任一冲突，整批零写入。</strong><p>将核对原目标空间中全部 ${receipt.changes.length} 项是否仍等于本次写后状态；不会自动恢复无冲突的子集。</p></div>
+        <div class="binding">目标：<strong>${esc(endpointName(receipt.targetId))}</strong> / ${esc(spaceLabel(receipt.targetSpaceId))}<br>收据：${esc(receipt.id)}</div>
+        <div class="preview-list">${receipt.changes.map(change => `<div class="preview-row"><div class="preview-row-title">${esc(change.title)}<span class="project-tag">${esc(change.project)}</span></div><p>${change.action === "new" ? "撤回本次新建索引；记录显示原先不存在。" : "恢复本次覆盖前的旧索引演示快照。"}</p></div>`).join("")}</div>
+        <div class="actionbar"><span class="action-status">只读查看备份不会触发退出或恢复。</span><button class="button" data-action="show-receipt">返回结果</button><button class="button primary" data-action="confirm-undo">检查并撤销 ${receipt.changes.length} 项</button></div>`;
+    }
+
+    function render(focusKey) {
+      const active = document.activeElement;
+      const previousFocus = focusKey || (active && active.dataset ? active.dataset.focus : "");
+      const searchPosition = active && active.dataset && active.dataset.focus === "search" ? active.selectionStart : null;
+      if (state.view === "preview") app.innerHTML = renderPreview();
+      else if (state.view === "result") app.innerHTML = renderResult();
+      else if (state.view === "undo") app.innerHTML = renderUndo();
+      else app.innerHTML = renderSelection();
+      const receipt = latestReceipt();
+      receiptEntry.innerHTML = receipt ? `<button class="link-button" data-action="show-receipt" data-focus="last-receipt" aria-label="查看上次复制收据">上次复制</button>` : "";
+      if (previousFocus) {
+        const candidates = document.querySelectorAll("[data-focus]");
+        const next = Array.from(candidates).find(item => item.dataset.focus === previousFocus);
+        if (next) {
+          next.focus({ preventScroll: true });
+          if (previousFocus === "search" && searchPosition !== null && next.setSelectionRange) {
+            next.setSelectionRange(searchPosition, searchPosition);
+          }
+        }
+      }
+    }
+
+    function showToast(message) {
+      state.toast = message;
+    }
+
+    function clearBinding(message = "来源或目标已改变，旧选择与预览已清空。") {
+      state.picked.clear();
+      state.preview = null;
+      state.invalidatedIds = [];
+      state.view = "select";
+      showToast(message);
+    }
+
+    function openModal(title, body, options = {}) {
+      modalReturnFocus = document.activeElement;
+      modalConfirm = options.onConfirm || null;
+      modalRoot.innerHTML = `<div class="modal-overlay" data-modal-overlay><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h2 id="modal-title">${esc(title)}</h2><div class="modal-body">${body}</div><div class="modal-actions"><button class="button ${modalConfirm ? "quiet" : "primary"}" data-modal-close ${!modalConfirm ? "data-autofocus" : ""}>${esc(options.closeLabel || (modalConfirm ? "取消" : "关闭"))}</button>${modalConfirm ? `<button class="button primary" data-modal-confirm>${esc(options.confirmLabel || "确认")}</button>` : ""}</div></section></div>`;
+      const autofocus = modalRoot.querySelector("[data-autofocus]") || modalRoot.querySelector("button");
+      if (autofocus) autofocus.focus();
+    }
+
+    function closeModal(restore = true) {
+      if (!modalRoot.firstChild) return;
+      modalRoot.innerHTML = "";
+      modalConfirm = null;
+      if (restore && modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus({ preventScroll: true });
+      modalReturnFocus = null;
+    }
+
+    function showBackup(receipt) {
+      if (!receipt) return;
+      const updates = receipt.changes.filter(change => change.action === "update");
+      const additions = receipt.changes.filter(change => change.action === "new");
+      const counts = receiptCounts(receipt);
+      openModal("本次备份与收据", `<p><strong>收据 ${esc(receipt.id)}</strong> · ${esc(receipt.status)}</p><p>新增 ${counts.added} · 更新 ${counts.updated} · 已选跳过 ${counts.skipped} · 其他未纳入 ${counts.others}</p><p>位置：演示内存（未创建文件）。备份只包含将覆盖的索引演示快照与本次收据，不含聊天原文。</p>${updates.length ? `<ul>${updates.map(change => `<li>${esc(change.title)}：覆盖前旧索引演示快照。</li>`).join("")}</ul>` : "<p>零覆盖：没有旧索引需备份。</p>"}${additions.length ? `<p>新增项原先不存在：${additions.map(change => esc(change.title)).join("、")}。</p>` : ""}<p>查看不会写数据；撤销必须先做整批恢复预览与预检。</p>`);
+    }
+
+    function showRecovery() {
+      const receipt = latestReceipt();
+      openModal("恢复信息", `<p><strong>状态：${receipt && receipt.status === "interrupted" ? "上次操作未完成" : "恢复未确认"}</strong></p><p>目标：${esc(endpointName(receipt ? receipt.targetId : state.targetId))} / ${esc(spaceLabel(receipt ? receipt.targetSpaceId : state.targetSpaceId))}</p><p>现场、目标当前内存索引与恢复材料均保留；没有自动重试或部分恢复。真实实现需要人工核对后显式处理，本原型不提供继续写入入口。</p><p>只有“重置演示”会丢弃这套虚构现场并回到正常情形；它不是实际恢复。</p>`, { closeLabel: "关闭" });
+    }
+
+    function confirmDesktopExit() {
+      const oldPlan = state.preview;
+      state.targetRunning = false;
+      state.targetExited = true;
+      const target = targetIndex();
+      if (target["same-update"] && target["same-update"].turns === 12) {
+        target["same-update"].turns = 24;
+        target["same-update"].demoRevision = "desktop-exit-flush";
+      }
+      const oldBefore = new Map(oldPlan.changes.map(change => [change.rowId, JSON.stringify(change.before)]));
+      state.preview = makePreview();
+      state.preview.afterDesktopExit = true;
+      state.preview.exitAffected = state.preview.changes.filter(change => oldBefore.get(change.rowId) !== JSON.stringify(change.before)).map(change => change.rowId);
+      showToast("已重新读取本批已选项；尚未写入。请确认更新后的预览。");
+      render("view-title");
+    }
+
+    function requestDesktopExit() {
+      openModal("退出目标并重新预览？", `<p>将只模拟正常退出目标桌面，<strong>不会直接复制</strong>。退出可能刷新索引或影响桌面内的 Code 任务。</p><p>本工具不主动停止外部终端 / IDE 的 CLI，但不保证桌面子任务继续运行。退出后会重新读取本批已选项，仍需再次点击“复制 N 项”。</p><p>不会自动重新打开目标、切号或切换 API 模式。</p>`, {
+        confirmLabel: "退出目标并重新预览",
+        onConfirm: confirmDesktopExit
+      });
+    }
+
+    function buildReceipt(plan, status) {
+      const receipt = {
+        id: `DEMO-${String(state.receipts.length + 1).padStart(3, "0")}`,
+        status,
+        sourceId: plan.sourceId,
+        targetId: plan.targetId,
+        sourceSpaceId: plan.sourceSpaceId,
+        targetSpaceId: plan.targetSpaceId,
+        changes: clone(plan.changes),
+        skippedCount: plan.skipped.length,
+        otherCount: plan.others.length,
+        undoConflicts: []
+      };
+      return receipt;
+    }
+
+    function applyChange(receipt, change) {
+      const target = targetIndex(receipt.targetSpaceId);
+      target[change.rowId] = clone(change.after);
+    }
+
+    function restoreAll(receipt) {
+      const target = targetIndex(receipt.targetSpaceId);
+      receipt.changes.forEach(change => {
+        if (change.action === "new") delete target[change.rowId];
+        else target[change.rowId] = clone(change.before);
+      });
+    }
+
+    function invalidatePreview(affectedIds) {
+      state.preview.invalid = true;
+      state.invalidatedIds = affectedIds;
+      showToast("预览后发生变化：已停止执行，零写入。请重新预览。");
+      state.view = "preview";
+      render("view-title");
+    }
+
+    function validatePreview(plan) {
+      if (!plan || plan.targetSpaceId !== state.targetSpaceId || plan.sourceSpaceId !== state.sourceSpaceId) {
+        return plan ? plan.changes.map(change => change.rowId) : [];
+      }
+      const target = targetIndex(plan.targetSpaceId);
+      return plan.changes.filter(change => {
+        const current = target[change.rowId] ? clone(target[change.rowId]) : null;
+        return JSON.stringify(current) !== JSON.stringify(change.before);
+      }).map(change => change.rowId);
+    }
+
+    function executeCopy() {
+      if (state.recoveryBlocked || !state.preview || state.preview.invalid) return;
+      if (state.targetRunning) {
+        requestDesktopExit();
+        return;
+      }
+      if (state.scenario === "stale-plan" && !state.staleApplied) {
+        state.staleApplied = true;
+        state.staleTargetKey = state.targetSpaceId;
+        targetIndex()["new-one"] = {
+          id: "new-one",
+          title: "接口重构",
+          project: "atlas",
+          turns: 1,
+          cliSegment: "fixture-unrelated-target",
+          demoRevision: "external-change-after-preview"
+        };
+        invalidatePreview(state.preview.changes.filter(change => change.rowId === "new-one").map(change => change.rowId));
+        return;
+      }
+      const changed = validatePreview(state.preview);
+      if (changed.length) {
+        invalidatePreview(changed);
+        return;
+      }
+      const plan = state.preview;
+      if (!plan.changes.length) return;
+      if (state.scenario === "backup-failed") {
+        const receipt = buildReceipt(plan, "backup-failed");
+        state.receipts.push(receipt);
+        state.result = { type: "backup-failed", receipt };
+        state.view = "result";
+        render("view-title");
+        return;
+      }
+      if (state.scenario === "write-failed-rollback-ok") {
+        const receipt = buildReceipt(plan, "rolled-back");
+        plan.changes.forEach(change => applyChange(receipt, change));
+        restoreAll(receipt);
+        state.receipts.push(receipt);
+        state.result = { type: "rolled-back", receipt };
+        state.view = "result";
+        render("view-title");
+        return;
+      }
+      if (state.scenario === "write-failed-rollback-incomplete") {
+        const receipt = buildReceipt(plan, "recovery-incomplete");
+        applyChange(receipt, plan.changes[0]);
+        state.receipts.push(receipt);
+        state.recoveryBlocked = true;
+        state.result = { type: "recovery-incomplete", receipt };
+        state.view = "result";
+        render("view-title");
+        return;
+      }
+      const receipt = buildReceipt(plan, "completed");
+      plan.changes.forEach(change => applyChange(receipt, change));
+      state.receipts.push(receipt);
+      state.result = { type: "completed", receipt };
+      state.view = "result";
+      render("view-title");
+    }
+
+    function refreshPreview() {
+      const before = state.picked.size;
+      memory.source.forEach(row => {
+        if (state.picked.has(row.id) && !classify(row).action) state.picked.delete(row.id);
+      });
+      const removed = before - state.picked.size;
+      state.preview = makePreview();
+      state.invalidatedIds = [];
+      showToast(removed ? `已重新预览：${removed} 项转为跳过并取消选择；此前零写入。` : "已重新读取并生成新预览；此前零写入。");
+      render("view-title");
+    }
+
+    function confirmUndo() {
+      const receipt = state.result.receipt;
+      if (!receipt || receipt.status !== "completed") return;
+      const target = targetIndex(receipt.targetSpaceId);
+      if (state.scenario === "undo-conflict" && !receipt.undoConflictInjected) {
+        const first = receipt.changes[0];
+        if (target[first.rowId]) {
+          target[first.rowId].turns += 1;
+          target[first.rowId].demoRevision = "external-progress-after-copy";
+        }
+        receipt.undoConflictInjected = true;
+      }
+      const conflicts = receipt.changes.filter(change => {
+        const current = target[change.rowId] ? clone(target[change.rowId]) : null;
+        return JSON.stringify(current) !== JSON.stringify(change.after);
+      }).map(change => ({
+        title: change.title,
+        reason: "当前目标与本次写后状态不一致，可能已有新进展或编辑。"
+      }));
+      if (conflicts.length) {
+        receipt.status = "undo-conflict";
+        receipt.undoConflicts = conflicts;
+        state.result = { type: "undo-conflict", receipt, conflicts };
+        state.view = "result";
+        render("view-title");
+        return;
+      }
+      restoreAll(receipt);
+      receipt.status = "undone";
+      state.result = { type: "undone", receipt };
+      state.view = "result";
+      render("view-title");
+    }
+
+    function seedInterruptedReceipt() {
+      const row = memory.source.find(item => item.id === "new-one");
+      const after = { id: row.id, title: row.title, project: row.project, turns: row.sourceTurns, cliSegment: "fixture-source-segment", demoRevision: "interrupted-demo" };
+      const receipt = {
+        id: "DEMO-INTERRUPTED",
+        status: "interrupted",
+        sourceId: state.sourceId,
+        targetId: state.targetId,
+        sourceSpaceId: state.sourceSpaceId,
+        targetSpaceId: state.targetSpaceId,
+        changes: [{ rowId: row.id, title: row.title, project: row.project, action: "new", reason: row.reason, before: null, after }],
+        skippedCount: 0,
+        otherCount: 5,
+        undoConflicts: []
+      };
+      targetIndex(receipt.targetSpaceId)[row.id] = clone(after);
+      state.receipts.push(receipt);
+      state.result = { type: "interrupted", receipt };
+    }
+
+    function handleAction(action, element) {
+      if (action === "select-all") {
+        const rows = visibleRows().filter(row => classify(row).action && selectionReady());
+        const allPicked = rows.length && rows.every(row => state.picked.has(row.id));
+        rows.forEach(row => allPicked ? state.picked.delete(row.id) : state.picked.add(row.id));
+        showToast(allPicked ? "已取消当前筛选结果的选择；筛选外选择不变。" : "已选择当前筛选中所有可处理项；不可处理项未选。");
+        render();
+      } else if (action === "preview") {
+        if (!selectionReady() || !state.picked.size) return;
+        state.preview = makePreview();
+        state.invalidatedIds = [];
+        state.view = "preview";
+        state.toast = "";
+        render("view-title");
+      } else if (action === "back") {
+        state.view = "select";
+        state.preview = null;
+        state.toast = "已保留选择，可修改后重新预览；尚未写入。";
+        render("view-title");
+      } else if (action === "cancel") {
+        state.preview = null;
+        state.result = { type: "cancelled" };
+        state.view = "result";
+        state.toast = "";
+        render("view-title");
+      } else if (action === "copy") {
+        executeCopy();
+      } else if (action === "exit-target") {
+        requestDesktopExit();
+      } else if (action === "refresh-preview") {
+        refreshPreview();
+      } else if (action === "return-preview") {
+        state.view = "preview";
+        state.preview.invalid = false;
+        state.result = null;
+        render("view-title");
+      } else if (action === "result-close") {
+        if (state.recoveryBlocked) return;
+        state.view = "select";
+        state.preview = null;
+        state.result = null;
+        state.picked.clear();
+        state.toast = latestReceipt() ? "收据仍可从窗口右上角“上次复制”查看。" : "";
+        render("view-title");
+      } else if (action === "show-backup") {
+        showBackup(state.result && state.result.receipt);
+      } else if (action === "show-receipt") {
+        const receipt = latestReceipt();
+        if (!receipt) return;
+        state.result = resultForReceipt(receipt);
+        state.view = "result";
+        render("view-title");
+      } else if (action === "undo") {
+        if (!state.result.receipt || state.result.receipt.status !== "completed") return;
+        state.view = "undo";
+        render("view-title");
+      } else if (action === "confirm-undo") {
+        confirmUndo();
+      } else if (action === "view-recovery") {
+        showRecovery();
+      } else if (action === "reset-demo") {
+        resetDemo("normal");
+      }
+    }
+
+    app.addEventListener("click", event => {
+      const action = event.target.closest("[data-action]");
+      if (action) {
+        handleAction(action.dataset.action, action);
+        return;
+      }
+      const rowElement = event.target.closest("[data-row]");
+      if (rowElement && !event.target.closest("input, button, select, summary, details, a")) {
+        const row = memory.source.find(item => item.id === rowElement.dataset.row);
+        if (!row || !classify(row).action || !selectionReady()) return;
+        state.picked.has(row.id) ? state.picked.delete(row.id) : state.picked.add(row.id);
+        render(`pick-${row.id}`);
+      }
+    });
+
+    receiptEntry.addEventListener("click", event => {
+      const action = event.target.closest("[data-action]");
+      if (action) handleAction(action.dataset.action, action);
+    });
+
+    app.addEventListener("input", event => {
+      if (event.target.dataset.role === "search") {
+        state.query = event.target.value;
+        render();
+      }
+    });
+
+    app.addEventListener("change", event => {
+      const role = event.target.dataset.role;
+      if (event.target.dataset.pick) {
+        const id = event.target.dataset.pick;
+        event.target.checked ? state.picked.add(id) : state.picked.delete(id);
+        state.preview = null;
+        render();
+        return;
+      }
+      if (role === "search") return;
+      if (role === "project") {
+        state.project = event.target.value;
+        render();
+      } else if (role === "update-existing") {
+        const turnOff = state.updateExisting && !event.target.checked;
+        let removed = 0;
+        state.updateExisting = event.target.checked;
+        if (turnOff) {
+          memory.source.forEach(row => {
+            if ((row.kind === "same-session-update" || row.kind === "continuation") && state.picked.has(row.id)) {
+              state.picked.delete(row.id);
+              removed += 1;
+            }
+          });
+        }
+        state.preview = null;
+        showToast(turnOff ? (removed ? `已关闭更新，并取消 ${removed} 个更新项的选择；新增项保留。` : "已关闭更新；已有会话继续默认跳过。") : "已允许选择有充分证据的更新项；仍需预览确认。");
+        render();
+      } else if (role === "source-endpoint" || role === "target-endpoint") {
+        const side = role.startsWith("source") ? "source" : "target";
+        state[`${side}Id`] = event.target.value;
+        const selected = endpoint(event.target.value);
+        state[`${side}SpaceId`] = selected.spaces.length === 1 ? selected.spaces[0].id : "";
+        if (side === "target") {
+          state.targetRunning = false;
+          state.targetExited = false;
+        }
+        clearBinding();
+        render();
+      } else if (role === "source-space" || role === "target-space") {
+        const side = role.startsWith("source") ? "source" : "target";
+        state[`${side}SpaceId`] = event.target.value;
+        clearBinding("空间已改变，旧选择与预览已清空；新预览将绑定完整空间标识。");
+        render();
+      }
+    });
+
+    scenarioSelect.addEventListener("change", () => resetDemo(scenarioSelect.value));
+
+    modalRoot.addEventListener("click", event => {
+      if (event.target.closest("[data-modal-confirm]")) {
+        const callback = modalConfirm;
+        closeModal(false);
+        if (callback) callback();
+      } else if (event.target.closest("[data-modal-close]") || event.target.hasAttribute("data-modal-overlay")) {
+        closeModal(true);
+      }
+    });
+
+    document.addEventListener("keydown", event => {
+      if (modalRoot.firstChild) {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeModal(true);
+          return;
+        }
+        if (event.key === "Tab") {
+          const focusable = Array.from(modalRoot.querySelectorAll("button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), [tabindex='0']"));
+          if (!focusable.length) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+        return;
+      }
+      if (event.key === "Escape") {
+        if (state.view === "preview") {
+          event.preventDefault();
+          state.view = "select";
+          state.preview = null;
+          state.toast = "已返回修改，未写入。";
+          render("view-title");
+        } else if (state.view === "undo") {
+          event.preventDefault();
+          state.view = "result";
+          render("view-title");
+        } else if (state.view === "result" && !state.recoveryBlocked) {
+          event.preventDefault();
+          handleAction("result-close", null);
+        }
+      }
+    });
+
+    scenarioSelect.innerHTML = fixture.scenarios.map(scenario => `<option value="${esc(scenario)}">${esc(scenarioNames[scenario] || scenario)}</option>`).join("");
+    resetDemo("normal");
+  </script>
+</body>
+</html>

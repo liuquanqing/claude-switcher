@@ -4,16 +4,19 @@
   "formal_profile_doctor": "NOT_RUN_PROFILE_MISSING",
   "formal_plan_lint": "NOT_RUN_PROFILE_MISSING",
   "new_engine": "NOT_IMPLEMENTED",
-  "prototype_browser_checks": "NOT_RUN_PROVIDER_QUOTA",
+  "prototype_browser_checks": "PASS: 29 fictional interaction/responsive checks",
   "production_migration_enabled": false,
   "real_session_reads_or_writes": false,
   "reference_fixture_native_capture": "PASS after disposable packaging repair",
   "candidate_installed": true,
   "candidate_launched_by_agent": false,
   "new_guard_registered_by_agent": false,
-  "plan_sha256": "1bf694481863dea3aab489b1474ed3e3ecfb49cd22de301382eee92d78b08291",
+  "plan_sha256": "09918ee777e7212c793eaf63f8645c65d6b31e9e0309e523073af9baf5490e8b",
   "frontend_author": "Kimi CLI only, user confirmed waiting",
-  "frontend_continuation": "2026-10-27 19:50 Asia/Singapore, one-time thread heartbeat",
+  "frontend_continuation": "one-time heartbeat triggered 2026-10-27 22:41 Asia/Singapore; completed",
   "automation_id": "kimi",
-  "guard_handoff": "authorized after user quits Claude; not performed yet"
+  "guard_handoff": "authorized after user quits Claude; not performed yet",
+  "prototype": "Kimi CLI produced and corrected offline HTML",
+  "prototype_engine": "NOT_IMPLEMENTED",
+  "feature_flag": false
 }
