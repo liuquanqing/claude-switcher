@@ -265,40 +265,70 @@ struct ProfileCard: View {
     }
 }
 
-struct AddAccountRow: View {
+struct AddAccountCard: View {
     let onAdd: (String) -> Void
-    let onCancel: () -> Void
+    @State private var editing = false
     @State private var name = ""
+    @State private var hover = false
     @FocusState private var focused: Bool
     private var valid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "plus").font(.system(size: 11, weight: .semibold)).foregroundColor(.claude)
-            TextField("账号名称，例如：客户 A", text: $name)
-                .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundColor(.txt)
-                .focused($focused).onSubmit(commit)
-                .padding(.horizontal, 9).padding(.vertical, 7)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.bg))
-                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
-            Button("取消", action: onCancel).buttonStyle(.plain)
-                .font(.system(size: 11)).foregroundColor(.sub)
-            Button("添加", action: commit).buttonStyle(.plain)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(valid ? .white : .sub)
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(RoundedRectangle(cornerRadius: 7).fill(valid ? Color.claude : Color.stroke))
-                .disabled(!valid)
+        Group {
+            if editing {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("新账号", systemImage: "plus")
+                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.sub)
+                    TextField("名称，例如：客户 A", text: $name)
+                        .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundColor(.txt)
+                        .focused($focused).onSubmit(commit)
+                        .padding(.horizontal, 9).padding(.vertical, 7)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.bg))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
+                    HStack(spacing: 10) {
+                        Spacer()
+                        Button("取消", action: reset).buttonStyle(.plain)
+                            .font(.system(size: 10.5)).foregroundColor(.sub)
+                        Button("添加", action: commit).buttonStyle(.plain)
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundColor(valid ? .white : .sub)
+                            .padding(.horizontal, 10).padding(.vertical, 5)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(valid ? Color.claude : Color.stroke))
+                            .disabled(!valid)
+                    }
+                }
+                .padding(13)
+            } else {
+                Button { editing = true } label: {
+                    VStack(spacing: 7) {
+                        Image(systemName: "plus").font(.system(size: 18, weight: .light))
+                        Text("添加账号").font(.system(size: 11.5, weight: .medium))
+                    }
+                    .foregroundColor(.sub)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10).fill(Color.card))
-        .onAppear { focused = true }
+        .frame(height: 132)
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.card.opacity(editing || hover ? 1 : 0.5)))
+        .overlay(RoundedRectangle(cornerRadius: 14)
+            .stroke(Color.stroke.opacity(editing ? 0.9 : hover ? 0.75 : 0.5), lineWidth: 1))
+        .onHover { hover = $0 }
+        .onChange(of: editing) { value in if value { focused = true } }
     }
 
     func commit() {
         guard valid else { return }
         onAdd(name)
+        reset()
+    }
+
+    func reset() {
         name = ""
+        focused = false
+        editing = false
     }
 }
 
@@ -318,7 +348,6 @@ struct FooterButton: View {
 struct Panel: View {
     @ObservedObject var store: Store
     @ObservedObject var protection: ProtectionController
-    @State private var addingAccount = false
     @State private var quitHover = false
     let cols = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
     init(store: Store) {
@@ -333,13 +362,14 @@ struct Panel: View {
                     Task { await store.switchTo(p.name) }
                 }
             }
+            AddAccountCard { store.addProfile($0) }
         }
     }
 
     var body: some View {
         VStack(spacing: 10) {
             Header(store: store)
-            ProtectionStrip(controller: store.protection, busy: store.busy != nil) {
+            ProtectionStrip(controller: protection, busy: store.busy != nil) {
                 Task { await store.openProtectedClaude() }
             }
             TerminalStrip(store: store)
@@ -354,22 +384,9 @@ struct Panel: View {
                 HStack(spacing: 7) {
                     Text("账号").font(.system(size: 13, weight: .semibold)).foregroundColor(.txt)
                     Text("\(store.profiles.count) 个").font(.system(size: 10)).foregroundColor(.sub)
-                    Spacer()
-                    if !addingAccount {
-                        Button { addingAccount = true } label: {
-                            Label("添加账号", systemImage: "plus")
-                                .font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
-                        }.buttonStyle(.plain)
-                    }
                 }
                 .padding(.horizontal, 2)
-                if addingAccount {
-                    AddAccountRow(onAdd: {
-                        store.addProfile($0)
-                        addingAccount = false
-                    }, onCancel: { addingAccount = false })
-                }
-                if store.profiles.count > 4 {
+                if store.profiles.count + 1 > 4 {
                     ScrollView { accountGrid }.frame(height: 386)
                 } else {
                     accountGrid
@@ -397,21 +414,27 @@ struct Panel: View {
                     store.toggleOpenAtLogin()
                 }
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
-                Button { NSApp.terminate(nil) } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "power").font(.system(size: 11, weight: .medium))
-                        Text("退出界面").font(.system(size: 11, weight: .medium))
+                VStack(alignment: .trailing, spacing: 4) {
+                    Button { NSApp.terminate(nil) } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "power").font(.system(size: 11, weight: .medium))
+                            Text("退出界面").font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(quitHover ? .txt : .sub)
+                        .padding(.horizontal, 9).padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.stroke.opacity(quitHover ? 0.7 : 0.35)))
+                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
                     }
-                    .foregroundColor(quitHover ? .txt : .sub)
-                    .padding(.horizontal, 8).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(quitHover ? Color.stroke : Color.clear))
+                    .buttonStyle(.plain)
+                    .help("仅关闭界面，不更改保护状态")
+                    .disabled(store.busy != nil || protection.working)
+                    .onHover { quitHover = $0 }
+                    Text(protection.exitStatusText)
+                        .font(.system(size: 8.5))
+                        .foregroundColor(protection.enabled && !protection.guardOnline ? .warn : .sub)
+                        .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .help(store.protection.enabled
-                      ? "仅退出界面，独立后台保护继续运行；停止保护请在上方单独确认"
-                      : "仅退出界面，不改变后台保护状态")
-                .disabled(store.busy != nil || store.protection.working)
-                .onHover { quitHover = $0 }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
