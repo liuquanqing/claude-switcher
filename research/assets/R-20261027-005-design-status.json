@@ -11,5 +11,9 @@
   "candidate_installed": true,
   "candidate_launched_by_agent": false,
   "new_guard_registered_by_agent": false,
-  "plan_sha256": "1253431f884e4e6f937612d106db1e0965bb17bdfb179916c7d02b64d0264988"
+  "plan_sha256": "1bf694481863dea3aab489b1474ed3e3ecfb49cd22de301382eee92d78b08291",
+  "frontend_author": "Kimi CLI only, user confirmed waiting",
+  "frontend_continuation": "2026-10-27 19:50 Asia/Singapore, one-time thread heartbeat",
+  "automation_id": "kimi",
+  "guard_handoff": "authorized after user quits Claude; not performed yet"
 }

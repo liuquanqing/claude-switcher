@@ -2,7 +2,7 @@
 
 一个菜单栏应用管理 Claude 桌面账号、终端登录同步和网络地区守护。基于 [l2succes/claude-switcher](https://github.com/l2succes/claude-switcher) 的 MIT 代码开发；上游说明保存在 [UPSTREAM-README](docs/UPSTREAM-README.md)。
 
-当前为 `v1.3.0-local.5` 本地开发候选，已另外安装到 `/Applications/Claude Switcher 候选版.app`，**没有覆盖原版、启动候选或部署新守卫**。守卫/急停按用户要求仅做隔离仿真，不安排真实账号故障注入；回切由正常使用反馈。旧守卫仍保留，交接单独确认。
+当前为 `v1.3.0-local.5` 本地开发候选，已另外安装到 `/Applications/Claude Switcher 候选版.app`，**没有覆盖原版、启动候选或部署新守卫**。守卫/急停按用户要求仅做隔离仿真，不安排真实账号故障注入；回切由正常使用反馈。旧守卫仍保留；用户已授权在自行退出Claude后交接，当前未执行。
 
 [打开离线功能对比说明](docs/功能对比说明.html)：与桌面原版、CCSwitcher、检查型切换器及 API 管理器的功能和边界对照。
 
