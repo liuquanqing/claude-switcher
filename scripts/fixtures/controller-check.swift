@@ -140,6 +140,9 @@ actor FixtureGuardWorker: GuardWorking {
   transfer.setPicked("local_ui.json", selected: true)
   await transfer.copySelected(); try await settled(transfer)
   require(transfer.lastOperation?.canUndo == true && transfer.confirmation == nil, "add-only native action uses actual temp engine without extra dialog")
+  transfer.showBackup(); try await settled(transfer)
+  require(transfer.backupItems.first?.title == "设置面板排版整理" && transfer.backupItems.first?.cwd == "/demo/atlas", "backup preview verifies actual temp files before showing concrete session metadata")
+  transfer.dismissBackup()
   require(transfer.rows.first { $0.id == "local_ui.json" }?.selectable == false, "copied session is immediately deduplicated")
   transfer.requestUndo(); transfer.dismissConfirmation(); await transfer.confirmAction(); try await settled(transfer)
   require(transfer.lastOperation?.canUndo == false && transfer.rows.first { $0.id == "local_ui.json" }?.selectable == true, "native alert dismissal cannot consume pending undo")
@@ -200,6 +203,38 @@ actor FixtureGuardWorker: GuardWorking {
    worker: SessionTransferWorker(runningProbe: { throw SafetyError("probe must not run for parked target") }))
   await inactiveController.refresh(); inactiveController.setPicked("local_ui.json", selected: true); await inactiveController.copySelected()
   require(inactiveController.lastOperation?.canUndo == true, "parked target does not query or stop a running desktop")
+  let exportFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: exportFixture.1) }
+  let exportController = SessionTransferController(store: Store(demo: true), testEnvironment: exportFixture.0, commandURL: URL(fileURLWithPath: "/usr/bin/true"))
+  await exportController.refresh(); exportController.setPicked("local_ui.json", selected: true)
+  await exportController.exportInstructions()
+  require(exportController.handoffInformation?.contains("plan --request") == true && exportController.handoffInformation?.contains("apply --request") == true, "handoff contains commands for the explicitly injected fixture helper without executing it")
+  require(!FileManager.default.fileExists(atPath: exportFixture.0.backups.path) && exportController.picked.contains("local_ui.json"), "export never starts copy or consumes selection")
+  exportController.dismissHandoff(); require(exportController.handoffInformation == nil, "closing handoff is presentation only")
+  let requestFolder = exportFixture.1.appendingPathComponent("session-transfer-requests")
+  let exported = try FileManager.default.contentsOfDirectory(at: requestFolder, includingPropertiesForKeys: nil)
+  let request = try SessionTransferRequest.load(from: exported[0]); _ = try request.checkedPlan()
+  require(request.selected == ["local_ui.json"] && request.updateExisting == false, "local request preserves exact selected add-only intent")
+  for scenario in ["recovery", "conflict"] {
+   let fixture = try SessionTransferDemo.environment(scenario: scenario)
+   defer { try? FileManager.default.removeItem(at: fixture.1) }
+   let controller = SessionTransferController(store: Store(demo: true), testEnvironment: fixture.0)
+   await controller.refresh(); require(controller.lastOperation?.needsRecovery == true, "native QA scenario has a real isolated unresolved journal")
+   controller.requestRecovery(); controller.dismissConfirmation(); await controller.confirmAction()
+   if scenario == "recovery" {
+    require(controller.lastOperation?.state == .restored, "native recoverable fixture reaches restored with actual temp engine")
+   } else {
+    require(controller.errorMessage?.contains("新进展") == true && controller.lastOperation?.needsRecovery == true, "native conflict fixture remains locked and reports preserved external progress")
+    controller.requestKeepCurrent(); controller.cancelConfirmation()
+    require(controller.lastOperation?.needsRecovery == true, "cancel exception cannot unlock recovery")
+    controller.requestKeepCurrent(); controller.dismissConfirmation(); await controller.confirmAction()
+    require(controller.lastOperation?.state == .preserved, "explicit exception closes journal without claiming recovery")
+   }
+  }
+  let navigationStore = Store(demo: true); let previousAccount = navigationStore.current
+  var returned = 0; navigationStore.onShowAccounts = { returned += 1 }
+  navigationStore.returnToAccounts()
+  require(returned == 1 && navigationStore.current == previousAccount, "return navigation calls panel callback without switching accounts")
   print("PASS: \(checks) controller/store checks; temporary files and fixture worker only. No live credential/service actions.")
  }
 }

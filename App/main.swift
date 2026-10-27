@@ -179,9 +179,11 @@ final class Store: ObservableObject {
     @Published var cliStatusDetail: String?
     @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?
     var onChange: (() -> Void)?
+    var onShowAccounts: (() -> Void)?
+    func returnToAccounts() { onShowAccounts?() }
     let protection: ProtectionController
     let isDemo: Bool
-    var sessionMigrationEnabled: Bool { false }
+    var sessionMigrationEnabled: Bool { true }
     @Published private(set) var refreshing = false
     private var desktopObservation: DesktopLifecycleObservation?
 
@@ -455,6 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             store = demoMode ? Store(demo: true) : Store()
             store.onChange = { [weak self] in self?.updateTitle() }
+            store.onShowAccounts = { [weak self] in self?.showPanel() }
             popover.behavior = .transient
             popover.animates = true
             popover.appearance = NSAppearance(named: .darkAqua)
@@ -483,7 +486,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     CopyWindow.window?.title = "复制会话 · 演示（临时虚构数据）"
                 }
             }
-            if demoMode && !demoPopover && !transferPreview {
+            if demoMode && !demoPopover {
                 let initialViewportHeight = max(1, (NSScreen.main?.visibleFrame.height ?? 800) * 0.75)
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: initialViewportHeight),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -503,7 +506,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.appearance = NSAppearance(named: .darkAqua)
                 window.center()
                 previewWindow = window
-                DispatchQueue.main.async { self.toggle() }
+                if !transferPreview { DispatchQueue.main.async { self.toggle() } }
             }
             if demoPopover {
                 item.isVisible = false

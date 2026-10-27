@@ -2,12 +2,35 @@ import AppKit
 import SwiftUI
 import SwitcherCore
 
+private enum SessionTransferSheet: Identifiable {
+    case confirmation(SessionTransferConfirmation)
+    case backup
+    case handoff
+
+    var id: String {
+        switch self {
+        case .confirmation(let confirmation): return confirmation.id.uuidString
+        case .backup: return "backup"
+        case .handoff: return "handoff"
+        }
+    }
+}
+
 @MainActor
 struct CopyThreadsView: View {
-    @StateObject private var controller: SessionTransferController
+    @ObservedObject private var controller: SessionTransferController
+    @FocusState private var modalCancelFocused: Bool
+    @State private var handoffCopied = false
+    private let store: Store
 
     init(store: Store) {
-        _controller = StateObject(wrappedValue: SessionTransferController(store: store))
+        self.store = store
+        self.controller = CopyWindow.controller(for: store)
+    }
+
+    init(store: Store, controller: SessionTransferController) {
+        self.store = store
+        self.controller = controller
     }
 
     private var selectableVisibleRows: [SessionTransferRow] {
@@ -22,20 +45,79 @@ struct CopyThreadsView: View {
         controller.locations.first { $0.id == controller.targetID }?.name ?? controller.targetID
     }
 
+    private var selectedSummary: String {
+        let selected = controller.rows.filter { controller.picked.contains($0.id) }
+        guard let first = selected.first else { return text("noSelection") }
+        if selected.count == 1 { return text("selectedOne", arguments: ["title": first.title]) }
+        return text("selectedMany", arguments: ["title": first.title, "count": String(selected.count)])
+    }
+
+    private var visibleStatusMessage: String? {
+        guard let status = controller.statusMessage else { return nil }
+        if status.hasPrefix("已复制") || status == "已撤销上次复制。" ||
+            status == "已恢复上次未完成的变更。" || status.hasPrefix("已保留当前数据并结束记录") {
+            return nil
+        }
+        switch status {
+        case "选择或空间已变化，请重新复制。": return text("statusSelectionChanged")
+        case "请先在相应账号或 API 工作区打开 Code 页，再重新检查。": return text("statusOpenCode")
+        case "请选择不同的来源和目标空间。": return text("statusDifferentSpaces")
+        default: return status
+        }
+    }
+
+    private var activeSheet: SessionTransferSheet? {
+        if let confirmation = controller.confirmation { return .confirmation(confirmation) }
+        if controller.backupInformation != nil { return .backup }
+        if controller.handoffInformation != nil { return .handoff }
+        return nil
+    }
+
+    private var sheetBinding: Binding<SessionTransferSheet?> {
+        Binding(get: { activeSheet }, set: { newValue in
+            guard newValue == nil, let sheet = activeSheet else { return }
+            switch sheet {
+            case .confirmation: controller.dismissConfirmation()
+            case .backup: controller.dismissBackup()
+            case .handoff: controller.dismissHandoff()
+            }
+        })
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Button { CopyWindow.returnToAccounts(store) } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "chevron.left")
+                        Text(text("back"))
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.link)
+                .foregroundColor(.sub)
+                .help(text("backHelp"))
+                Spacer()
+                Button(controller.language == "zh" ? "EN" : "中文") {
+                    controller.language = controller.language == "zh" ? "en" : "zh"
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.sub)
+            }
+
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 8) {
-                    picker("From", selection: sourceBinding, options: controller.locations)
+                    picker(text("from"), selection: sourceBinding, options: controller.locations)
                     if controller.sourceSpaces.count > 1 {
-                        spacePicker("来源空间", selection: sourceSpaceBinding, options: controller.sourceSpaces)
+                        spacePicker(text("sourceSpace"), selection: sourceSpaceBinding, options: controller.sourceSpaces)
                     }
                 }
                 Image(systemName: "arrow.right").foregroundColor(.claude)
                 VStack(alignment: .leading, spacing: 8) {
-                    picker("To", selection: targetBinding, options: controller.locations)
+                    picker(text("to"), selection: targetBinding, options: controller.locations)
                     if controller.targetSpaces.count > 1 {
-                        spacePicker("目标空间", selection: targetSpaceBinding, options: controller.targetSpaces)
+                        spacePicker(text("targetSpace"), selection: targetSpaceBinding, options: controller.targetSpaces)
                     }
                 }
                 Spacer(minLength: 0)
@@ -43,78 +125,97 @@ struct CopyThreadsView: View {
 
             if let error = controller.errorMessage {
                 message(error, color: .bad)
-            } else if let status = controller.statusMessage {
+            } else if let status = visibleStatusMessage {
                 message(status, color: .sub)
             }
 
             HStack(spacing: 12) {
-                TextField("Search threads or projects", text: $controller.query)
+                TextField(text("search"), text: $controller.query)
                     .textFieldStyle(.roundedBorder)
-                Toggle("更新已有会话", isOn: updateBinding)
+                Toggle(text("updateExisting"), isOn: updateBinding)
                     .toggleStyle(.checkbox)
                     .font(.system(size: 11))
+                    .tint(.claude)
                     .disabled(controller.isWorking)
-                    .help("默认只新增；开启后才可选择有充分证据的已有会话更新")
+                    .help(text("updateHelp"))
             }
 
             HStack(spacing: 7) {
-                Button(allVisiblePicked ? "Select none" : "Select all") {
+                Button(text(allVisiblePicked ? "selectNone" : "selectAll")) {
                     controller.selectAllVisible()
                 }
                 .buttonStyle(.link)
                 .font(.system(size: 11))
                 .disabled(selectableVisibleRows.isEmpty || controller.isWorking)
-                FooterButton(icon: "arrow.clockwise", help: "重新读取并检查会话") {
+                FooterButton(icon: "arrow.clockwise", help: text("refreshHelp")) {
                     Task { await controller.refresh() }
                 }
                 .disabled(controller.isWorking)
                 Spacer()
-                Text("\(controller.picked.count) selected · \(controller.visibleRows.count) shown")
-                    .font(.system(size: 11)).foregroundColor(.sub)
+                Text(text("counts", arguments: [
+                    "picked": String(controller.picked.count),
+                    "shown": String(controller.visibleRows.count)
+                ]))
+                .font(.system(size: 11)).foregroundColor(.sub)
             }
 
             List(controller.visibleRows) { row in
-                HStack(spacing: 10) {
+                let isPicked = controller.picked.contains(row.id)
+                HStack(alignment: .top, spacing: 10) {
                     Toggle("", isOn: pickedBinding(row))
                         .toggleStyle(.checkbox)
                         .labelsHidden()
+                        .tint(.claude)
                         .disabled(!row.selectable || controller.isWorking)
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
+                        .accessibilityLabel(Text(row.title))
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
                             Text(row.title)
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.txt)
-                                .lineLimit(1)
+                                .lineLimit(2)
                                 .truncationMode(.tail)
                                 .help(row.title)
-                            if row.kind != .add {
-                                Image(systemName: statusIcon(row.kind))
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(statusColor(row.kind))
-                                    .help(row.reason)
-                                    .accessibilityLabel(row.reason)
-                            }
+                                .layoutPriority(1)
+                            Text(row.project)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.sub)
+                                .lineLimit(1)
                         }
-                        Text(displayPath(row.cwd))
-                            .font(.system(size: 11))
+                        Text(row.cwd)
+                            .font(.system(size: 10.5, design: .monospaced))
                             .foregroundColor(.sub)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
                             .help(row.cwd)
+                        if !row.selectable && row.kind == .blocked {
+                            Text(row.reason)
+                                .font(.system(size: 10.5))
+                                .foregroundColor(.warn)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     Spacer(minLength: 4)
-                    Text(row.project)
-                        .font(.system(size: 10, weight: .bold))
-                        .padding(.horizontal, 6).padding(.vertical, 3)
-                        .foregroundColor(.sub)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.stroke))
-                        .lineLimit(1)
-                    Text(ago(row.lastActivity))
-                        .font(.system(size: 11))
-                        .foregroundColor(.sub)
-                        .frame(width: 66, alignment: .trailing)
+                    VStack(alignment: .trailing, spacing: 6) {
+                        Text(activityTime(row.lastActivity))
+                            .font(.system(size: 11))
+                            .foregroundColor(.sub)
+                            .frame(width: 66, alignment: .trailing)
+                        if let status = rowStatus(row) {
+                            Text(status)
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(row.kind == .update ? .claude : (row.kind == .blocked ? .warn : .sub))
+                        }
+                    }
                 }
-                .padding(.vertical, 3)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 9)
+                .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.claude.opacity(0.12) : Color.clear))
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(isPicked ? Color.claude : Color.clear)
+                        .frame(width: 3)
+                        .padding(.vertical, 7)
+                }
                 .contentShape(Rectangle())
                 .help(row.reason)
                 .accessibilityHint(row.reason)
@@ -122,11 +223,17 @@ struct CopyThreadsView: View {
                     guard row.selectable, !controller.isWorking else { return }
                     controller.setPicked(row.id, selected: !controller.picked.contains(row.id))
                 }
+                .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .listStyle(.inset(alternatesRowBackgrounds: false))
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.25)))
+            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.75), lineWidth: 1))
             .overlay {
                 if controller.visibleRows.isEmpty {
-                    Text(controller.rows.isEmpty ? "没有可复制的会话" : "没有匹配的会话")
+                    Text(text(controller.rows.isEmpty ? "noRows" : "noMatches"))
                         .font(.system(size: 12))
                         .foregroundColor(.sub)
                 }
@@ -136,16 +243,30 @@ struct CopyThreadsView: View {
                 operationView(operation)
             }
 
-            HStack(spacing: 8) {
+            HStack(spacing: 10) {
                 if controller.isWorking {
                     ProgressView().controlSize(.small)
-                    Text("正在处理…").font(.system(size: 11)).foregroundColor(.claude)
+                    Text(text("processing")).font(.system(size: 11)).foregroundColor(.claude)
+                } else {
+                    Text(selectedSummary)
+                        .font(.system(size: 11))
+                        .foregroundColor(controller.picked.isEmpty ? .sub : .claude)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(selectedSummary)
                 }
-                Spacer()
-                Button("复制 \(controller.picked.count) 项到 \(targetName)") {
+                Spacer(minLength: 4)
+                Button(text("copyForClaude")) {
+                    Task { await controller.exportInstructions() }
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+                .disabled(!controller.canExport || controller.isWorking)
+                Button(text("copy", arguments: ["count": String(controller.picked.count), "target": targetName])) {
                     Task { await controller.copySelected() }
                 }
-                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .tint(.claude)
                 .disabled(!controller.canCopy || controller.isWorking)
             }
         }
@@ -154,18 +275,14 @@ struct CopyThreadsView: View {
         .background(Color.bg)
         .preferredColorScheme(.dark)
         .task { await controller.refresh() }
-        .alert(item: confirmationBinding) { confirmation in
-            Alert(title: Text(confirmation.title),
-                  message: Text(confirmation.message),
-                  primaryButton: .cancel(Text("取消")) { controller.cancelConfirmation() },
-                  secondaryButton: .destructive(Text(confirmation.buttonTitle)) {
-                      Task { await controller.confirmAction() }
-                  })
+        .sheet(item: sheetBinding) { sheet in
+            sheetContent(sheet)
         }
-        .alert("备份摘要", isPresented: backupPresented) {
-            Button("关闭") { controller.dismissBackup() }
-        } message: {
-            Text(controller.backupInformation ?? "")
+        .onChange(of: controller.language) { language in
+            CopyWindow.updateTitle(store: store, language: language)
+        }
+        .onChange(of: controller.handoffInformation) { _ in
+            handoffCopied = false
         }
     }
 
@@ -189,21 +306,13 @@ struct CopyThreadsView: View {
         Binding(get: { controller.updateExisting }, set: { controller.setUpdates($0) })
     }
 
-    private var confirmationBinding: Binding<SessionTransferConfirmation?> {
-        Binding(get: { controller.confirmation }, set: { value in
-            if value == nil { controller.dismissConfirmation() }
-        })
-    }
-
-    private var backupPresented: Binding<Bool> {
-        Binding(get: { controller.backupInformation != nil }, set: { presented in
-            if !presented { controller.dismissBackup() }
-        })
-    }
-
     private func pickedBinding(_ row: SessionTransferRow) -> Binding<Bool> {
         Binding(get: { controller.picked.contains(row.id) },
                 set: { controller.setPicked(row.id, selected: $0) })
+    }
+
+    private func text(_ key: String, arguments: [String: String] = [:]) -> String {
+        SessionTransferLocalization.text(key, language: controller.language, arguments: arguments)
     }
 
     private func picker(_ label: String, selection: Binding<String>, options: [TransferLocationOption]) -> some View {
@@ -216,64 +325,84 @@ struct CopyThreadsView: View {
 
     private func spacePicker(_ label: String, selection: Binding<String>, options: [TransferSpaceOption]) -> some View {
         Picker(label, selection: selection) {
-            Text("请选择空间").tag("")
+            Text(text("chooseSpace")).tag("")
             ForEach(options) { Text($0.name).tag($0.id) }
         }
         .frame(width: 210)
         .disabled(controller.isWorking)
     }
 
-    private func displayPath(_ path: String) -> String {
-        path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-    }
-
-    private func message(_ text: String, color: Color) -> some View {
-        Text(text)
+    private func message(_ value: String, color: Color) -> some View {
+        Text(value)
             .font(.system(size: 11))
             .foregroundColor(color)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func statusIcon(_ kind: SessionTransferKind) -> String {
-        switch kind {
-        case .add: return "plus.circle"
-        case .update: return "arrow.triangle.2.circlepath"
-        case .skip: return "info.circle"
-        case .blocked: return "exclamationmark.circle"
+    private func rowStatus(_ row: SessionTransferRow) -> String? {
+        switch row.kind {
+        case .add: return nil
+        case .update: return text("canUpdate")
+        case .skip: return text("existing")
+        case .blocked: return text("needsReview")
         }
     }
 
-    private func statusColor(_ kind: SessionTransferKind) -> Color {
-        switch kind {
-        case .add: return .good
-        case .update: return .claude
-        case .skip: return .sub
-        case .blocked: return .warn
+    private func activityTime(_ date: Date) -> String {
+        let seconds = max(0, Int(-date.timeIntervalSinceNow))
+        if seconds < 60 { return text("justNow") }
+        if seconds < 3600 { return text("minutesAgo", arguments: ["count": String(seconds / 60)]) }
+        if seconds < 86400 { return text("hoursAgo", arguments: ["count": String(seconds / 3600)]) }
+        return text("daysAgo", arguments: ["count": String(seconds / 86400)])
+    }
+
+    private func operationContent(_ operation: SessionTransferOperation) -> (title: String, summary: String, color: Color) {
+        let items = operation.items
+        switch operation.state {
+        case .completed:
+            guard let first = items.first else { return (text("copyCompleted"), operation.summary, .good) }
+            let key = items.count == 1 ? "copiedOne" : "copiedMany"
+            return (text("copyCompleted"), text(key, arguments: ["title": first.title, "count": String(items.count)]), .good)
+        case .undone:
+            return (text("undone"), text("undoneSummary", arguments: ["count": String(items.count)]), .good)
+        case .restored:
+            return (text("restored"), text("restoredSummary"), .good)
+        case .preserved:
+            if operation.summary.contains("备份缺失或无法核对") {
+                return (text("preserved"), operation.summary, .warn)
+            }
+            return (text("preserved"), text("preservedSummary"), .warn)
+        case .copying, .restoring, .recoveryRequired:
+            return (text("recoveryRequired"), text("recoverySummary"), .bad)
+        @unknown default:
+            return (operation.title, operation.summary, .sub)
         }
     }
 
     private func operationView(_ operation: SessionTransferOperation) -> some View {
-        HStack(alignment: .center, spacing: 9) {
+        let content = operationContent(operation)
+        return HStack(alignment: .center, spacing: 9) {
+            Circle().fill(content.color).frame(width: 6, height: 6)
             VStack(alignment: .leading, spacing: 2) {
-                Text(operation.title)
+                Text(content.title)
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(operation.needsRecovery ? .bad : .txt)
-                Text(operation.summary)
+                    .foregroundColor(content.color)
+                Text(content.summary)
                     .font(.system(size: 10.5))
                     .foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 4)
-            Button("查看备份") { controller.showBackup() }
+            Button(text("viewBackup")) { controller.showBackup() }
                 .buttonStyle(.link).font(.system(size: 10.5))
             if operation.canUndo {
-                Button("撤销") { controller.requestUndo() }
+                Button(text("undo")) { controller.requestUndo() }
                     .buttonStyle(.link).font(.system(size: 10.5))
                     .disabled(controller.isWorking)
             }
             if operation.needsRecovery {
-                Button("恢复") { controller.requestRecovery() }
+                Button(text("recover")) { controller.requestRecovery() }
                     .buttonStyle(.link).font(.system(size: 10.5))
                     .disabled(controller.isWorking)
             }
@@ -282,23 +411,276 @@ struct CopyThreadsView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.card))
     }
+
+    private func sheetContent(_ sheet: SessionTransferSheet) -> some View {
+        Group {
+            switch sheet {
+            case .confirmation(let confirmation): confirmationSheet(confirmation)
+            case .backup: backupSheet()
+            case .handoff: handoffSheet()
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .background(Color.bg)
+        .preferredColorScheme(.dark)
+        .onAppear { modalCancelFocused = true }
+        .onDisappear { modalCancelFocused = false }
+    }
+
+    private func confirmationCopy(_ confirmation: SessionTransferConfirmation) -> (title: String, message: String, button: String, items: [TransferSessionItem]) {
+        switch confirmation.kind {
+        case "copy":
+            let updates = confirmation.items.filter { $0.kind == .update }
+            return (text("confirmCopyTitle"), text("confirmCopyBody", arguments: [
+                "added": String(confirmation.addedCount),
+                "updated": String(confirmation.updatedCount)
+            ]), text("confirmCopyButton"), updates.isEmpty ? confirmation.items : updates)
+        case "undo":
+            return (text("confirmUndoTitle"), text("confirmUndoBody"), text("confirmUndoButton"), confirmation.items)
+        case "recovery":
+            return (text("confirmRecoveryTitle"), text("confirmRecoveryBody"), text("confirmRecoveryButton"), confirmation.items)
+        case "preserve":
+            return (text("confirmPreserveTitle"), text("confirmPreserveBody"), text("confirmPreserveButton"), confirmation.items)
+        default:
+            return (confirmation.title, confirmation.message, confirmation.buttonTitle, confirmation.items)
+        }
+    }
+
+    private func confirmationSheet(_ confirmation: SessionTransferConfirmation) -> some View {
+        let content = confirmationCopy(confirmation)
+        return VStack(alignment: .leading, spacing: 13) {
+            Text(content.title).font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
+            Text(content.message)
+                .font(.system(size: 12))
+                .foregroundColor(.sub)
+                .fixedSize(horizontal: false, vertical: true)
+            if !content.items.isEmpty {
+                sessionList(content.items)
+            }
+            HStack {
+                Spacer()
+                Button(text(confirmation.kind == "preserve" ? "return" : "cancel")) {
+                    if confirmation.kind == "preserve" {
+                        controller.requestRecovery()
+                    } else {
+                        controller.cancelConfirmation()
+                    }
+                }
+                .keyboardShortcut(.cancelAction)
+                .focused($modalCancelFocused)
+                Button(content.button) {
+                    Task { await controller.confirmAction() }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(confirmation.kind == "preserve" ? .bad : .claude)
+            }
+            if confirmation.kind == "recovery" {
+                Divider().overlay(Color.stroke)
+                HStack {
+                    Spacer()
+                    Button(text("keepCurrent")) { controller.requestKeepCurrent() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                        .foregroundColor(.sub)
+                }
+            }
+        }
+    }
+
+    private func backupInformationText(_ information: String) -> String {
+        switch information {
+        case "正在核对备份…": return text("backupChecking")
+        case "备份已核对；只包含本次索引变更，不包含聊天原文。": return text("backupVerified")
+        default: return information
+        }
+    }
+
+    private func backupSheet() -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text(text("backupTitle")).font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
+            if let information = controller.backupInformation {
+                Text(backupInformationText(information))
+                    .font(.system(size: 11))
+                    .foregroundColor(.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+            if !controller.backupItems.isEmpty {
+                sessionList(controller.backupItems, showKind: true)
+            }
+            HStack {
+                Spacer()
+                Button(text("close")) { controller.dismissBackup() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.claude)
+                    .keyboardShortcut(.cancelAction)
+                    .focused($modalCancelFocused)
+            }
+        }
+    }
+
+    private func handoffSheet() -> some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text(text("handoffTitle")).font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
+            Text(text("handoffNote"))
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+            ScrollView {
+                Text(controller.handoffInformation ?? "")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.txt)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+            }
+            .frame(maxHeight: 320)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.card))
+            HStack {
+                Spacer()
+                Button(text("close")) { controller.dismissHandoff() }
+                    .keyboardShortcut(.cancelAction)
+                    .focused($modalCancelFocused)
+                Button(text(handoffCopied ? "copiedInstructions" : "copyInstructions")) {
+                    guard let information = controller.handoffInformation else { return }
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString(information, forType: .string)
+                    handoffCopied = true
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.claude)
+            }
+        }
+    }
+
+    private func sessionList(_ items: [TransferSessionItem], showKind: Bool = false) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(items) { item in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.txt)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(item.cwd)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if showKind, let label = backupItemKind(item.kind) {
+                            Text(label)
+                                .font(.system(size: 10))
+                                .foregroundColor(.sub)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    if item.id != items.last?.id { Divider().overlay(Color.stroke) }
+                }
+            }
+        }
+        .frame(maxHeight: 230)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.card.opacity(0.6)))
+    }
+
+    private func backupItemKind(_ kind: SessionTransferKind) -> String? {
+        switch kind {
+        case .add: return text("backupNew")
+        case .update: return text("backupUpdate")
+        case .skip, .blocked: return nil
+        }
+    }
 }
 
+@MainActor
+private final class CopyWindowDelegate: NSObject, NSWindowDelegate {
+    let store: Store
+    let controller: SessionTransferController
+    private var noticeTask: Task<Void, Never>?
+
+    init(store: Store, controller: SessionTransferController) {
+        self.store = store
+        self.controller = controller
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        CopyWindow.returnToAccounts(store)
+        return false
+    }
+
+    func showWorkingNotice(on window: NSWindow) {
+        window.subtitle = SessionTransferLocalization.text("workingClose", language: controller.language)
+        noticeTask?.cancel()
+        noticeTask = Task { @MainActor [weak window] in
+            do { try await Task.sleep(nanoseconds: 2_500_000_000) } catch { return }
+            guard !Task.isCancelled else { return }
+            window?.subtitle = ""
+        }
+    }
+}
+
+@MainActor
 enum CopyWindow {
     static var window: NSWindow?
+    private static var delegate: CopyWindowDelegate?
+    private static var controllers: [ObjectIdentifier: SessionTransferController] = [:]
 
-    @MainActor static func show(_ store: Store) {
+    static func controller(for store: Store) -> SessionTransferController {
+        let key = ObjectIdentifier(store)
+        if let controller = controllers[key] { return controller }
+        let controller = SessionTransferController(store: store)
+        controllers[key] = controller
+        return controller
+    }
+
+    static func show(_ store: Store) {
+        let controller = controller(for: store)
+        var viewWillRefresh = false
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 580),
                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            w.title = "复制 Claude Code 会话"
             w.isReleasedWhenClosed = false
             w.appearance = NSAppearance(named: .darkAqua)
-            w.contentViewController = NSHostingController(rootView: CopyThreadsView(store: store))
-            w.center()
+            w.contentMinSize = NSSize(width: 620, height: 520)
             window = w
+            install(store: store, controller: controller, on: w)
+            w.center()
+            viewWillRefresh = true
+        } else if delegate?.store !== store {
+            install(store: store, controller: controller, on: window!)
+            viewWillRefresh = true
+        }
+        updateTitle(store: store, language: controller.language)
+        window?.subtitle = ""
+        if !viewWillRefresh && !controller.isWorking {
+            Task { await controller.refresh() }
         }
         NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+    }
+
+    static func returnToAccounts(_ store: Store) {
+        let controller = controller(for: store)
+        guard !controller.isWorking else {
+            if let window { delegate?.showWorkingNotice(on: window) }
+            return
+        }
+        window?.subtitle = ""
+        window?.orderOut(nil)
+        store.returnToAccounts()
+    }
+
+    static func updateTitle(store: Store, language: String) {
+        guard let window, delegate?.store === store else { return }
+        let key = store.isDemo ? "demoWindowTitle" : "windowTitle"
+        window.title = SessionTransferLocalization.text(key, language: language)
+    }
+
+    private static func install(store: Store, controller: SessionTransferController, on window: NSWindow) {
+        let windowDelegate = CopyWindowDelegate(store: store, controller: controller)
+        delegate = windowDelegate
+        window.delegate = windowDelegate
+        window.contentViewController = NSHostingController(rootView: CopyThreadsView(store: store, controller: controller))
     }
 }

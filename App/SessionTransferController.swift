@@ -4,11 +4,21 @@ import SwitcherCore
 
 struct TransferLocationOption: Identifiable, Sendable { let id: String; let name: String }
 struct TransferSpaceOption: Identifiable, Sendable { let id: String; let name: String }
+struct TransferSessionItem: Identifiable {
+    let id: String
+    let title: String
+    let cwd: String
+    let kind: SessionTransferKind
+}
 struct SessionTransferConfirmation: Identifiable {
     let id = UUID()
     let title: String
     let message: String
     let buttonTitle: String
+    var kind: String = "copy"
+    var items: [TransferSessionItem] = []
+    var addedCount: Int = 0
+    var updatedCount: Int = 0
 }
 struct SessionTransferOperation: Identifiable {
     let id: String
@@ -17,6 +27,8 @@ struct SessionTransferOperation: Identifiable {
     let canUndo: Bool
     let needsRecovery: Bool
     let backupURL: URL
+    let items: [TransferSessionItem]
+    let state: SessionTransferReceiptState
 }
 struct SessionTransferEnvironment: Sendable {
     let endpoints: [SessionTransferEndpoint]
@@ -72,6 +84,18 @@ actor SessionTransferWorker {
     func restore(_ env: SessionTransferEnvironment, id: String, space: SessionTransferSpace, undo: Bool) throws -> SessionTransferReceipt {
         try service(env).restore(id, to: space, undo: undo, requireIdle: { try self.idle(env, space) })
     }
+    func export(_ env: SessionTransferEnvironment, plan: SessionTransferPlan, command: URL) throws -> String {
+        guard FileManager.default.isExecutableFile(atPath: command.path) else { throw SessionTransferFailure("未找到备用复制工具，请使用完整构建的应用。") }
+        try service(env).revalidate(plan)
+        let request = try SessionTransferRequest(plan: plan, transcripts: env.transcripts, backups: env.backups)
+        let path = env.backups.deletingLastPathComponent().appendingPathComponent("session-transfer-requests/" + UUID().uuidString + ".json")
+        try request.save(to: path)
+        _ = try SessionTransferRequest.load(from: path)
+        return request.instructions(command: command, request: path)
+    }
+    func backup(_ env: SessionTransferEnvironment, id: String) throws -> SessionTransferReceipt {
+        try service(env).checkedBackup(id)
+    }
 }
 
 @MainActor final class SessionTransferController: ObservableObject {
@@ -92,6 +116,9 @@ actor SessionTransferWorker {
     @Published private(set) var confirmation: SessionTransferConfirmation?
     @Published private(set) var lastOperation: SessionTransferOperation?
     @Published private(set) var backupInformation: String?
+    @Published private(set) var backupItems: [TransferSessionItem] = []
+    @Published private(set) var handoffInformation: String?
+    @Published var language = "zh"
     private let store: Store
     private let worker: SessionTransferWorker
     private let fixedEnvironment: SessionTransferEnvironment?
@@ -106,21 +133,27 @@ actor SessionTransferWorker {
     private var writing = false
     private var operationStatus: String?
     private let demoRoot: URL?
+    private let commandURL: URL
 
-    init(store: Store, testEnvironment: SessionTransferEnvironment? = nil, worker: SessionTransferWorker? = nil) {
+    init(store: Store, testEnvironment: SessionTransferEnvironment? = nil, worker: SessionTransferWorker? = nil, commandURL: URL? = nil) {
         self.store = store
+        self.commandURL = commandURL ?? Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/ClaudeSessionTransfer")
         if let testEnvironment {
             fixedEnvironment = testEnvironment; demoRoot = nil
             self.worker = worker ?? SessionTransferWorker(runningProbe: { false })
         } else if store.isDemo {
             do {
-                let result = try SessionTransferDemo.environment()
+                let scenario = Bundle.main.object(forInfoDictionaryKey: "CSPreviewTransferScenario") as? String ?? "normal"
+                let result = try SessionTransferDemo.environment(scenario: scenario)
                 fixedEnvironment = result.0; demoRoot = result.1
             } catch {
                 fixedEnvironment = SessionTransferEnvironment(endpoints: [], activeEndpointIDs: [], transcripts: URL(fileURLWithPath: "/unavailable-fixture"), backups: URL(fileURLWithPath: "/unavailable-fixture"))
                 demoRoot = nil; errorMessage = "演示夹具未创建，未访问真实会话。"
             }
-            self.worker = worker ?? SessionTransferWorker(runningProbe: { false })
+            let delay = min(5000, max(0, Bundle.main.object(forInfoDictionaryKey: "CSPreviewTransferPlanDelayMS") as? Int ?? 0))
+            self.worker = worker ?? SessionTransferWorker(runningProbe: { false }, beforePlan: {
+                if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000) }
+            })
         } else {
             fixedEnvironment = nil; demoRoot = nil
             self.worker = worker ?? SessionTransferWorker()
@@ -131,6 +164,7 @@ actor SessionTransferWorker {
         rows.filter { query.isEmpty || "\($0.title) \($0.cwd)".localizedCaseInsensitiveContains(query) }
     }
     var canCopy: Bool { !isWorking && !picked.isEmpty && sourceSpaceID != targetSpaceID && !sourceSpaceID.isEmpty && !targetSpaceID.isEmpty && historyError == nil && !recoveryBlocksTarget }
+    var canExport: Bool { canCopy }
     private var recoveryBlocksTarget: Bool {
         guard let receipt = latestReceipt, receipt.state.needsRecovery else { return false }
         return targetSpaceID == receipt.target.endpointID + "/" + receipt.target.account + "/" + receipt.target.organization
@@ -222,7 +256,9 @@ actor SessionTransferWorker {
             guard refreshID == intent else { statusMessage = "选择或空间已变化，请重新复制。"; return }
             if plan.updatedCount > 0 {
                 pendingPlan = plan
-                confirmation = SessionTransferConfirmation(title: "更新已有会话？", message: "将新增\(plan.addedCount)条、更新\(plan.updatedCount)条列表索引。旧索引会先自动备份，聊天原文不变。", buttonTitle: "确认复制")
+                confirmation = SessionTransferConfirmation(title: "更新已有会话？", message: "将新增\(plan.addedCount)条、更新\(plan.updatedCount)条列表索引。旧索引会先自动备份，聊天原文不变。", buttonTitle: "确认复制", kind: "copy", items: plan.changes.map { change in
+                    TransferSessionItem(id: change.name, title: change.title, cwd: plan.rows.first { $0.id == change.name }?.cwd ?? "", kind: change.kind)
+                }, addedCount: plan.addedCount, updatedCount: plan.updatedCount)
             } else { try await execute(plan, environment: env); await refresh() }
         } catch { await handle(error, environment: env) }
     }
@@ -289,7 +325,8 @@ actor SessionTransferWorker {
         lastOperation = SessionTransferOperation(id: receipt.id, title: receipt.state.needsRecovery ? "上次操作需要恢复" : "上次复制",
             summary: receipt.targetName + "：" + summary,
             canUndo: receipt.state == .completed, needsRecovery: receipt.state.needsRecovery,
-            backupURL: env.backups.appendingPathComponent(receipt.id))
+            backupURL: env.backups.appendingPathComponent(receipt.id),
+            items: receipt.items.map { TransferSessionItem(id: $0.name, title: $0.title, cwd: $0.cwd ?? "", kind: $0.kind) }, state: receipt.state)
     }
     private func handle(_ error: Error, environment env: SessionTransferEnvironment) async {
         errorMessage = error.localizedDescription
@@ -301,21 +338,47 @@ actor SessionTransferWorker {
     func requestUndo() {
         guard !isWorking, let last = lastOperation, last.canUndo else { return }
         pendingRestore = (last.id, true); pendingPlan = nil; pendingPreserve = nil
-        confirmation = SessionTransferConfirmation(title: "撤销上次复制？", message: "仅在目标未被后来修改时恢复；如有新进展会整批停止，不覆盖新数据。", buttonTitle: "确认撤销")
+        confirmation = SessionTransferConfirmation(title: "撤销上次复制？", message: "仅在目标未被后来修改时恢复；如有新进展会整批停止，不覆盖新数据。", buttonTitle: "确认撤销", kind: "undo", items: last.items)
     }
     func requestRecovery() {
         guard !isWorking, let last = lastOperation, last.needsRecovery else { return }
         pendingRestore = (last.id, false); pendingPlan = nil; pendingPreserve = nil
-        confirmation = SessionTransferConfirmation(title: "恢复未完成的复制？", message: "先核对原目标与备份。遇到外部新进展就停止，不强行覆盖。", buttonTitle: "检查并恢复")
+        confirmation = SessionTransferConfirmation(title: "恢复未完成的复制？", message: "先核对原目标与备份。遇到外部新进展就停止，不强行覆盖。", buttonTitle: "检查并恢复", kind: "recovery", items: last.items)
     }
     func requestKeepCurrent() {
         guard !isWorking, let last = lastOperation, last.needsRecovery else { return }
         pendingPreserve = last.id; pendingPlan = nil; pendingRestore = nil
-        confirmation = SessionTransferConfirmation(title: "保留当前数据并结束恢复？", message: "不会还原或删除任何会话，也不会删除已有备份。这次操作不视为已完整恢复；后续复制仍会重新核验冲突。", buttonTitle: "保留现状")
+        confirmation = SessionTransferConfirmation(title: "保留当前数据并结束恢复？", message: "不会还原或删除任何会话，也不会删除已有备份。这次操作不视为已完整恢复；后续复制仍会重新核验冲突。", buttonTitle: "保留现状", kind: "preserve", items: last.items)
     }
     func showBackup() {
-        guard let last = lastOperation else { backupInformation = historyError; return }
-        backupInformation = "\(last.summary)\n\n备份只包含本次索引前态、拟写内容和收据，不包含聊天原文。\n\n位置：\(last.backupURL.path)"
+        guard !isWorking, let last = lastOperation, let env = environment else { return }
+        let intent = refreshID
+        backupItems = []; backupInformation = "正在核对备份…"; isWorking = true
+        Task {
+            defer { if refreshID == intent { isWorking = false } }
+            do {
+                let receipt = try await worker.backup(env, id: last.id)
+                guard refreshID == intent, backupInformation != nil else { return }
+                backupItems = receipt.items.map { TransferSessionItem(id: $0.name, title: $0.title, cwd: $0.cwd ?? "", kind: $0.kind) }
+                backupInformation = "备份已核对；只包含本次索引变更，不包含聊天原文。"
+            } catch {
+                guard refreshID == intent, backupInformation != nil else { return }
+                backupInformation = "备份无法核对：" + error.localizedDescription
+            }
+        }
     }
     func dismissBackup() { backupInformation = nil }
+    func dismissHandoff() { handoffInformation = nil }
+    func exportInstructions() async {
+        guard canExport, let env = environment, let source = chosen(sourceSpaceID), let target = chosen(targetSpaceID) else { return }
+        let intent = refreshID
+        let identities = Dictionary(uniqueKeysWithValues: rows.filter { picked.contains($0.id) }.map { ($0.id, $0.identity) })
+        isWorking = true; errorMessage = nil
+        defer { if refreshID == intent { isWorking = false } }
+        do {
+            let plan = try await worker.plan(env, source: source, target: target, selected: picked, updates: updateExisting, expectedSourceIdentities: identities)
+            guard refreshID == intent else { throw SessionTransferFailure("选择已变化，请重新生成指令。") }
+            handoffInformation = try await worker.export(env, plan: plan, command: commandURL)
+        } catch { errorMessage = error.localizedDescription }
+    }
 }

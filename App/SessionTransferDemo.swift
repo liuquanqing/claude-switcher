@@ -4,7 +4,7 @@ import SwitcherCore
 /// Only called for Store(demo:true). The actual service writes temporary fictional
 /// indexes and backups; it cannot resolve any user's Claude profile or transcript.
 enum SessionTransferDemo {
-    static func environment() throws -> (SessionTransferEnvironment, URL) {
+    static func environment(scenario: String = "normal") throws -> (SessionTransferEnvironment, URL) {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("claude-transfer-demo-" + UUID().uuidString)
         try fm.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -29,6 +29,21 @@ enum SessionTransferDemo {
             }
         }
         let endpoints = [SessionTransferEndpoint(id: "profile:Business", name: "Business", root: a), SessionTransferEndpoint(id: "profile:Personal", name: "Personal", root: b), SessionTransferEndpoint(id: "api", name: "API 工作区", root: api)]
-        return (SessionTransferEnvironment(endpoints: endpoints, activeEndpointIDs: [], transcripts: root.appendingPathComponent("projects"), backups: root.appendingPathComponent("backups")), root)
+        let environment = SessionTransferEnvironment(endpoints: endpoints, activeEndpointIDs: [], transcripts: root.appendingPathComponent("projects"), backups: root.appendingPathComponent("backups"))
+        if scenario == "recovery" || scenario == "conflict" {
+            let engine = SessionTransferService(transcripts: environment.transcripts, backups: environment.backups)
+            let source = try engine.spaces(in: endpoints[0])[0], target = try engine.spaces(in: endpoints[1])[0]
+            let plan = try engine.plan(source: source, target: target, selected: ["local_ui.json"], updateExisting: false)
+            var receipt = try engine.execute(plan); receipt.state = .recoveryRequired
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+            try encoder.encode(receipt).write(to: environment.backups.appendingPathComponent(receipt.id + "/receipt.json"))
+            if scenario == "conflict" {
+                let file = target.directory.appendingPathComponent("local_ui.json")
+                var object = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as! [String: Any]
+                object["completedTurns"] = 999
+                try json(object, file)
+            }
+        }
+        return (environment, root)
     }
 }

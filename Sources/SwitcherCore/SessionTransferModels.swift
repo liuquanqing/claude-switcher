@@ -2,7 +2,7 @@ import Foundation
 
 public enum SessionTransferKind: String, Codable, Sendable { case add, update, skip, blocked }
 
-public struct SessionTransferEndpoint: Sendable, Equatable {
+public struct SessionTransferEndpoint: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
     public let root: URL
@@ -13,7 +13,7 @@ public struct SessionTransferEndpoint: Sendable, Equatable {
     }
 }
 
-public struct SessionTransferSpace: Identifiable, Sendable, Equatable {
+public struct SessionTransferSpace: Codable, Identifiable, Sendable, Equatable {
     public var id: String { endpoint.id + "/" + account + "/" + organization }
     public let endpoint: SessionTransferEndpoint
     public let account: String
@@ -83,6 +83,7 @@ public struct SessionTransferReceiptItem: Codable, Sendable, Equatable {
     public let name: String
     public let title: String
     public let kind: SessionTransferKind
+    public let cwd: String?
     public let beforeHash: String?
     public let afterHash: String
     public let beforeFile: String?

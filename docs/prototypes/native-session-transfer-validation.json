@@ -1,0 +1,181 @@
+{
+  "date": "2026-10-28",
+  "timezone": "Asia/Singapore",
+  "version": "1.3.0-local.6",
+  "frontendAuthor": "Kimi CLI default configuration",
+  "backendAndQA": "Codex",
+  "unitTests": 154,
+  "controllerChecks": 62,
+  "productionEntryInSource": true,
+  "installedAppReplaced": false,
+  "realSessionsReadOrWritten": false,
+  "checks": [
+    {
+      "id": "default_chinese",
+      "result": "PASS",
+      "observation": "原生默认中文，轻量 EN 切换"
+    },
+    {
+      "id": "single_selection",
+      "result": "PASS",
+      "observation": "复选框点击一次只选择一项，底部显示具体标题"
+    },
+    {
+      "id": "handoff_readonly",
+      "result": "PASS",
+      "observation": "原生生成请求/查看说明/复制指令/关闭；目标与复制日志未写入"
+    },
+    {
+      "id": "packaged_plan",
+      "result": "PASS",
+      "observation": "最终 App 内 helper 使用原生导出的同一虚构请求只读预检通过"
+    },
+    {
+      "id": "add_copy",
+      "result": "PASS",
+      "observation": "新增直接复制、结果内联、清空选择并去重"
+    },
+    {
+      "id": "verified_backup",
+      "result": "PASS",
+      "observation": "核对实际备份后显示具体标题与路径，关闭返回"
+    },
+    {
+      "id": "undo",
+      "result": "PASS",
+      "observation": "确认展示具体会话；撤销实际临时文件后回清单"
+    },
+    {
+      "id": "explicit_update",
+      "result": "PASS",
+      "observation": "开启更新不自动勾选；只解锁可安全更新的条目"
+    },
+    {
+      "id": "update_cancel",
+      "result": "PASS",
+      "observation": "Escape 返回并保留有效选择；最终临时目录验证未写入目标"
+    },
+    {
+      "id": "confirmed_update",
+      "result": "PASS",
+      "observation": "显式确认后目标进度 12 到 28；来源/JSONL 哈希不变"
+    },
+    {
+      "id": "return_accounts",
+      "result": "PASS",
+      "observation": "返回到相同 Store 的假账号主面板，没有切换账号"
+    },
+    {
+      "id": "reenter_selection",
+      "result": "PASS",
+      "observation": "重新从复制入口进入，保留有效选择并刷新"
+    },
+    {
+      "id": "red_close",
+      "result": "PASS",
+      "observation": "窗口红点也回到账号面板"
+    },
+    {
+      "id": "unresolved_reentry",
+      "result": "PASS",
+      "observation": "返回并重新进入，未完成记录与复制锁定仍在"
+    },
+    {
+      "id": "recover",
+      "result": "PASS",
+      "observation": "确认恢复后实际虚构引擎回到复制前状态"
+    },
+    {
+      "id": "external_conflict",
+      "result": "PASS",
+      "observation": "外部进度 999 时拒绝还原，维持未完成"
+    },
+    {
+      "id": "exception_back",
+      "result": "PASS",
+      "observation": "保留现状的二次确认中 Escape 回恢复框"
+    },
+    {
+      "id": "keep_current",
+      "result": "PASS",
+      "observation": "明确结束日志后，外部进度 999 与其他目标 12 均保留"
+    },
+    {
+      "id": "language",
+      "result": "PASS",
+      "observation": "EN 控件/确认/正常结果可读；真实标题路径不翻译，选择不变"
+    },
+    {
+      "id": "api_spaces",
+      "result": "PASS",
+      "observation": "API 多空间需显式选定；切换目标清空旧选择，未选空间禁止复制"
+    },
+    {
+      "id": "busy_return",
+      "result": "PASS",
+      "observation": "只在演示注入 5 秒预检，期间点击返回未离开复制窗口；红点共用同一阻止函数"
+    },
+    {
+      "id": "no_duplicate_results",
+      "result": "PASS",
+      "observation": "最终构建复制后仅保留一处结果，没有顶部重复成功提示"
+    },
+    {
+      "id": "missing_backup_preview",
+      "result": "PASS",
+      "observation": "仅在明确观察到的虚构根内移走备份，查看时显示无法核对，无伪造摘要"
+    },
+    {
+      "id": "missing_backup_keep",
+      "result": "PASS",
+      "observation": "最终原生结果明确备份缺失/无法核对且未执行恢复；来源/JSONL/目标哈希均保持"
+    },
+    {
+      "id": "bundle_checks",
+      "result": "PASS",
+      "observation": "正常 release 与深度签名通过；独立预览重签后机器码相同、helper 字节相同"
+    },
+    {
+      "id": "fallback_writer_policy",
+      "result": "PASS",
+      "observation": "纯函数覆盖桌面、切换器和重复迁移 helper；普通终端 Claude 与守卫不被绑定。实际 ps 宽路径查询接受，未终止任何进程。"
+    },
+    {
+      "id": "packaged_apply_gate",
+      "result": "PASS",
+      "observation": "最终打包命令对同一虚构请求 plan 成功；预览界面存在时 apply 运行中门禁拒绝，备份未建、目标未写，不退出任何进程。"
+    }
+  ],
+  "notRun": [
+    "真实账号/会话迁移和回切",
+    "真实断网、节点变更、急停、守卫交接",
+    "打包 CLI apply/undo/recover 对真实桌面进程的验收（公共命令适配层已用假探针测试）",
+    "忙碌时红点瞬态截图（已测试按钮，源码确认共用同一路径）",
+    "OS崩溃/断电注入",
+    "额外完整严格并发检查本轮未重跑，前阶段既有诊断仍保留"
+  ],
+  "sourceHashes": {
+    "App/main.swift": "94a284f0a9427fb2bca7c89260bc56cbc43f585bb29fb6bc2ad967de4ac21bc4",
+    "App/SessionTransferController.swift": "3bbff9a73623521f5b4195b8f4040375dc7fd0f65aec11af6c74c99abfa29103",
+    "App/SessionTransferDemo.swift": "21376a480e9c63b0cc8231389ef40725f293fa9b93968ab4a2fefd3d8bfb3fe7",
+    "App/SessionTransferView.swift": "896a3969d911b0066002d14f00682c79c81d9f48d9b9ef21e8d8bf7b57c0f7fb",
+    "App/SessionTransferLocalization.swift": "c97e05283d85be53ed8d6a749a53d4f9c391b1bbe253eecf2a7a8ab37e49ae17",
+    "Package.swift": "cf3a147b70c166b95bf30e08ab7bdf8820233fa4ae92617905447db99f43d15b",
+    "build.sh": "1c05ae33a86e7380da5e135c807dfc182700d3b9e6436af76e0a7a1efa72ca90",
+    "scripts/preview.sh": "e78460f4dfc48b0b206631e9293bb4e1f5548c0561ec25c9026894e80cf226f7",
+    "scripts/fixtures/controller-check.swift": "cd9aa7b5853902143c68e3a93855993900cd601860f7ffa3f53db86f39ef0bb3",
+    "Sources/ClaudeSessionTransfer/main.swift": "e435bd4937ea4f8359d31ac93dc3c3a862289b2ec178fba3d1121419aceab0e6",
+    "Tests/SwitcherCoreTests/SessionTransferTests.swift": "a3c527961d62d9866f8bdba441edcb07c939af78c7fadf03d7bb76c2aa3cf213",
+    "Sources/SwitcherCore/SessionTransferCommand.swift": "5201de6560b8d1fc2ea95f1fe94bdcb90a9b8c372a269252ef7c823a61054c8f",
+    "Sources/SwitcherCore/SessionTransferDisk.swift": "625d30318bf271fb00a8a29d7951c7d6915950095ffdff01e21286860bfacd99",
+    "Sources/SwitcherCore/SessionTransferJournal.swift": "04e1118d8ed03159fdce577bb5948d7a9fb2c9f55532b617ca1eae42b28734cb",
+    "Sources/SwitcherCore/SessionTransferModels.swift": "75e5ffac4da81537ef8a91c48988d4cb2f6222cb218cf094f5b4233fbb331c8f",
+    "Sources/SwitcherCore/SessionTransferService.swift": "0cc2d10e70e974e167abcbe27ac1fca8f98a2e72b48b7f7bf5e2ffe381a2e702"
+  },
+  "screenshots": [
+    "native-session-transfer-final.jpg",
+    "native-session-transfer-confirm.jpg",
+    "native-session-transfer-missing-backup.jpg"
+  ],
+  "review": "../../research/R-20261028-002-native-transfer.md"
+}

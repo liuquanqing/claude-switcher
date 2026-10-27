@@ -385,4 +385,114 @@ final class SessionTransferTests: FixtureTest {
         XCTAssertEqual(try Disk.json(bytes(name, in: target))["completedTurns"] as? Int, 21)
     }
 
+    func exportedRequest() throws -> (SessionTransferRequest, URL) {
+        let request = try SessionTransferRequest(plan: plan(), transcripts: transcripts, backups: backups)
+        let url = folder.appendingPathComponent("requests/a request's name.json")
+        try request.save(to: url)
+        return (request, url)
+    }
+    func command(_ verb: String, request: URL, extra: [String] = [], idle: () throws -> Void = {}) throws -> [String: Any] {
+        try Disk.json(SessionTransferCommand.run([verb, "--request", request.path] + extra, requireIdle: idle))
+    }
+    func testCommandPlanExportsNoContentAndDoesNotWriteTarget() throws {
+        let file = try index(); let original = try bytes(file, in: source)
+        let (request, url) = try exportedRequest(), result = try command("plan", request: url)
+        XCTAssertEqual(result["status"] as? String, "ready")
+        XCTAssertEqual(result["fingerprint"] as? String, request.expectedFingerprint)
+        XCTAssertEqual((result["sessions"] as? [[String: String]])?.first?["title"], "具体会话：one")
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: target.directory.path).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backups.path)); XCTAssertEqual(try bytes(file, in: source), original)
+        let encoded = try String(contentsOf: url)
+        XCTAssertFalse(encoded.contains("completedTurns")); XCTAssertFalse(encoded.contains("FICTIONAL TEST ONLY"))
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+    }
+    func testCommandApplyRequiresExpectedFingerprintAndExplicitIdle() throws {
+        try index(); let (request, url) = try exportedRequest()
+        XCTAssertThrowsError(try command("apply", request: url))
+        XCTAssertThrowsError(try command("apply", request: url, extra: ["--expect", "wrong"]))
+        XCTAssertThrowsError(try command("apply", request: url, extra: ["--expect", request.expectedFingerprint], idle: { throw SafetyError("fixture desktop running") }))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backups.path))
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: target.directory.path).isEmpty)
+    }
+    func testCommandApplyUndoAndDuplicateExecutionUseSameEngine() throws {
+        let file = try index(), (request, url) = try exportedRequest()
+        let result = try command("apply", request: url, extra: ["--expect", request.expectedFingerprint])
+        let id = try XCTUnwrap(result["receiptID"] as? String)
+        XCTAssertEqual(result["state"] as? String, "completed")
+        XCTAssertEqual(try service.loadReceipt(id).items.first?.cwd, "/fake/project")
+        XCTAssertThrowsError(try command("apply", request: url, extra: ["--expect", request.expectedFingerprint]))
+        XCTAssertEqual(try command("undo", request: url, extra: ["--receipt", id.lowercased()])["state"] as? String, "undone")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.directory.appendingPathComponent(file).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.directory.appendingPathComponent(file).path))
+    }
+    func testCommandChangedSourceOrTargetCannotRefreshItsOwnApproval() throws {
+        let file = try index(), (request, url) = try exportedRequest()
+        try index(turns: 77, time: 4000)
+        XCTAssertThrowsError(try command("plan", request: url))
+        XCTAssertThrowsError(try command("apply", request: url, extra: ["--expect", request.expectedFingerprint]))
+        try index(); try index("one", logical: "foreign", space: target)
+        let foreign = try bytes(file, in: target)
+        XCTAssertThrowsError(try command("apply", request: url, extra: ["--expect", request.expectedFingerprint]))
+        XCTAssertEqual(try bytes(file, in: target), foreign)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: backups.path))
+    }
+    func testCommandRecoveryAndConflictDoNotOverwriteExternalProgress() throws {
+        let file = try index(), (request, url) = try exportedRequest()
+        let result = try command("apply", request: url, extra: ["--expect", request.expectedFingerprint])
+        let id = result["receiptID"] as! String, receipt = try service.loadReceipt(id)
+        try mutateReceipt(receipt, state: .recoveryRequired)
+        try index("one", turns: 999, time: 9999, space: target)
+        let external = try bytes(file, in: target)
+        XCTAssertThrowsError(try command("recover", request: url, extra: ["--receipt", id]))
+        XCTAssertEqual(try bytes(file, in: target), external)
+        try receipt.items.first.map { item in try Data(contentsOf: backups.appendingPathComponent(id + "/" + item.afterFile)).write(to: target.directory.appendingPathComponent(file)) }
+        XCTAssertEqual(try command("recover", request: url, extra: ["--receipt", id])["state"] as? String, "restored")
+    }
+    func testCommandRejectsMalformedArgumentsAndRequestSymlinks() throws {
+        try index(); let (_, url) = try exportedRequest()
+        for extra in [["--request", url.path], ["--unexpected", "x"], ["--expect"], ["--receipt", "bad"]] {
+            XCTAssertThrowsError(try command("plan", request: url, extra: extra))
+        }
+        let link = folder.appendingPathComponent("linked-request.json")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: url)
+        XCTAssertThrowsError(try command("plan", request: link))
+    }
+    func testHandoffQuotesShellPathsAndDoesNotContainActualSessionBody() throws {
+        try index(); let (request, url) = try exportedRequest()
+        let command = URL(fileURLWithPath: "/fake dir/it's $(touch should-not-run)/tool")
+        let text = request.instructions(command: command, request: url)
+        XCTAssertTrue(text.contains(SessionTransferRequest.shellQuote(command.path)))
+        XCTAssertTrue(text.contains("'\"'\"'")); XCTAssertTrue(text.contains("plan --request")); XCTAssertTrue(text.contains("undo --request"))
+        XCTAssertFalse(text.contains("FICTIONAL TEST ONLY")); XCTAssertFalse(text.contains("--force"))
+    }
+    func testReceiptWithoutNewOptionalPathRemainsReadable() throws {
+        try index(); let receipt = try service.execute(plan())
+        let path = backups.appendingPathComponent(receipt.id + "/receipt.json")
+        var object = try Disk.json(Data(contentsOf: path)), items = object["items"] as! [[String: Any]]
+        for i in items.indices { items[i].removeValue(forKey: "cwd") }; object["items"] = items
+        try Disk.encode(object).write(to: path)
+        XCTAssertNil(try service.loadReceipt(receipt.id).items.first?.cwd)
+        XCTAssertEqual(try service.restore(receipt.id, to: target, undo: true).state, .undone)
+    }
+    func testFirstReceiptSaveFailureRetainsItsRecoveryIDBeforeTargetWrite() throws {
+        let file = try index()
+        let failed = SessionTransferService(transcripts: transcripts, backups: backups, io: .init(write: { bytes, url, mode in
+            try SessionTransferDisk.write(bytes, url, mode)
+            if url.lastPathComponent == "receipt.json" { throw SafetyError("fixture save acknowledgement failed") }
+        }))
+        var failedID: String?
+        XCTAssertThrowsError(try failed.execute(plan())) { failedID = ($0 as? SessionTransferFailure)?.receiptID }
+        let id = try XCTUnwrap(failedID)
+        XCTAssertEqual(try service.loadReceipt(id).state, .copying)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: target.directory.appendingPathComponent(file).path))
+        XCTAssertEqual(try service.restore(id, to: target, undo: false).state, .restored)
+    }
+    func testFallbackWriterRequiresDesktopAndSwitcherExitWithoutBindingTerminalCLI() throws {
+        let helper = "/fake/App.app/Contents/Helpers/ClaudeSessionTransfer"
+        XCTAssertNoThrow(try SessionTransferCommand.checkWriters("/usr/local/bin/claude\n/fake/ClaudeGuard\n" + helper))
+        for writer in ["/Applications/Claude.app/Contents/MacOS/Claude", "/fake/Preview.app/Contents/MacOS/ClaudeSwitcher", helper] {
+            XCTAssertThrowsError(try SessionTransferCommand.checkWriters(helper + "\n" + writer))
+        }
+    }
+
 }

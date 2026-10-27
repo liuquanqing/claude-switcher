@@ -5,6 +5,7 @@
 主界面保留来源、目标、搜索、具体会话清单和底部复制按钮。默认只新增；更新显式开启，涉及更新才确认。说明与结果按操作出现，取消、关闭备份和异常返回各自回到对应层级。默认中文，右上角可切英文。
 
 - [当前主界面](session-transfer-simplified.png) · [当前窄屏](session-transfer-simplified-narrow.png)
+- [已接入的原生窗口](native-session-transfer-final.jpg) · [原生更新确认](native-session-transfer-confirm.jpg) · [原生验证](native-session-transfer-validation.json)
 - [本轮 22 组浏览器检查记录](session-transfer-simplified-validation.json) · [交互说明](../会话迁移交互设计.md)
 - [迁移方案](../会话迁移方案.md) · [引擎与原生接线进度](../会话迁移实现进度.md)
 - `session-transfer-fixtures.json`：合成案例；fixtureProof 是演示字段，没有正式格式证据时不能用来放行真实跨段接续。
@@ -12,4 +13,4 @@
 
 发现并修复了浏览器后退时恢复旧下拉框值造成目标显示不一致的问题，真实浏览器复测通过。bfcache 分支只有事件模拟验证，未宣称实际浏览器命中该缓存路径。
 
-本稿单文件离线，所有复制、备份和恢复只改变虚构内存；网页通过不等于原生功能已启用。真实会话、登录/API配置、CLI和守卫均未操作。
+网页稿仍为单文件虚构内存演示。原生 local.6 已按此接入并完成独立临时目录验收，额外提供“复制给 Claude”备用命令；详见实现进度。原生使用文件引擎，不以网页检查替代其验证。真实会话、登录/API配置与守卫均未操作；现用安装未替换。

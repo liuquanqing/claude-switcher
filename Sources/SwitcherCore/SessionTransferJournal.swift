@@ -40,6 +40,11 @@ extension SessionTransferService {
         }.sorted { $0.createdAt > $1.createdAt }
     }
     public func backupFolder(_ receipt: SessionTransferReceipt) throws -> URL { try folder(receipt.id) }
+    public func checkedBackup(_ id: String) throws -> SessionTransferReceipt {
+        let receipt = try loadReceipt(id)
+        _ = try verifyBackup(receipt)
+        return receipt
+    }
     func verifyBackup(_ receipt: SessionTransferReceipt) throws -> [(SessionTransferReceiptItem, Data?, Data)] {
         let dir = try folder(receipt.id)
         return try receipt.items.map { item in
@@ -74,6 +79,7 @@ extension SessionTransferService {
                 if let bytes = change.before, let name = beforeFile { try io.write(bytes, dir.appendingPathComponent(name), .create) }
                 try io.write(change.after, dir.appendingPathComponent(afterFile), .create)
                 items.append(SessionTransferReceiptItem(name: change.name, title: change.title, kind: change.kind,
+                    cwd: try Disk.json(change.after)["cwd"] as? String,
                     beforeHash: change.before.map(Disk.hash), afterHash: Disk.hash(change.after), beforeFile: beforeFile, afterFile: afterFile))
             }
             var receipt = SessionTransferReceipt(version: 1, id: id, createdAt: Date(), target: plan.targetScope,
@@ -110,13 +116,13 @@ extension SessionTransferService {
                 throw SessionTransferFailure("\(receipt.message!) \(cause)", receiptID: id)
             }
         } catch {
-            // Before a valid receipt exists, no target write was attempted. Keep staged
-            // backup material inspectable without calling it an interrupted target copy.
+            // Before a receipt exists, no target write was attempted. Remove only
+            // this operation's staged backup directory; an existing receipt retains its ID.
             if !FileManager.default.fileExists(atPath: dir.appendingPathComponent("receipt.json").path) {
                 try? FileManager.default.removeItem(at: dir)
                 throw SessionTransferFailure("备份或准备未完成，目标未修改。\(error.localizedDescription)")
             }
-            throw error
+            throw SessionTransferFailure(error.localizedDescription, receiptID: (error as? SessionTransferFailure)?.receiptID ?? id)
         }
     }
     func rollback(_ receipt: SessionTransferReceipt, space: SessionTransferSpace, eligibleNames: Set<String>? = nil, requireIdle: () throws -> Void) -> Bool {
@@ -147,7 +153,7 @@ extension SessionTransferService {
         for (item, before, after) in files {
             let current = try Disk.optionalData(space.directory.appendingPathComponent(item.name))
             guard current == after || (!undo && current == before) else {
-                throw SessionTransferFailure("目标已有新进展或外部修改，整批未撤销；保留当前数据。", receiptID: id)
+                throw SessionTransferFailure("目标已有新进展或外部修改，整批未还原；保留当前数据。", receiptID: id)
             }
         }
         receipt.undoRequested = undo || receipt.undoRequested
