@@ -74,7 +74,7 @@ CLI 核验针对默认保存登录；菜单栏应用无法观察每个 shell 的
 - [开发与验证](docs/开发与验证.md)
 - [安装、旧守卫迁移和停止保护](docs/安装与迁移.md)
 
-Git 只在本地维护，分支为 `codex/network-region-guard`，`upstream` 指向原项目；不推送上游或建立远端仓库。
+GitLab 私有仓库：[liuquanqing/claude-switcher](https://git.touchturing.com/liuquanqing/claude-switcher)。`origin` 指向该仓库，`main` 保存维护版主线，`codex/network-region-guard` 为当前开发分支；原版来源仍保留为 GitHub `upstream`，不向上游推送。
 
 ## License
 
