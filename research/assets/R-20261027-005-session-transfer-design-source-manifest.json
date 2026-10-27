@@ -1,0 +1,53 @@
+{
+  "base": "ef4766758e7d810ae52dd6bab1382feeea0a1d41",
+  "files": [
+    {
+      "path": "REVIEW_SCOPE.md",
+      "sha256": "27d779869141d39122caf91286cc85e8ef660f472a27a3700736aa3a24dd6252"
+    },
+    {
+      "path": "Sources/SwitcherCore/ThreadRepository.swift",
+      "sha256": "e5e96e25861a3aae72ae30fd116e8593bcc25c54897afa3b58834be0bfeaeec8"
+    },
+    {
+      "path": "Tests/SwitcherCoreTests/ThreadTests.swift",
+      "sha256": "f4446047d1572186826d0be25e86c5e8be9ef50b867856621ebc76fd2b9c7af7"
+    },
+    {
+      "path": "docs/prototypes/session-transfer-fixtures.json",
+      "sha256": "a43dda0a3a2a1c896782c50ffbb31810f6b468b88429dd7940cfd2fcd90b32b6"
+    },
+    {
+      "path": "docs/会话迁移方案.md",
+      "sha256": "b8f597f4bb670a1875e182ce468becbfb4de2da1fc3ae7f93763a8c11cfed7b5"
+    },
+    {
+      "path": "docs/存储与迁移方案分析.md",
+      "sha256": "b34d06a1c5afb2d018a9ae12e3e9790378179cefce3eeeecc954fbf898aef495"
+    },
+    {
+      "path": "original-copy-excerpt.swift.txt",
+      "sha256": "f58d83f3c42640dd867e5f0d3d62f24a283996085a54fe301b3f3b6f77c1f665"
+    },
+    {
+      "path": "redacted-script-reference/execution-summary.md",
+      "sha256": "651b7e370703daf469ee856f757fe0f61571466191b1c3f8ac35595e7b6ca243"
+    },
+    {
+      "path": "redacted-script-reference/planning-fixtures.json",
+      "sha256": "c657c70eff2201b984a69c81745d034f6071a35ffd5d3b49c6fe0ee03118e384"
+    },
+    {
+      "path": "redacted-script-reference/reset-index-example.sh",
+      "sha256": "e8e72d2e53fd3c172d4b276660a450b5f9be3c5905be453db682aaab59b3c52d"
+    },
+    {
+      "path": "redacted-script-reference/run-after-quit.sh",
+      "sha256": "66c83d361d6fa40a74186f5631d90a9cdc7976a002808e7a2e217646e113bcc3"
+    },
+    {
+      "path": "redacted-script-reference/sync-desktop-sessions.py",
+      "sha256": "b8e27c189d0daf9fdcea814a0418ca46c859e826cdd0262359104c251480bcc4"
+    }
+  ]
+}

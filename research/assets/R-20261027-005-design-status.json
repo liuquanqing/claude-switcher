@@ -1,0 +1,15 @@
+{
+  "scope": "design draft and install only",
+  "draft_structure": "PASS",
+  "formal_profile_doctor": "NOT_RUN_PROFILE_MISSING",
+  "formal_plan_lint": "NOT_RUN_PROFILE_MISSING",
+  "new_engine": "NOT_IMPLEMENTED",
+  "prototype_browser_checks": "NOT_RUN_PROVIDER_QUOTA",
+  "production_migration_enabled": false,
+  "real_session_reads_or_writes": false,
+  "reference_fixture_native_capture": "PASS after disposable packaging repair",
+  "candidate_installed": true,
+  "candidate_launched_by_agent": false,
+  "new_guard_registered_by_agent": false,
+  "plan_sha256": "1253431f884e4e6f937612d106db1e0965bb17bdfb179916c7d02b64d0264988"
+}

@@ -1,0 +1,122 @@
+{
+  "schema": "session-transfer-interaction/v1",
+  "notice": "All records and continuation proof are fictional UI fixtures, not an official Claude index schema. No backend/filesystem access.",
+  "defaultSource": "business",
+  "defaultTarget": "personal",
+  "updateExistingDefault": false,
+  "endpoints": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "mode": "subscription",
+      "label": "订阅档案",
+      "spaces": [
+        {
+          "id": "personal-main",
+          "name": "个人空间"
+        }
+      ]
+    },
+    {
+      "id": "business",
+      "name": "Business",
+      "mode": "subscription",
+      "label": "订阅档案",
+      "spaces": [
+        {
+          "id": "business-main",
+          "name": "团队空间"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "name": "API 工作区",
+      "mode": "api",
+      "label": "配置匹配 Magpie",
+      "spaces": [
+        {
+          "id": "api-main",
+          "name": "默认工作区"
+        },
+        {
+          "id": "api-other",
+          "name": "另一个工作区"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "id": "new-one",
+      "title": "接口重构",
+      "project": "atlas",
+      "kind": "new",
+      "sourceTurns": 18,
+      "targetTurns": null,
+      "reason": "目标没有这条索引，原文可用。"
+    },
+    {
+      "id": "same-update",
+      "title": "测试覆盖整理",
+      "project": "atlas",
+      "kind": "same-session-update",
+      "sourceTurns": 28,
+      "targetTurns": 12,
+      "reason": "指向同一份原文，仅列表进度较旧。"
+    },
+    {
+      "id": "continued",
+      "title": "长任务续接",
+      "project": "worker",
+      "kind": "continuation",
+      "sourceTurns": 2,
+      "targetTurns": 120,
+      "reason": "合成证据已确认接续点，目标未在接续点之后继续；新段轮数少不代表落后。",
+      "fixtureProof": {
+        "kind": "join-point-evidence-for-ui-only",
+        "targetHasNoProgressAfterJoin": true
+      }
+    },
+    {
+      "id": "target-ahead",
+      "title": "发布脚本",
+      "project": "deploy",
+      "kind": "target-ahead",
+      "sourceTurns": 5,
+      "targetTurns": 13,
+      "reason": "目标已更新，保留目标。"
+    },
+    {
+      "id": "fork",
+      "title": "分支实验",
+      "project": "lab",
+      "kind": "conflict",
+      "sourceTurns": 40,
+      "targetTurns": 15,
+      "reason": "同名但没有可确认的续接关系，不覆盖。"
+    },
+    {
+      "id": "missing",
+      "title": "旧项目记录",
+      "project": "archive",
+      "kind": "missing-transcript",
+      "sourceTurns": 16,
+      "targetTurns": null,
+      "reason": "找不到引用的原文，不能仅复制空索引。"
+    }
+  ],
+  "scenarios": [
+    "normal",
+    "target-uninitialized",
+    "multi-space",
+    "desktop-running",
+    "stale-plan",
+    "backup-failed",
+    "write-failed-rollback-ok",
+    "write-failed-rollback-incomplete",
+    "undo-conflict",
+    "continuation-without-join-proof",
+    "interrupted-operation"
+  ]
+}
