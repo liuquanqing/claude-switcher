@@ -17,7 +17,7 @@ struct TerminalProtectionCard: View {
             switch self {
             case .passed: return .good
             case .failed: return .bad
-            case .unknown: return .warn
+            case .unknown: return .sub
             case .notRun: return .sub
             }
         }
@@ -92,53 +92,71 @@ struct TerminalProtectionCard: View {
     private func checkDetailRow(_ item: CheckDetailItem) -> some View {
         HStack(spacing: 8) {
             Image(systemName: item.icon)
+                .foregroundColor(.sub)
                 .frame(width: 16, alignment: .leading)
             Text(item.title)
                 .foregroundColor(.txt)
                 .frame(width: 58, alignment: .leading)
-            Spacer(minLength: 8)
             Text(item.value)
+                .foregroundColor(item.status.color)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .trailing)
             Image(systemName: item.status.icon)
+                .foregroundColor(item.status.color)
                 .frame(width: 12)
         }
         .font(.system(size: 10.5))
-        .foregroundColor(item.status.color)
     }
 
     private var checkDetailsContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             if let message = controller.lastCheckReport?.validationMessage {
                 Label(message, systemImage: "exclamationmark.triangle")
                     .font(.system(size: 9.5)).foregroundColor(.warn)
                     .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 8)
             }
             ForEach(checkDetailItems, id: \.title) { item in
                 checkDetailRow(item)
+                    .padding(.vertical, 4)
+                if item.title != checkDetailItems.last?.title {
+                    Divider()
+                        .opacity(0.6)
+                        .padding(.leading, 24)
+                }
             }
         }
-        .padding(.top, 8)
+        .padding(.top, 6)
     }
     private var checkHelpContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("“仅检查网络”只诊断，不开启保护或打开 Claude；“检查并打开”会重新检查必要条件，满足门禁后打开当前账号。")
-                .fixedSize(horizontal: false, vertical: true)
-            Text(modeDetail)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("启动与切换前检查代理、TUN 和出口国家；失败或未知均不放行。仅保护桌面版，后台检查存在间隔。")
-                .fixedSize(horizontal: false, vertical: true)
-            Text("配置只读时仍可仅检查网络；启用保护与保存设置需要写入配置。")
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("“仅检查网络”只诊断，不开启保护或打开 Claude；“检查并打开”会重新检查必要条件，满足门禁后打开当前账号。")
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(modeDetail)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("启动与切换前检查代理、TUN 和出口国家；失败或未知均不放行。仅保护桌面版，后台检查存在间隔。")
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("配置只读时仍可仅检查网络；启用保护与保存设置需要写入配置。")
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Divider()
-            Text("辅助体检")
-                .font(.system(size: 10, weight: .semibold)).foregroundColor(.txt)
-            Link("IP / WebRTC 体检（第三方）↗", destination: URL(string: "https://ip.net.coffee/claude/")!)
-                .font(.system(size: 10.5, weight: .medium)).foregroundColor(.claude)
-            Text("第三方网页，结果仅供参考；不抓取评分，不作为打开放行的硬门禁。")
-                .fixedSize(horizontal: false, vertical: true)
+                .opacity(0.6)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("辅助体检")
+                    .font(.system(size: 10, weight: .semibold)).foregroundColor(.txt)
+                Link("IP / WebRTC 体检（第三方）↗", destination: URL(string: "https://ip.net.coffee/claude/")!)
+                    .font(.system(size: 10.5, weight: .medium)).foregroundColor(.claude)
+                Text("第三方网页，结果仅供参考；不抓取评分，不作为打开放行的硬门禁。")
+                    .font(.system(size: 9))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .font(.system(size: 9.5)).foregroundColor(.sub)
-        .padding(.top, 8)
+        .lineSpacing(2)
+        .padding(.top, 6)
     }
 
     private var protectionEnabled: Binding<Bool> {
@@ -228,68 +246,90 @@ struct TerminalProtectionCard: View {
 
             if showSettings {
                 Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1)
-                VStack(alignment: .leading, spacing: 10) {
-                    Toggle("后台保护", isOn: protectionEnabled)
-                        .toggleStyle(.switch)
-                        .font(.system(size: 11.5, weight: .semibold)).foregroundColor(.txt)
-                        .disabled(busy || controller.working)
-                    if controller.activeCountry == nil {
-                        Text("首次使用：设置目标国家和代理模式，再开启后台保护。")
-                            .font(.system(size: 9.5)).foregroundColor(.sub)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    HStack(spacing: 8) {
-                        Text("目标国家").font(.system(size: 10.5)).foregroundColor(.sub)
-                        TextField("SG", text: $controller.country)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .multilineTextAlignment(.center).foregroundColor(.txt)
-                            .padding(.vertical, 5).frame(width: 44)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.bg))
-                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
-                            .help("两位国家代码，例如 SG；保存设置或开启保护后生效")
-                        Picker("代理模式", selection: $controller.mode) {
-                            Text("Shadowrocket").tag(ProxyMode.shadowrocket)
-                            Text("自动识别 TUN").tag(ProxyMode.auto)
+                VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 12) {
+                            Text("后台保护")
+                                .font(.system(size: 11.5, weight: .semibold)).foregroundColor(.txt)
+                            Spacer()
+                            Toggle("后台保护", isOn: protectionEnabled)
+                                .toggleStyle(.switch)
+                                .labelsHidden()
+                                .disabled(busy || controller.working)
                         }
-                        .pickerStyle(.menu).labelsHidden().frame(width: 145)
-                        Spacer(minLength: 0)
+                        if controller.activeCountry == nil {
+                            Text("首次使用：设置目标国家和代理模式，再开启后台保护。")
+                                .font(.system(size: 9.5)).foregroundColor(.sub)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("目标国家").font(.system(size: 10.5)).foregroundColor(.sub)
+                            TextField("SG", text: $controller.country)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .multilineTextAlignment(.center).foregroundColor(.txt)
+                                .frame(width: 56, height: 28)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.bg))
+                                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
+                                .help("两位国家代码，例如 SG；保存设置或开启保护后生效")
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("代理模式").font(.system(size: 10.5)).foregroundColor(.sub)
+                            Picker("代理模式", selection: $controller.mode) {
+                                Text("Shadowrocket").tag(ProxyMode.shadowrocket)
+                                Text("自动识别 TUN").tag(ProxyMode.auto)
+                            }
+                            .pickerStyle(.menu).labelsHidden()
+                            .font(.system(size: 11))
+                            .frame(width: 145, height: 28)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .disabled(busy || controller.working || controller.checking)
-                    HStack(spacing: 10) {
-                        Button { Task { await controller.checkNow() } } label: {
-                            HStack(spacing: 5) {
-                                if controller.checking { ProgressView().controlSize(.small) }
-                                Text(controller.checking ? "检查中…" : "仅检查网络")
-                                    .font(.system(size: 10.5, weight: .semibold))
-                            }
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .foregroundColor(.claude)
-                            .background(RoundedRectangle(cornerRadius: 7).fill(Color.claude.opacity(0.12)))
-                        }
-                        .buttonStyle(.plain).disabled(busy || controller.working || controller.checking)
-                        .opacity(busy || controller.working || controller.checking ? 0.55 : 1)
-                        .help("只诊断网络，不开启保护，也不打开 Claude")
-                        if controller.enabled {
-                            Button("保存设置") { Task { await controller.enable() } }
-                                .buttonStyle(.plain).font(.system(size: 10.5, weight: .semibold))
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            Button { Task { await controller.checkNow() } } label: {
+                                HStack(spacing: 5) {
+                                    if controller.checking { ProgressView().controlSize(.small) }
+                                    Text(controller.checking ? "检查中…" : "仅检查网络")
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                }
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .foregroundColor(.white)
-                                .background(RoundedRectangle(cornerRadius: 7).fill(Color.claude))
-                                .disabled(busy || controller.working)
-                                .opacity(busy || controller.working ? 0.55 : 1)
+                                .foregroundColor(.txt)
+                                .background(RoundedRectangle(cornerRadius: 7).fill(Color.cardHi))
+                                .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
+                            }
+                            .buttonStyle(.plain).disabled(busy || controller.working || controller.checking)
+                            .opacity(busy || controller.working || controller.checking ? 0.55 : 1)
+                            .help("只诊断网络，不开启保护，也不打开 Claude")
+                            Spacer(minLength: 8)
+                            if controller.enabled {
+                                Button("保存设置") { Task { await controller.enable() } }
+                                    .buttonStyle(.plain).font(.system(size: 10.5, weight: .semibold))
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .foregroundColor(.white)
+                                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.claude))
+                                    .disabled(busy || controller.working)
+                                    .opacity(busy || controller.working ? 0.55 : 1)
+                            }
                         }
-                        Spacer()
-                    }
-                    HStack(spacing: 5) {
-                        Text("最近检测：").foregroundColor(.sub)
-                        Text(checkSummary).foregroundColor(checkSummaryColor)
-                        Spacer(minLength: 4)
-                        if let date = controller.lastCheckReport?.checkedAt {
-                            Text(date, style: .time).foregroundColor(.sub)
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            Text("最近检测：").foregroundColor(.sub)
+                            Text(checkSummary)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(checkSummaryColor)
+                            Spacer(minLength: 8)
+                            if let date = controller.lastCheckReport?.checkedAt {
+                                Text(date, style: .time)
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.sub)
+                            }
                         }
+                        .font(.system(size: 9.5)).lineLimit(1)
                     }
-                    .font(.system(size: 9.5)).lineLimit(1)
                     DisclosureGroup("检测详情", isExpanded: $showCheckDetails) {
                         checkDetailsContent
                     }

@@ -607,6 +607,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let popover = NSPopover()
     var store: Store!
     var previewWindow: NSWindow?
+    var previewContentHeight: CGFloat?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         MainActor.assumeIsolated {
@@ -633,19 +634,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             rootItem.submenu = commands
             NSApp.mainMenu = applicationMenu
             if demoMode {
-                let height = min(CGFloat(860), (NSScreen.main?.visibleFrame.height ?? 900) - 60)
-                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: height),
+                let initialViewportHeight = max(1, (NSScreen.main?.visibleFrame.height ?? 800) * 0.75)
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: initialViewportHeight),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
                 window.title = "Claude Switcher · 演示（不操作真实账号）"
                 window.isReleasedWhenClosed = false
-                window.contentViewController = NSHostingController(rootView: ScrollView { Panel(store: store) }
-                    .frame(width: 500, height: height).background(Color.bg))
+                let contentRect = window.contentRect(forFrameRect: window.frame)
+                let decorationHeight = window.frame.height - contentRect.height
+                let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame ?? window.frame
+                let maxContentHeight = max(1, visibleFrame.height - decorationHeight)
+                window.contentViewController = NSHostingController(rootView: DemoPanel(
+                    store: store,
+                    initialViewportHeight: initialViewportHeight,
+                    maxContentHeight: maxContentHeight
+                ) { [weak self] height in
+                    self?.resizePreviewWindow(to: height)
+                })
                 window.appearance = NSAppearance(named: .darkAqua)
                 window.center()
                 previewWindow = window
                 DispatchQueue.main.async { self.toggle() }
             }
         }
+    }
+
+    @MainActor func resizePreviewWindow(to contentHeight: CGFloat) {
+        guard let window = previewWindow, contentHeight.isFinite, contentHeight > 0 else { return }
+        if let previous = previewContentHeight, abs(previous - contentHeight) < 0.5 { return }
+        previewContentHeight = contentHeight
+
+        let oldFrame = window.frame
+        let contentRect = window.contentRect(forFrameRect: oldFrame)
+        let decorationHeight = oldFrame.height - contentRect.height
+        let decorationWidth = oldFrame.width - contentRect.width
+        let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame ?? oldFrame
+        let height = min(contentHeight + decorationHeight, visibleFrame.height)
+        var frame = NSRect(x: oldFrame.minX, y: oldFrame.maxY - height,
+                           width: 500 + decorationWidth, height: height)
+        frame.origin.y = min(max(frame.origin.y, visibleFrame.minY), visibleFrame.maxY - frame.height)
+        guard abs(oldFrame.height - frame.height) > 0.5
+                || abs(oldFrame.width - frame.width) > 0.5
+                || abs(oldFrame.minX - frame.minX) > 0.5
+                || abs(oldFrame.minY - frame.minY) > 0.5 else { return }
+        window.setFrame(frame, display: true, animate: false)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

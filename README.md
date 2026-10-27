@@ -2,11 +2,13 @@
 
 一个菜单栏应用管理 Claude 桌面账号、终端登录同步和网络地区守护。基于 [l2succes/claude-switcher](https://github.com/l2succes/claude-switcher) 的 MIT 代码开发；上游说明保存在 [UPSTREAM-README](docs/UPSTREAM-README.md)。
 
-当前为 `v1.3.0-local.3` 本地开发候选，**没有替换已安装应用，也没有部署新的守卫**。真实账号切换及异常网络急停还需要真机验收。
+当前为 `v1.3.0-local.4` 本地开发候选，**没有替换已安装应用，也没有部署新的守卫**。真实账号切换及异常网络急停还需要真机验收。
 
 ![虚构账号界面预览](docs/panel-local.png)
 
 *截图使用虚构账号，不代表已部署保护。*
+
+原生演示窗口与展开区：[默认窗口](docs/window-local.jpg)、[保护设置](docs/settings-local.jpg)。窗口按内容调整高度，较长说明可在窗口内滚动。
 
 本轮界面由 Kimi CLI 在原有双列账号布局上局部融合，保留网格添加卡与明确的退出按钮。底部不再常驻保护提示；保护开关和检测说明放在设置中。主代理负责后端与评审。
 
@@ -57,6 +59,7 @@ swift test
 ## 文档
 
 - [账号存储、3P 与迁移方案分析](docs/存储与迁移方案分析.md)
+- [CCSwitcher 的 CLI 登录保存与权限比较](docs/CLI登录保存方案调研.md)
 - [整合设计与验收边界](docs/整合设计.md)
 - [开发与验证](docs/开发与验证.md)
 - [安装、旧守卫迁移和停止保护](docs/安装与迁移.md)

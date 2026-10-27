@@ -475,6 +475,41 @@ struct Panel: View {
     }
 }
 
+@MainActor
+struct DemoPanel: View {
+    let store: Store
+    let initialViewportHeight: CGFloat
+    let maxContentHeight: CGFloat
+    let onContentHeightChange: (CGFloat) -> Void
+    @State private var contentHeight: CGFloat?
+
+    var body: some View {
+        ScrollView {
+            Panel(store: store)
+                .fixedSize(horizontal: false, vertical: true)
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear
+                            .onAppear { reportContentHeight(geometry.size.height) }
+                            .onChange(of: geometry.size.height) { height in
+                                reportContentHeight(height)
+                            }
+                    }
+                }
+        }
+        .frame(width: 500, height: min(contentHeight ?? initialViewportHeight, maxContentHeight))
+        .background(Color.bg)
+    }
+
+    private func reportContentHeight(_ height: CGFloat) {
+        guard height.isFinite, height > 0 else { return }
+        DispatchQueue.main.async {
+            contentHeight = height
+            onContentHeightChange(height)
+        }
+    }
+}
+
 // MARK: - Deferred copy threads prototype (no product entry)
 
 struct CopyThreadsView: View {
