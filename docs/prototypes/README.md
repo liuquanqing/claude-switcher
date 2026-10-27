@@ -1,13 +1,15 @@
 # 会话复制交互稿
 
-[打开可点击交互稿](session-transfer.html)。Kimi CLI已完成设计与一轮问题修正，主会话29项浏览器交互/响应式检查通过，控制台错误0。单文件可离线打开，不读取真实账号或会话。
+[打开当前可点击稿](session-transfer.html)。2026-10-28 由本机 Kimi CLI 在既有稿上精简，Codex 只提意见与验证，未代写前端代码。
 
-保留来源、目标、搜索和勾选列表；默认仅新增，更新显式开启。预览准确显示新增/更新、自动备份和其他未纳入项。API空间、退出后重新预览、失效计划、两类恢复和撤销冲突均是虚构内存演示。
+主界面保留来源、目标、搜索、具体会话清单和底部复制按钮。默认只新增；更新显式开启，涉及更新才确认。说明与结果按操作出现，取消、关闭备份和异常返回各自回到对应层级。默认中文，右上角可切英文。
 
-- [选择页截图](session-transfer-select.png) · [预览截图](session-transfer-preview.png) · [窄屏截图](session-transfer-narrow.png) · [恢复状态截图](session-transfer-recovery.png)
-- [交互说明](../会话迁移交互设计.md) · [方案草案](../会话迁移方案.md) · [QA记录](../../design-qa.md)
-- `session-transfer-fixtures.json`：合成案例；fixtureProof不是官方Claude字段。HTML内嵌fixture与其精确一致。
-- `session-transfer-reference.jpg`：既有原生窗口的Store(demo:true)基线；新稿是功能扩展，不宣称1:1像素复刻。
-- `session-transfer-validation.json`：本轮真实执行的原型检查、修正与边界记录。
+- [当前主界面](session-transfer-simplified.png) · [当前窄屏](session-transfer-simplified-narrow.png)
+- [本轮 22 组浏览器检查记录](session-transfer-simplified-validation.json) · [交互说明](../会话迁移交互设计.md)
+- [迁移方案](../会话迁移方案.md) · [引擎与原生接线进度](../会话迁移实现进度.md)
+- `session-transfer-fixtures.json`：合成案例；fixtureProof 是演示字段，没有正式格式证据时不能用来放行真实跨段接续。
+- `session-transfer-reference.jpg`：原版原生窗口的虚构数据基线。旧截图与 `session-transfer-validation.json`、根目录 `design-qa.md` 保留为 10 月 27 日第一稿历史记录，不能冒充本版验收。
 
-原预约19:50的单次续办实际于22:41触发；初次Kimi限额记录保留，恢复后使用同一Kimi默认配置，未替换前端作者。源代码/生产入口未改；新迁移引擎仍未实现，真实会话、登录/API配置、CLI和守卫均未操作。本轮按约只提交本地，不推送GitLab。
+发现并修复了浏览器后退时恢复旧下拉框值造成目标显示不一致的问题，真实浏览器复测通过。bfcache 分支只有事件模拟验证，未宣称实际浏览器命中该缓存路径。
+
+本稿单文件离线，所有复制、备份和恢复只改变虚构内存；网页通过不等于原生功能已启用。真实会话、登录/API配置、CLI和守卫均未操作。

@@ -382,57 +382,6 @@ final class Store: ObservableObject {
 
     private func reloadAfterOperation() { if !isDemo { reloadList() } }
 
-    func scanThreads(_ profile: String) throws -> ThreadScan {
-        if isDemo {
-            let examples = ["项目规划", "接口调试", "多组织会话"]
-            return ThreadScan(threads: examples.enumerated().map { index, title in
-                ThreadInfo(file: URL(fileURLWithPath: "/demo/local_\(index).json"), title: title,
-                           cwd: "/demo/projects/Example", lastActivity: Date().addingTimeInterval(Double(-index * 300)),
-                           archived: false, account: "demo-account", organization: index == 2 ? "workspace-b" : "workspace-a")
-            }, unreadable: 0)
-        }
-        return try ThreadRepository().scan(profileDir(profile))
-    }
-
-    func threadDestinations(_ profile: String) throws -> [ThreadDestination] {
-        if isDemo {
-            return ["workspace-a", "workspace-b"].map {
-                ThreadDestination(directory: URL(fileURLWithPath: "/demo/" + $0), account: "demo-account", organization: $0)
-            }
-        }
-        return try ThreadRepository().destinations(profileDir(profile))
-    }
-
-    func copyThreads(_ threads: [ThreadInfo], to target: String, destinationID: String) async -> String {
-        guard sessionMigrationEnabled else { return "会话迁移暂未启用：待核对既有订阅/API 迁移脚本。" }
-        guard busy == nil else { return "Busy, try again in a moment." }
-        if isDemo { return "Copied \(threads.count) demo threads; no files changed." }
-        busy = "检查复制目标…"
-        defer { busy = nil; reloadList() }
-        do {
-            // Resolve again at execution time; the account may have changed since selection.
-            guard let destination = try threadDestinations(target).first(where: { $0.id == destinationID }) else {
-                throw err("目标组织已变化，请重新选择。")
-            }
-            let restart = target == currentProfile()
-                && !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
-            if restart {
-                let decision = await protection.preflight()
-                guard decision.allowed else { throw err(decision.message) }
-                guard await quitClaude() else { throw err("Claude didn't quit. Close it manually and try again.") }
-            }
-            busy = "Copying \(threads.count) threads…"
-            let result = try ThreadRepository().copy(threads, to: destination)
-            if restart {
-                let decision = await protection.preflight()
-                guard decision.allowed else {
-                    return "Copied \(result.copied); Claude 未重新打开：" + decision.message
-                }
-                try await launchClaude()
-            }
-            return "Copied \(result.copied) threads to \(target) (\(result.skipped) already there)."
-        } catch { return "Copy failed: " + error.localizedDescription }
-    }
 
 }
 
@@ -526,7 +475,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             commands.addItem(withTitle: "退出界面（保护状态不变）", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             rootItem.submenu = commands
             NSApp.mainMenu = applicationMenu
-            if demoMode && !demoPopover {
+            let transferPreview = demoMode && Bundle.main.object(forInfoDictionaryKey: "CSPreviewTransfer") as? Bool == true
+            if transferPreview {
+                item.isVisible = false
+                DispatchQueue.main.async {
+                    CopyWindow.show(self.store)
+                    CopyWindow.window?.title = "复制会话 · 演示（临时虚构数据）"
+                }
+            }
+            if demoMode && !demoPopover && !transferPreview {
                 let initialViewportHeight = max(1, (NSScreen.main?.visibleFrame.height ?? 800) * 0.75)
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: initialViewportHeight),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)

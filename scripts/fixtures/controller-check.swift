@@ -122,6 +122,84 @@ actor FixtureGuardWorker: GuardWorking {
   do { _ = try await reader.read(directory: desktopFixture) } catch { desktopDenied = true }
   require(desktopDenied, "unreadable desktop data is not signed out")
   try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: sourceConfig.path)
+  let transferFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: transferFixture.1) }
+  let transferStore = Store(demo: true)
+  let transfer = SessionTransferController(store: transferStore, testEnvironment: transferFixture.0)
+  func settled(_ controller: SessionTransferController) async throws {
+   for _ in 0..<100 {
+    await Task.yield()
+    if !controller.isWorking { return }
+    try await Task.sleep(nanoseconds: 5_000_000)
+   }
+   preconditionFailure("transfer fixture did not settle")
+  }
+  await transfer.refresh()
+  require(transfer.rows.contains { $0.title == "设置面板排版整理" && $0.cwd == "/demo/atlas" }, "native controller exposes concrete session title/project")
+  require(transfer.rows.first { $0.id == "local_ui.json" }?.selectable == true && !transfer.updateExisting, "native default adds only")
+  transfer.setPicked("local_ui.json", selected: true)
+  await transfer.copySelected(); try await settled(transfer)
+  require(transfer.lastOperation?.canUndo == true && transfer.confirmation == nil, "add-only native action uses actual temp engine without extra dialog")
+  require(transfer.rows.first { $0.id == "local_ui.json" }?.selectable == false, "copied session is immediately deduplicated")
+  transfer.requestUndo(); transfer.dismissConfirmation(); await transfer.confirmAction(); try await settled(transfer)
+  require(transfer.lastOperation?.canUndo == false && transfer.rows.first { $0.id == "local_ui.json" }?.selectable == true, "native alert dismissal cannot consume pending undo")
+  transfer.setUpdates(true); try await settled(transfer)
+  transfer.setPicked("local_api.json", selected: true)
+  let targetIndex = transferFixture.0.endpoints.first { $0.id == "profile:Personal" }!.root.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_api.json")
+  let progressBefore = try Data(contentsOf: targetIndex)
+  await transfer.copySelected()
+  let pendingTargetBytes = try Data(contentsOf: targetIndex)
+  require(transfer.confirmation != nil && pendingTargetBytes == progressBefore, "covering update requires explicit confirmation before temp write")
+  transfer.cancelConfirmation(); await transfer.confirmAction(); try await settled(transfer)
+  require(try Data(contentsOf: targetIndex) == progressBefore, "cancelled confirmation cannot later commit")
+  transfer.setPicked("local_api.json", selected: true); await transfer.copySelected()
+  transfer.dismissConfirmation(); await transfer.confirmAction(); try await settled(transfer)
+  let progressAfter = try JSONSerialization.jsonObject(with: Data(contentsOf: targetIndex)) as! [String: Any]
+  require(progressAfter["completedTurns"] as? Int == 28, "native confirmed update reaches same file engine")
+  let unresolvedID = transfer.lastOperation!.id
+  let receiptURL = transferFixture.0.backups.appendingPathComponent(unresolvedID + "/receipt.json")
+  var unresolvedDocument = try JSONSerialization.jsonObject(with: Data(contentsOf: receiptURL)) as! [String: Any]
+  unresolvedDocument["state"] = "recoveryRequired"
+  try JSONSerialization.data(withJSONObject: unresolvedDocument).write(to: receiptURL)
+  await transfer.refresh()
+  require(transfer.lastOperation?.needsRecovery == true && !transfer.canCopy, "unresolved journal is shown and blocks another copy")
+  transfer.requestKeepCurrent(); transfer.cancelConfirmation(); await transfer.confirmAction()
+  let stillUnresolved = try JSONSerialization.jsonObject(with: Data(contentsOf: receiptURL)) as! [String: Any]
+  require(stillUnresolved["state"] as? String == "recoveryRequired", "cancel keep-current leaves journal unresolved")
+  let targetBeforePreserve = try Data(contentsOf: targetIndex)
+  transfer.requestKeepCurrent(); transfer.dismissConfirmation(); await transfer.confirmAction(); try await settled(transfer)
+  let targetAfterPreserve = try Data(contentsOf: targetIndex)
+  require(transfer.lastOperation?.needsRecovery == false && transfer.statusMessage?.contains("未执行恢复") == true && targetAfterPreserve == targetBeforePreserve, "explicit keep-current ends only journal and reports no recovery")
+  transfer.setTarget("api"); try await settled(transfer)
+  require(transfer.targetSpaces.count == 2 && transfer.targetSpaceID.isEmpty && transfer.picked.isEmpty, "API multi-space never guesses or retains old selection")
+  let blockedFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: blockedFixture.1) }
+  let blockedEnv = SessionTransferEnvironment(endpoints: blockedFixture.0.endpoints, activeEndpointIDs: ["profile:Personal"], transcripts: blockedFixture.0.transcripts, backups: blockedFixture.0.backups)
+  let blockedTransfer = SessionTransferController(store: Store(demo: true), testEnvironment: blockedEnv, worker: SessionTransferWorker(runningProbe: { true }))
+  await blockedTransfer.refresh(); blockedTransfer.setPicked("local_ui.json", selected: true); await blockedTransfer.copySelected()
+  require(blockedTransfer.errorMessage?.contains("自行退出 Claude") == true && !FileManager.default.fileExists(atPath: blockedEnv.backups.path), "fake live-desktop gate prevents backup and target writes without querying real processes")
+  let intentFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: intentFixture.1) }
+  let intentController = SessionTransferController(store: Store(demo: true), testEnvironment: intentFixture.0,
+   worker: SessionTransferWorker(runningProbe: { false }, beforePlan: { try? await Task.sleep(nanoseconds: 150_000_000) }))
+  await intentController.refresh(); intentController.setPicked("local_ui.json", selected: true)
+  let oldSourceID = intentController.sourceID, oldTargetID = intentController.targetID
+  let inFlightCopy = Task { @MainActor in await intentController.copySelected() }
+  for _ in 0..<50 { if intentController.isWorking { break }; await Task.yield() }
+  intentController.setSource("api"); intentController.setTarget("api"); intentController.setUpdates(true)
+  require(intentController.sourceID == oldSourceID && intentController.targetID == oldTargetID && !intentController.updateExisting, "in-flight planning freezes source target and update intent")
+  await intentController.confirmAction()
+  require(intentController.errorMessage?.contains("重新确认") == true && intentController.confirmation == nil, "busy confirmation reports failure and discards stale pending intent")
+  await intentController.refresh()
+  await inFlightCopy.value
+  require(!FileManager.default.fileExists(atPath: intentFixture.0.backups.path) && intentController.statusMessage?.contains("重新复制") == true, "refreshed epoch discards the old asynchronous plan before any backup or write")
+  let inactiveFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: inactiveFixture.1) }
+  let inactiveEnv = SessionTransferEnvironment(endpoints: inactiveFixture.0.endpoints, activeEndpointIDs: ["api"], transcripts: inactiveFixture.0.transcripts, backups: inactiveFixture.0.backups)
+  let inactiveController = SessionTransferController(store: Store(demo: true), testEnvironment: inactiveEnv,
+   worker: SessionTransferWorker(runningProbe: { throw SafetyError("probe must not run for parked target") }))
+  await inactiveController.refresh(); inactiveController.setPicked("local_ui.json", selected: true); await inactiveController.copySelected()
+  require(inactiveController.lastOperation?.canUndo == true, "parked target does not query or stop a running desktop")
   print("PASS: \(checks) controller/store checks; temporary files and fixture worker only. No live credential/service actions.")
  }
 }

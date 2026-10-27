@@ -562,6 +562,9 @@ struct Panel: View {
                     }
                 }
                 Spacer(minLength: 4)
+                if store.sessionMigrationEnabled {
+                    FooterButton(icon: "doc.on.doc", help: "复制 Claude Code 会话") { CopyWindow.show(store) }
+                }
                 FooterButton(icon: "arrow.clockwise", help: "刷新账号与用量") { Task { await store.refresh() } }
                 FooterButton(icon: store.openAtLogin ? "sunrise.fill" : "sunrise",
                              help: store.openAtLogin ? "已设置登录时打开界面，点击关闭" : "设置登录时打开界面") {
@@ -606,148 +609,5 @@ struct DemoPanel: View {
                       initialViewportHeight: initialViewportHeight,
                       maxContentHeight: maxContentHeight,
                       onContentHeightChange: onContentHeightChange)
-    }
-}
-
-// MARK: - Deferred copy threads prototype (no product entry)
-
-struct CopyThreadsView: View {
-    @ObservedObject var store: Store
-    @State private var from = ""
-    @State private var to = ""
-    @State private var threads: [ThreadInfo] = []
-    @State private var picked = Set<String>()
-    @State private var query = ""
-    @State private var showArchived = false
-    @State private var destinations: [ThreadDestination] = []
-    @State private var destinationID = ""
-    @State private var scanNote: String?
-    @State private var status: String?
-
-    var names: [String] { store.profiles.map(\.name) }
-    var visible: [ThreadInfo] {
-        threads.filter { (showArchived || !$0.archived)
-            && (query.isEmpty || "\($0.title) \($0.cwd)".localizedCaseInsensitiveContains(query)) }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 10) {
-                picker("From", $from)
-                Image(systemName: "arrow.right").foregroundColor(.claude)
-                picker("To", $to)
-                Spacer()
-            }
-            if !destinations.isEmpty {
-                Picker("目标组织", selection: $destinationID) {
-                    Text("请选择目标组织").tag("")
-                    ForEach(destinations) { Text($0.label).tag($0.id) }
-                }
-            }
-            if let scanNote { Text(scanNote).font(.system(size: 11)).foregroundColor(.warn) }
-            HStack {
-                TextField("Search threads or projects", text: $query).textFieldStyle(.roundedBorder)
-                Toggle("Archived", isOn: $showArchived).toggleStyle(.checkbox)
-            }
-            HStack {
-                Button(allPicked ? "Select none" : "Select all") {
-                    if allPicked { visible.forEach { picked.remove($0.id) } } else { visible.forEach { picked.insert($0.id) } }
-                }.buttonStyle(.link)
-                Spacer()
-                Text("\(picked.count) selected · \(visible.count) shown").font(.system(size: 11)).foregroundColor(.sub)
-            }
-            List(visible) { t in
-                HStack(spacing: 10) {
-                    Toggle("", isOn: Binding(get: { picked.contains(t.id) },
-                                             set: { on in if on { picked.insert(t.id) } else { picked.remove(t.id) } }))
-                        .toggleStyle(.checkbox).labelsHidden()
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(t.title).font(.system(size: 13, weight: .semibold)).foregroundColor(.txt).lineLimit(1)
-                        Text(t.cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                            .font(.system(size: 11)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
-                    }
-                    Spacer()
-                    Text(t.project).font(.system(size: 10, weight: .bold)).padding(.horizontal, 6).padding(.vertical, 3)
-                        .foregroundColor(.sub).background(RoundedRectangle(cornerRadius: 5).fill(Color.stroke))
-                    Text(ago(t.lastActivity)).font(.system(size: 11)).foregroundColor(.sub).frame(width: 60, alignment: .trailing)
-                }
-                .padding(.vertical, 3)
-                .contentShape(Rectangle())
-                .onTapGesture { if picked.contains(t.id) { picked.remove(t.id) } else { picked.insert(t.id) } }
-            }
-            .listStyle(.inset(alternatesRowBackgrounds: false))
-            .overlay { if visible.isEmpty { Text(from.isEmpty ? "" : "No threads in \(from)").foregroundColor(.sub) } }
-            HStack {
-                if let b = store.busy {
-                    ProgressView().controlSize(.small); Text(b).foregroundColor(.claude)
-                } else if let s = status {
-                    Text(s).font(.system(size: 12)).foregroundColor(s.hasPrefix("Copied") ? .good : .warn).lineLimit(2)
-                }
-                Spacer()
-                Button("Copy \(picked.count) to \(to)") {
-                    let sel = threads.filter { picked.contains($0.id) }
-                    Task {
-                        status = await store.copyThreads(sel, to: to, destinationID: destinationID)
-                        if status?.hasPrefix("Copied") == true { picked.removeAll() }
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(picked.isEmpty || from == to || store.busy != nil || destinationID.isEmpty)
-            }
-            if to == store.current && store.claudeRunning {
-                Text("Claude will restart so \(to) picks up the copied threads.").font(.system(size: 11)).foregroundColor(.sub)
-            }
-        }
-        .padding(16)
-        .frame(minWidth: 620, minHeight: 520)
-        .background(Color.bg)
-        .preferredColorScheme(.dark)
-        .onAppear {
-            to = store.current
-            from = names.first { $0 != to } ?? to
-            load(); loadDestinations()
-        }
-        .onChange(of: from) { _ in load() }
-        .onChange(of: to) { _ in loadDestinations() }
-    }
-
-    var allPicked: Bool { !visible.isEmpty && visible.allSatisfy { picked.contains($0.id) } }
-
-    func load() {
-        picked.removeAll(); status = nil; scanNote = nil
-        do {
-            let scan = try store.scanThreads(from)
-            threads = scan.threads
-            if scan.unreadable > 0 { scanNote = "\(scan.unreadable) 个索引无法读取，未纳入复制。" }
-        } catch { threads = []; scanNote = error.localizedDescription }
-    }
-    func loadDestinations() {
-        destinationID = ""
-        do {
-            destinations = try store.threadDestinations(to)
-            if destinations.count == 1 { destinationID = destinations[0].id }
-        } catch { destinations = []; status = error.localizedDescription }
-    }
-
-    func picker(_ label: String, _ sel: Binding<String>) -> some View {
-        Picker(label, selection: sel) { ForEach(names, id: \.self) { Text($0).tag($0) } }.frame(width: 190)
-    }
-}
-
-enum CopyWindow {
-    static var window: NSWindow?
-    @MainActor static func show(_ store: Store) {
-        if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 580),
-                             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-            w.title = "Copy Claude Code Threads"
-            w.isReleasedWhenClosed = false
-            w.appearance = NSAppearance(named: .darkAqua)
-            w.contentViewController = NSHostingController(rootView: CopyThreadsView(store: store))
-            w.center()
-            window = w
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
     }
 }

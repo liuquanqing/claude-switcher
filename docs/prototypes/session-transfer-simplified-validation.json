@@ -1,0 +1,133 @@
+{
+  "date": "2026-10-28",
+  "scope": "Kimi 精简版 HTML 原型；不代表原生或真实会话迁移验收",
+  "author": "本机 Kimi CLI 默认配置；Codex 浏览器 QA",
+  "browser": "Codex 内置浏览器",
+  "checks": [
+    {
+      "name": "默认中文与新增模式",
+      "result": "PASS",
+      "observation": "无常驻步骤/大段说明，更新默认关闭"
+    },
+    {
+      "name": "具体会话选择",
+      "result": "PASS",
+      "observation": "标题、项目、路径与时间可辨认；选中强调且底部复述标题"
+    },
+    {
+      "name": "显式更新",
+      "result": "PASS",
+      "observation": "开启不自动勾选；确认列出将被更新的具体会话"
+    },
+    {
+      "name": "取消更新",
+      "result": "PASS",
+      "observation": "回清单，保留两项选择与开关，不出现复制完成"
+    },
+    {
+      "name": "复制完成",
+      "result": "PASS",
+      "observation": "清单仍在，结果内联，选择清空避免重复点击"
+    },
+    {
+      "name": "查看备份",
+      "result": "PASS",
+      "observation": "具体会话摘要只读，关闭回原结果与焦点"
+    },
+    {
+      "name": "撤销",
+      "result": "PASS",
+      "observation": "列出具体会话，确认后回原清单并显示已撤销"
+    },
+    {
+      "name": "未完成恢复",
+      "result": "PASS",
+      "observation": "新复制暂停，可取消处理且保持锁定"
+    },
+    {
+      "name": "异常确认返回",
+      "result": "PASS",
+      "observation": "保留现状确认中的返回回到处理恢复框"
+    },
+    {
+      "name": "外部新进展",
+      "result": "PASS",
+      "observation": "处理框直接说明停止恢复，不提供覆盖确认"
+    },
+    {
+      "name": "保留现状并结束",
+      "result": "PASS",
+      "observation": "双重明确操作后结果声明未恢复或覆盖，不冒称恢复成功"
+    },
+    {
+      "name": "中英文切换",
+      "result": "PASS",
+      "observation": "保留所选具体会话，标题/项目/路径不翻译"
+    },
+    {
+      "name": "多空间",
+      "result": "PASS",
+      "observation": "API 目标空间需要显式选择；选择前禁止复制"
+    },
+    {
+      "name": "430px 窄屏",
+      "result": "PASS",
+      "observation": "来源目标纵排，完整路径可换行，scrollWidth=innerWidth=430"
+    },
+    {
+      "name": "宿主返回",
+      "result": "PASS",
+      "observation": "功能说明链接实际到达功能对比页 #features"
+    },
+    {
+      "name": "浏览器后退回返",
+      "result": "PASS",
+      "observation": "发现并交给 Kimi 修复旧下拉值与新内存目标不一致；重测已一致"
+    },
+    {
+      "name": "备份失败",
+      "result": "PASS",
+      "observation": "未开始复制、目标未改，选择保留可明确重试"
+    },
+    {
+      "name": "计划过期",
+      "result": "PASS",
+      "observation": "目标变化停止复制，冲突行禁选"
+    },
+    {
+      "name": "目标运行中",
+      "result": "PASS",
+      "observation": "只提示自行退出；虚构退出并重新检查后仍需主动复制"
+    },
+    {
+      "name": "筛选选择",
+      "result": "PASS",
+      "observation": "搜索 worker 时保留筛选外接口重构选择及摘要"
+    },
+    {
+      "name": "键盘取消",
+      "result": "PASS",
+      "observation": "Escape 返回清单，保留两项选择且焦点回复制按钮"
+    },
+    {
+      "name": "浏览器日志",
+      "result": "PASS",
+      "observation": "error/warn 读取为空"
+    }
+  ],
+  "staticChecks": [
+    "内嵌 fixture 精确一致",
+    "JavaScript node --check 通过",
+    "未发现网络/浏览器持久存储调用"
+  ],
+  "boundaries": [
+    "全部复制/恢复为内存虚构数据",
+    "未读取真实会话、账号、Keychain；未操作代理/守卫/现用应用",
+    "普通页面回返已真实浏览器复测；bfcache 分支只有 Kimi 事件模拟检查，未宣称浏览器实际命中",
+    "原生返回、中文样式和异常出口还需按本稿接线与验证；生产入口仍关闭"
+  ],
+  "screenshots": [
+    "session-transfer-simplified.png",
+    "session-transfer-simplified-narrow.png"
+  ]
+}
