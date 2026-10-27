@@ -1,0 +1,1175 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Claude Switcher · 本地功能对比说明</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #171411;
+      --surface: #211c18;
+      --surface-raised: #2a231e;
+      --text: #f6efe8;
+      --muted: #cbbdb1;
+      --border: #4c4037;
+      --border-strong: #796354;
+      --accent: #ee976f;
+      --accent-strong: #ffc09f;
+      --accent-ink: #24150e;
+      --link: #f3ad89;
+      --focus: #ffc6a8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--page);
+      scroll-padding-top: 1.5rem;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 17px;
+      line-height: 1.7;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button,
+    a,
+    summary {
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    button {
+      font: inherit;
+    }
+
+    a {
+      color: var(--link);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 0.22em;
+    }
+
+    a:hover {
+      color: var(--accent-strong);
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    summary:focus-visible,
+    main:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 4px;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 10;
+      top: 0.75rem;
+      left: -10000px;
+      padding: 0.65rem 1rem;
+      border-radius: 0.4rem;
+      background: var(--accent);
+      color: var(--accent-ink);
+      font-weight: 700;
+    }
+
+    .skip-link:focus {
+      left: 0.75rem;
+    }
+
+    .page {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      padding: 0 clamp(1.25rem, 4vw, 3rem) 2.5rem;
+    }
+
+    .hero {
+      padding: clamp(2.5rem, 7vw, 5.5rem) 0 2.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .eyebrow {
+      margin: 0 0 0.8rem;
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 750;
+      letter-spacing: 0.12em;
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 2rem;
+      padding: 0.25rem 0.7rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      line-height: 1.4;
+    }
+
+    .badge-local {
+      border-color: #a86749;
+      background: #35231b;
+      color: #ffc3a5;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      overflow-wrap: break-word;
+    }
+
+    h1 {
+      max-width: 19em;
+      margin: 0;
+      font-size: clamp(2rem, 5vw, 3.25rem);
+      line-height: 1.18;
+      letter-spacing: -0.035em;
+    }
+
+    .hero-summary {
+      max-width: 47rem;
+      margin: 1.25rem 0 0;
+      color: var(--muted);
+      font-size: clamp(1.02rem, 2vw, 1.16rem);
+    }
+
+    .release-state {
+      max-width: 54rem;
+      margin: 1.5rem 0 0;
+      padding: 0.9rem 1.1rem;
+      border-left: 4px solid var(--accent);
+      background: var(--surface);
+    }
+
+    .release-state strong {
+      display: block;
+      margin-bottom: 0.15rem;
+      color: var(--accent-strong);
+      font-size: 0.82rem;
+    }
+
+    .release-state p {
+      margin: 0;
+    }
+
+    .updated {
+      margin: 1rem 0 0;
+      color: var(--muted);
+      font-size: 0.86rem;
+    }
+
+    .page-nav {
+      padding: 1rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .page-nav ul {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem 1.25rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .page-nav a {
+      display: inline-block;
+      padding: 0.35rem 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .page-nav a:hover {
+      color: var(--accent-strong);
+      text-decoration: underline;
+    }
+
+    main section {
+      scroll-margin-top: 1.5rem;
+    }
+
+    main section + section {
+      margin-top: 3.5rem;
+    }
+
+    .section-heading {
+      margin-bottom: 1.2rem;
+    }
+
+    .section-heading h2 {
+      margin: 0;
+      font-size: clamp(1.4rem, 3vw, 1.8rem);
+      line-height: 1.3;
+      letter-spacing: -0.015em;
+    }
+
+    .section-heading p {
+      max-width: 50rem;
+      margin: 0.45rem 0 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .verification-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0.75rem;
+      margin: 0;
+    }
+
+    .verification-item {
+      min-width: 0;
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 0.65rem;
+      background: var(--surface);
+    }
+
+    .verification-item dt {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+    }
+
+    .verification-item dd {
+      margin: 0.45rem 0 0;
+      font-size: 1rem;
+      font-weight: 650;
+      line-height: 1.55;
+    }
+
+    .verification-item dd.is-pending {
+      color: var(--accent-strong);
+    }
+
+    .filter-panel {
+      padding: 1rem;
+      border: 1px solid var(--border);
+      border-radius: 0.65rem;
+      background: var(--surface);
+    }
+
+    .filter-label {
+      display: block;
+      margin-bottom: 0.65rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+    }
+
+    .filter-button {
+      min-height: 2.75rem;
+      padding: 0.48rem 0.85rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 0.45rem;
+      background: var(--surface-raised);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 650;
+    }
+
+    .filter-button:hover {
+      border-color: var(--accent);
+    }
+
+    .filter-button[aria-pressed="true"] {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    .feature-count {
+      margin: 1rem 0 0.8rem;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .feature-list,
+    .reference-grid,
+    .acceptance-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .feature-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.9rem;
+    }
+
+    .feature-item {
+      display: flex;
+      min-width: 0;
+    }
+
+    .feature-card {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      min-width: 0;
+      padding: 1.15rem;
+      border: 1px solid var(--border);
+      border-radius: 0.7rem;
+      background: var(--surface);
+    }
+
+    .feature-topline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+
+    .group {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 650;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-height: 1.75rem;
+      padding: 0.15rem 0.55rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 999px;
+      color: var(--text);
+      font-size: 0.75rem;
+      font-weight: 700;
+      line-height: 1.4;
+      white-space: nowrap;
+    }
+
+    .status-implemented {
+      border-color: #527561;
+      background: #24392e;
+      color: #c8ead4;
+    }
+
+    .status-out_of_scope {
+      background: #302a25;
+      color: #ddd1c5;
+    }
+
+    .status-deferred {
+      border-color: #806c45;
+      background: #3a3022;
+      color: #f1d8a4;
+    }
+
+    .status-not_run {
+      border-color: #956456;
+      background: #3d2925;
+      color: #f3c0b1;
+    }
+
+    .feature-card h3 {
+      margin: 0.8rem 0 0.5rem;
+      font-size: 1.12rem;
+      line-height: 1.45;
+    }
+
+    .feature-card > p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .feature-card details {
+      margin-top: auto;
+      padding-top: 0.85rem;
+    }
+
+    .feature-card summary {
+      width: fit-content;
+      color: var(--link);
+      cursor: pointer;
+      font-size: 0.86rem;
+      font-weight: 700;
+    }
+
+    .feature-card summary::marker {
+      color: var(--accent);
+    }
+
+    .feature-card details p {
+      margin: 0.65rem 0 0;
+      padding-top: 0.7rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .empty-state,
+    .render-message {
+      padding: 1rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 0.55rem;
+      background: var(--surface);
+    }
+
+    .render-message {
+      margin: 1.5rem 0 0;
+      color: var(--accent-strong);
+    }
+
+    .name-note {
+      margin: 0 0 1rem;
+      padding: 0.85rem 1rem;
+      border-left: 3px solid var(--accent);
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 0.93rem;
+    }
+
+    .name-note strong {
+      color: var(--text);
+    }
+
+    .reference-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.9rem;
+    }
+
+    .reference-grid > li {
+      display: flex;
+      min-width: 0;
+    }
+
+    .reference-card {
+      flex: 1;
+      min-width: 0;
+      padding: 1.15rem;
+      border: 1px solid var(--border);
+      border-radius: 0.7rem;
+      background: var(--surface);
+    }
+
+    .reference-card h3 {
+      margin: 0;
+      font-size: 1.05rem;
+      line-height: 1.45;
+    }
+
+    .reference-role {
+      margin: 0.3rem 0 0;
+      color: var(--accent-strong);
+      font-size: 0.86rem;
+      font-weight: 650;
+    }
+
+    .reference-card dl {
+      margin: 0.9rem 0;
+    }
+
+    .reference-card dl > div {
+      display: grid;
+      grid-template-columns: 4.2rem minmax(0, 1fr);
+      gap: 0.7rem;
+      padding: 0.55rem 0;
+      border-top: 1px solid var(--border);
+    }
+
+    .reference-card dt {
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 650;
+    }
+
+    .reference-card dd {
+      margin: 0;
+      font-size: 0.88rem;
+    }
+
+    .source-link {
+      display: inline-block;
+      font-size: 0.88rem;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+
+    .flow-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.7rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: flow;
+    }
+
+    .flow-list li {
+      display: flex;
+      align-items: baseline;
+      gap: 0.8rem;
+      min-width: 0;
+      padding: 0.85rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 0.55rem;
+      background: var(--surface);
+      counter-increment: flow;
+    }
+
+    .flow-list li::before {
+      content: counter(flow, decimal-leading-zero);
+      flex: 0 0 auto;
+      color: var(--accent);
+      font-size: 0.8rem;
+      font-variant-numeric: tabular-nums;
+      font-weight: 750;
+    }
+
+    .exit-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.8rem;
+      margin: 0;
+    }
+
+    .exit-item {
+      padding: 1rem 1.1rem;
+      border: 1px solid var(--border);
+      border-radius: 0.6rem;
+      background: var(--surface);
+    }
+
+    .exit-item dt {
+      color: var(--accent-strong);
+      font-weight: 700;
+    }
+
+    .exit-item dd {
+      margin: 0.35rem 0 0;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .acceptance-list {
+      border-top: 1px solid var(--border);
+    }
+
+    .acceptance-list > li {
+      display: grid;
+      grid-template-columns: minmax(11rem, 0.7fr) minmax(0, 1.6fr);
+      gap: 1.25rem;
+      padding: 1rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .acceptance-name {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.55rem;
+    }
+
+    .acceptance-name h3 {
+      margin: 0;
+      font-size: 0.98rem;
+      line-height: 1.5;
+    }
+
+    .acceptance-list p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .page-footer {
+      margin-top: 3.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .page-footer p {
+      margin: 0.25rem 0;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      overflow-wrap: anywhere;
+    }
+
+    @media (max-width: 880px) {
+      .verification-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .feature-list,
+      .reference-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 600px) {
+      body {
+        font-size: 16px;
+      }
+
+      .page {
+        padding-right: 1rem;
+        padding-left: 1rem;
+      }
+
+      .hero {
+        padding-top: 2.25rem;
+      }
+
+      h1 {
+        letter-spacing: -0.025em;
+      }
+
+      .page-nav ul {
+        gap: 0.2rem 1rem;
+      }
+
+      main section + section {
+        margin-top: 2.75rem;
+      }
+
+      .verification-grid,
+      .flow-list,
+      .exit-list {
+        grid-template-columns: 1fr;
+      }
+
+      .filter-panel {
+        padding: 0.8rem;
+      }
+
+      .filters {
+        gap: 0.5rem;
+      }
+
+      .filter-button {
+        flex: 1 0 auto;
+      }
+
+      .reference-card dl > div {
+        grid-template-columns: 1fr;
+        gap: 0.15rem;
+      }
+
+      .acceptance-list > li {
+        grid-template-columns: 1fr;
+        gap: 0.55rem;
+      }
+    }
+
+    @media print {
+      @page {
+        margin: 16mm;
+      }
+
+      :root {
+        color-scheme: light;
+        --page: #ffffff;
+        --surface: #ffffff;
+        --surface-raised: #ffffff;
+        --text: #1f1b18;
+        --muted: #403a35;
+        --border: #b8b0aa;
+        --border-strong: #6d645e;
+        --accent: #843d22;
+        --accent-strong: #74331c;
+        --link: #6f3019;
+        --focus: #000000;
+      }
+
+      html,
+      body {
+        background: #ffffff !important;
+        color: #1f1b18 !important;
+      }
+
+      body {
+        font-size: 10.5pt;
+        line-height: 1.5;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .page {
+        width: auto;
+        max-width: none;
+        padding: 0;
+      }
+
+      .hero {
+        padding: 0 0 1.2rem;
+      }
+
+      h1 {
+        font-size: 25pt;
+      }
+
+      .skip-link,
+      .page-nav,
+      .filter-panel,
+      .feature-count {
+        display: none !important;
+      }
+
+      main section + section,
+      .page-footer {
+        margin-top: 2rem;
+      }
+
+      .badge,
+      .status,
+      .status-implemented,
+      .status-out_of_scope,
+      .status-deferred,
+      .status-not_run,
+      .badge-local {
+        border-color: #6d645e;
+        background: transparent;
+        color: #1f1b18;
+      }
+
+      .release-state,
+      .name-note {
+        background: transparent;
+      }
+
+      .feature-list,
+      .reference-grid,
+      .verification-grid,
+      .flow-list,
+      .exit-list {
+        gap: 0.55rem;
+      }
+
+      .feature-item[hidden] {
+        display: flex !important;
+      }
+
+      .feature-card,
+      .reference-card,
+      .verification-item,
+      .flow-list li,
+      .exit-item,
+      .acceptance-list > li {
+        break-inside: avoid;
+      }
+
+      .feature-card details {
+        margin-top: 0.85rem;
+      }
+
+      .feature-card details > :not(summary) {
+        display: block !important;
+      }
+
+      .feature-card summary {
+        display: none;
+      }
+
+      .feature-card details p {
+        border-top: 0;
+      }
+
+      h1,
+      h2,
+      h3 {
+        break-after: avoid;
+      }
+
+      a {
+        color: #6f3019;
+      }
+
+      .source-link::after {
+        content: " (" attr(href) ")";
+        font-size: 8pt;
+        font-weight: 400;
+        overflow-wrap: anywhere;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <div class="page">
+    <header class="hero">
+      <p class="eyebrow">本地功能对比说明</p>
+      <div class="badge-row" aria-label="文档状态">
+        <span class="badge badge-local">本地候选 · 未覆盖原版</span>
+        <span class="badge" id="version"></span>
+      </div>
+      <h1 id="page-title">Claude Switcher · 改造说明</h1>
+      <p class="hero-summary" id="summary"></p>
+      <div class="release-state">
+        <strong>当前发布状态</strong>
+        <p id="release-state"></p>
+      </div>
+      <p class="updated">数据更新：<time id="updated"></time></p>
+    </header>
+
+    <nav class="page-nav" aria-label="页内导航">
+      <ul>
+        <li><a href="#verification">验证状态</a></li>
+        <li><a href="#features">功能状态</a></li>
+        <li><a href="#references">参考来源</a></li>
+        <li><a href="#flow">切换流程</a></li>
+        <li><a href="#exit">退出语义</a></li>
+        <li><a href="#acceptance">待验收范围</a></li>
+      </ul>
+    </nav>
+
+    <noscript>
+      <p class="render-message">请启用浏览器 JavaScript 以显示内嵌数据；本页不会请求外部资源。</p>
+    </noscript>
+    <p class="render-message" id="render-error" role="alert" hidden></p>
+
+    <main id="main" tabindex="-1">
+      <section id="verification" aria-labelledby="verification-title">
+        <div class="section-heading">
+          <h2 id="verification-title">验证状态</h2>
+          <p>查看当前验证与复核进度；待更新项目仍需最终验收。</p>
+        </div>
+        <dl class="verification-grid" id="verification-grid"></dl>
+      </section>
+
+      <section id="features" aria-labelledby="features-title">
+        <div class="section-heading">
+          <h2 id="features-title">功能状态</h2>
+          <p>了解本地候选能做什么，以及各项功能的适用边界。</p>
+        </div>
+        <div class="filter-panel">
+          <span class="filter-label" id="filter-label">按状态筛选</span>
+          <div class="filters" id="filters" role="group" aria-labelledby="filter-label"></div>
+        </div>
+        <p class="feature-count" id="feature-count" aria-live="polite"></p>
+        <p class="empty-state" id="feature-empty" hidden>此状态下暂无功能。</p>
+        <ul class="feature-list" id="feature-list"></ul>
+      </section>
+
+      <section id="references" aria-labelledby="references-title">
+        <div class="section-heading">
+          <h2 id="references-title">参考来源对照</h2>
+          <p>对照借鉴内容、本地调整与未照搬部分，并可打开原项目源码。</p>
+        </div>
+        <p class="name-note"><strong>名称区分：</strong>CCSwitcher 是 CLI 账号参考；CC Switch 是 API 工具。</p>
+        <ul class="reference-grid" id="reference-grid"></ul>
+      </section>
+
+      <section id="flow" aria-labelledby="flow-title">
+        <div class="section-heading">
+          <h2 id="flow-title">切换流程</h2>
+          <p>从切换前核验与备份，到切换后的恢复回读和保护确认。</p>
+        </div>
+        <ol class="flow-list" id="flow-list"></ol>
+      </section>
+
+      <section id="exit" aria-labelledby="exit-title">
+        <div class="section-heading">
+          <h2 id="exit-title">退出语义</h2>
+          <p>区分关闭界面、停止保护、退出 API 接管与 CLI 注销的不同影响。</p>
+        </div>
+        <dl class="exit-list" id="exit-list"></dl>
+      </section>
+
+      <section id="acceptance" aria-labelledby="acceptance-title">
+        <div class="section-heading">
+          <h2 id="acceptance-title">待验收范围与边界</h2>
+          <p>重点了解未执行、暂缓及本轮范围外事项；已实现功能的边界可在上方卡片中展开。</p>
+        </div>
+        <ul class="acceptance-list" id="acceptance-list"></ul>
+      </section>
+    </main>
+
+    <footer class="page-footer">
+      <p>事实与验证状态以 <code>docs/功能对比数据.json</code> 为准。</p>
+      <p>本页为单个离线 HTML，不加载外部字体、图片、脚本或跟踪资源。</p>
+    </footer>
+  </div>
+
+  <script id="feature-data" type="application/json">{"title":"Claude Switcher · 改造说明","version":"1.3.0-local.5 候选","updated":"2026-10-27","summary":"保留原版账号切换与用量界面，补网络门禁、默认 CLI 登录核验、失败恢复和清晰的操作反馈。","releaseState":"本地候选；未覆盖正在使用的原版，未部署新守卫，未操作真实账号回切。","verification":{"unitTests":99,"controllerChecks":33,"nativeUI":"假数据窗口与520pt瞬态父层通过；真实菜单栏锚点未验收","claudeReview":"两次冻结快照审查完成；主会话已回核并修正发现"},"features":[{"name":"桌面目录轮换","group":"账号切换","state":"implemented","summary":"保留原版的退出后目录轮换；普通移动失败会还原。","limit":"新版真实 A→B→A 尚未执行；异常断电不是跨存储原子事务。"},{"name":"CLI 切换前核验","group":"账号切换","state":"implemented","summary":"先确认默认登录、目标备份与身份，保存备份成功后才退出/移动桌面。","limit":"无法确认时暂停联动；可明确选择仅切桌面，CLI保持原样。旧备份保留。"},{"name":"账号与组织配对","group":"账号切换","state":"implemented","summary":"结合账号/组织标识，不只相信邮箱或上次选择标记。","limit":"核验默认保存材料，不代表每个运行中 CLI 的实际认证状态。"},{"name":"恢复回读与失败还原","group":"账号切换","state":"implemented","summary":"恢复后回读；CLI提交失败时尝试还原登录与桌面目录。","limit":"外部工具同时改过的数据不强行覆盖；不能确认还原会明确报错。"},{"name":"CLI 异常时仅切桌面","group":"账号切换","state":"implemented","summary":"仅准备阶段失败时，允许用户明确选择桌面单独切换；CLI原登录和备份不变。","limit":"只在核验准备失败、尚未写备份/退出桌面时提供；备份写入或恢复失败不继续。按钮已用假数据验证。"},{"name":"网络门禁","group":"保护","state":"implemented","summary":"检查代理、TUN 与三个 Claude 域名的出口国家；失败/未知不执行软件内受保护操作。","limit":"不是防火墙，也不证明其他进程或每条连接的实际出口。"},{"name":"桌面后台守护","group":"保护","state":"implemented","summary":"只管理本入口启动或用户明确确认的订阅桌面；退出界面不停止独立守卫。","limit":"API/未知配置不自动纳入；进程或配置代次变化需要重新确认。实际断网急停未验收。"},{"name":"CLI 日常检查与同步","group":"保护","state":"implemented","summary":"软件触发的同步/核验先过网络门禁；后台发现不一致只提示。","limit":"仅核验默认保存登录；未检测各shell/项目或旧任务，不会停止CLI。"},{"name":"CLI 进程托管与强停","group":"保护","state":"out_of_scope","summary":"按用户最新使用方式，本轮明确不做。","limit":"已运行会话何时读取新凭据由CLI自身决定；不能由默认存储核验推断实际认证。"},{"name":"API 配置来源识别","group":"API工具","state":"implemented","summary":"依据已生效 profile ID 与固定标记匹配 Magpie 或 CC Switch；不确定就显示未知。","limit":"识别的是配置，不是最后写入者证明或“正在代理”的运行证明。"},{"name":"打开原 API 管理器","group":"API工具","state":"implemented","summary":"只打开白名单应用；退出 API 接管由原工具完成。","limit":"退出接管须在原工具的模式/提供方设置中操作；仅退出管理器应用不代表解除接管。"},{"name":"自动退出 API / 修改密钥","group":"API工具","state":"out_of_scope","summary":"留给 Magpie / CC Switch。","limit":"本软件只识别与导航，不成为另一套 API 管理器。"},{"name":"按需说明与上下文帮助","group":"界面","state":"implemented","summary":"两行动作对照按需内联展开；兼容信息就近帮助，操作失败才显示原因。","limit":"嵌套浮层Esc未可靠确认，改用内联；假数据短屏滚动通过，真实菜单栏锚点仍未验收。"},{"name":"退出界面 / 停止保护","group":"界面","state":"implemented","summary":"两个动作分开；退出不注销账号、不终止 CLI；停止保护需要确认。","limit":"没有后台保护常驻说明条。"},{"name":"会话迁移产品入口","group":"迁移","state":"deferred","summary":"继续关闭；已分析侧栏索引与共享 JSONL 原文的区别。","limit":"个人 reset 脚本未直接接入产品；实际脚本本轮未执行。"},{"name":"真实部署与账号回切","group":"验收","state":"not_run","summary":"用户原版曾实测成功，当前仍使用原版；新版另行验收。","limit":"不把隔离测试、截图或静态外审当作真实部署完成。"}],"references":[{"name":"l2succes/claude-switcher","role":"桌面切换基础","borrowed":"账号卡、用量、目录轮换、每档案 CLI 保存。","change":"在原有流程前补核验和门禁，失败补恢复。","notCopied":"未更换为完整快照历史或并行多实例架构。","url":"https://github.com/l2succes/claude-switcher/tree/011c00797c083530dc8cfa4557416cece86ab2b1"},{"name":"XueshiQiao/CCSwitcher v2.1.0","role":"CLI 多账号参考","borrowed":"身份配对、坏备份分类、切后确认的思路。","change":"保留原生更新及独立条目，避免先删后加。","notCopied":"不整套照搬全库单条备份、后台直接刷新或进程切换承诺。","url":"https://github.com/XueshiQiao/CCSwitcher/tree/efff246d4e3a12ff064eae1431b9e9126bd0302c"},{"name":"YOURSJEYO/claude-switcher","role":"安全检查参考","borrowed":"启动前检查和地区异常拦截的方向。","change":"核心门禁聚焦代理、TUN、出口国家。","notCopied":"不把14项全部当硬门禁；不自动改系统语言、地区、IPv6或代理规则。","url":"https://github.com/YOURSJEYO/claude-switcher"},{"name":"Magpie","role":"API 模式管理工具","borrowed":"读取已生效配置中的工具标记。","change":"显示配置匹配来源并打开Magpie。","notCopied":"不重写它们的模式、模型、密钥和退出流程。","url":"https://github.com/yetone/magpie"},{"name":"CC Switch","role":"API模式管理工具","borrowed":"读取其固定3P profile标记。","change":"来源匹配时打开CC Switch。","notCopied":"与CLI多账号参考CCSwitcher是两个不同项目；不代改模式和密钥。","url":"https://github.com/farion1231/cc-switch/blob/df511e82e2bf2f0512b0c5ef4e02306717df05cb/src-tauri/src/claude_desktop_config.rs"}],"flow":["网络门禁","身份与备份分类","先保存备份","退出桌面","移动目录","恢复 CLI 并回读","打开前复检","启动并确认桌面保护范围"],"exitSemantics":[{"action":"退出界面","effect":"关闭本软件界面；独立守卫按已保存开关运行。"},{"action":"停止保护","effect":"明确停用独立守卫；不注销账号、不停止 CLI。"},{"action":"退出 API 接管","effect":"在匹配原工具的模式/提供方设置中退出；仅关闭管理器应用不代表解除接管。"},{"action":"CLI /logout","effect":"由用户在 CLI 中执行，本软件不代为注销。"}]}</script>
+  <script>
+    (() => {
+      "use strict";
+
+      const byId = (id) => document.getElementById(id);
+      const asText = (value, fallback = "") => {
+        if (value === null || value === undefined || value === "") return fallback;
+        return String(value);
+      };
+      const make = (tag, className, value) => {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        if (value !== undefined && value !== null) element.textContent = String(value);
+        return element;
+      };
+      const setText = (id, value) => {
+        byId(id).textContent = asText(value);
+      };
+
+      const statusLabels = new Map([
+        ["implemented", "已实现"],
+        ["out_of_scope", "范围外"],
+        ["deferred", "暂缓"],
+        ["not_run", "未执行"]
+      ]);
+      const statusOrder = ["implemented", "out_of_scope", "deferred", "not_run"];
+      const stateLabel = (state) => statusLabels.get(state) || state || "未标注";
+      const makeStatus = (state) => {
+        const knownClass = statusLabels.has(state) ? ` status-${state}` : "";
+        return make("span", `status${knownClass}`, stateLabel(state));
+      };
+
+      const renderHeader = (data) => {
+        const title = asText(data.title, "Claude Switcher · 改造说明");
+        document.title = `${title} · 功能对比说明`;
+        setText("page-title", title);
+        setText("version", data.version);
+        setText("summary", data.summary);
+        setText("release-state", data.releaseState);
+        const updated = byId("updated");
+        updated.textContent = asText(data.updated, "待最终更新");
+        if (data.updated) updated.setAttribute("datetime", asText(data.updated));
+      };
+
+      const renderVerification = (verification) => {
+        const container = byId("verification-grid");
+        const labels = new Map([
+          ["unitTests", "单元测试"],
+          ["controllerChecks", "控制器检查"],
+          ["nativeUI", "原生界面"],
+          ["claudeReview", "独立复审"]
+        ]);
+        const entries = verification && typeof verification === "object" ? Object.entries(verification) : [];
+        entries.forEach(([key, value]) => {
+          const item = make("div", "verification-item");
+          item.append(make("dt", "", labels.get(key) || key));
+          const displayValue = value === null || value === undefined ? "待最终更新" : asText(value);
+          const dd = make("dd", value === null || value === undefined ? "is-pending" : "", displayValue);
+          item.append(dd);
+          container.append(item);
+        });
+      };
+
+      const makeReferenceLink = (reference) => {
+        const rawUrl = asText(reference.url);
+        try {
+          const parsed = new URL(rawUrl);
+          if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+            return make("span", "source-link", rawUrl);
+          }
+          const link = make("a", "source-link", "打开源码 ↗");
+          link.href = parsed.href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer external";
+          link.referrerPolicy = "no-referrer";
+          link.title = rawUrl;
+          link.setAttribute("aria-label", `打开 ${asText(reference.name, "参考项目")} 的源码（新窗口）`);
+          return link;
+        } catch {
+          return make("span", "source-link", rawUrl || "源码链接待最终更新");
+        }
+      };
+
+      const renderReferences = (references) => {
+        const container = byId("reference-grid");
+        references.forEach((reference) => {
+          const item = make("li");
+          const card = make("article", "reference-card");
+          card.append(make("h3", "", reference.name));
+          card.append(make("p", "reference-role", reference.role));
+          const definitions = make("dl");
+          [
+            ["借鉴", reference.borrowed],
+            ["本地调整", reference.change],
+            ["未照搬", reference.notCopied]
+          ].forEach(([label, value]) => {
+            const row = make("div");
+            row.append(make("dt", "", label));
+            row.append(make("dd", "", value));
+            definitions.append(row);
+          });
+          card.append(definitions);
+          card.append(makeReferenceLink(reference));
+          item.append(card);
+          container.append(item);
+        });
+      };
+
+      const renderFlow = (flow) => {
+        const container = byId("flow-list");
+        flow.forEach((step) => container.append(make("li", "", step)));
+      };
+
+      const renderExit = (exitSemantics) => {
+        const container = byId("exit-list");
+        exitSemantics.forEach((entry) => {
+          const item = make("div", "exit-item");
+          item.append(make("dt", "", entry.action));
+          item.append(make("dd", "", entry.effect));
+          container.append(item);
+        });
+      };
+
+      const renderAcceptance = (features) => {
+        const container = byId("acceptance-list");
+        const acceptanceStates = new Set(["deferred", "not_run", "out_of_scope"]);
+        features.forEach((feature) => {
+          const state = asText(feature.state);
+          if (!acceptanceStates.has(state)) return;
+          const item = make("li");
+          const heading = make("div", "acceptance-name");
+          heading.append(make("h3", "", feature.name));
+          heading.append(makeStatus(state));
+          item.append(heading);
+          item.append(make("p", "", asText(feature.limit, "待最终更新")));
+          container.append(item);
+        });
+      };
+
+      const renderFeatures = (features) => {
+        const list = byId("feature-list");
+        const filters = byId("filters");
+        const entries = [];
+        const states = [];
+
+        features.forEach((feature) => {
+          const state = asText(feature.state);
+          if (!states.includes(state)) states.push(state);
+          const item = make("li", "feature-item");
+          const card = make("article", "feature-card");
+          const topline = make("div", "feature-topline");
+          topline.append(make("span", "group", feature.group));
+          topline.append(makeStatus(state));
+          card.append(topline);
+          card.append(make("h3", "", feature.name));
+          card.append(make("p", "", feature.summary));
+          const details = make("details");
+          details.append(make("summary", "", "边界 / 待验收说明"));
+          details.append(make("p", "", asText(feature.limit, "待最终更新")));
+          card.append(details);
+          item.append(card);
+          list.append(item);
+          entries.push({ item, state });
+        });
+
+        const orderedStates = [
+          ...statusOrder.filter((state) => states.includes(state)),
+          ...states.filter((state) => !statusOrder.includes(state))
+        ];
+        const filterButtons = [];
+        let activeState = null;
+
+        const applyFilter = (nextState) => {
+          activeState = nextState;
+          let visible = 0;
+          entries.forEach((entry) => {
+            const matches = activeState === null || entry.state === activeState;
+            entry.item.hidden = !matches;
+            if (matches) visible += 1;
+          });
+          filterButtons.forEach(({ button, state }) => {
+            button.setAttribute("aria-pressed", String(state === activeState));
+          });
+          byId("feature-count").textContent = activeState === null
+            ? `显示全部 ${features.length} 项功能`
+            : `${stateLabel(activeState)}：显示 ${visible} / ${features.length} 项`;
+          byId("feature-empty").hidden = visible !== 0;
+        };
+
+        const addFilter = (state, label, count) => {
+          const button = make("button", "filter-button", `${label} · ${count}`);
+          button.type = "button";
+          button.setAttribute("aria-controls", "feature-list");
+          button.addEventListener("click", () => applyFilter(state));
+          filters.append(button);
+          filterButtons.push({ button, state });
+        };
+
+        addFilter(null, "全部", features.length);
+        orderedStates.forEach((state) => {
+          addFilter(state, stateLabel(state), entries.filter((entry) => entry.state === state).length);
+        });
+        applyFilter(null);
+      };
+
+      let printDetailState = null;
+      window.addEventListener("beforeprint", () => {
+        if (printDetailState !== null) return;
+        printDetailState = Array.from(document.querySelectorAll("details")).map((details) => ({
+          details,
+          open: details.open
+        }));
+        printDetailState.forEach(({ details }) => {
+          details.open = true;
+        });
+      });
+      window.addEventListener("afterprint", () => {
+        if (printDetailState === null) return;
+        printDetailState.forEach(({ details, open }) => {
+          details.open = open;
+        });
+        printDetailState = null;
+      });
+
+      try {
+        const data = JSON.parse(byId("feature-data").textContent);
+        const features = Array.isArray(data.features) ? data.features : [];
+        const references = Array.isArray(data.references) ? data.references : [];
+        const flow = Array.isArray(data.flow) ? data.flow : [];
+        const exitSemantics = Array.isArray(data.exitSemantics) ? data.exitSemantics : [];
+        renderHeader(data);
+        renderVerification(data.verification);
+        renderFeatures(features);
+        renderReferences(references);
+        renderFlow(flow);
+        renderExit(exitSemantics);
+        renderAcceptance(features);
+      } catch (error) {
+        const message = byId("render-error");
+        message.textContent = "内嵌数据无法显示，请重新运行 scripts/render-comparison.py 生成页面。";
+        message.hidden = false;
+      }
+    })();
+  </script>
+</body>
+</html>

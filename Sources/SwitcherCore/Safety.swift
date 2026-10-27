@@ -1,10 +1,10 @@
 import Foundation
 
-public enum ProxyMode: String, Codable, CaseIterable {
+public enum ProxyMode: String, Codable, CaseIterable, Sendable {
     case shadowrocket, auto
 }
 
-public struct SafetyConfig: Codable, Equatable {
+public struct SafetyConfig: Codable, Equatable, Sendable {
     public var enabled: Bool
     public var expectedCountry: String
     public var proxyMode: ProxyMode
@@ -67,13 +67,14 @@ public struct NetworkObservation: Codable, Equatable {
     }
 }
 
-public enum SafetyReason: String, Codable {
+public enum SafetyReason: String, Codable, Sendable {
     case allowed, disabled, invalidConfig, proxyDisconnected, tunMissing, countryUnknown, countryMismatch
     case guardUnavailable, staleReceipt, terminationFailed
     case routesDisagree
+    case unsupportedMode
 }
 
-public struct SafetyDecision: Codable, Equatable {
+public struct SafetyDecision: Codable, Equatable, Sendable {
     public var reason: SafetyReason
     public var expectedCountry: String?
     public var observedCountry: String?
@@ -94,6 +95,7 @@ public struct SafetyDecision: Codable, Equatable {
         case .staleReceipt: return "守卫回执缺失或已过期，不能确认后台保护在线。"
         case .terminationFailed: return "网络检查失败，但未能关闭 Claude，请立即手动退出。"
         case .routesDisagree: return "Claude 各域名的出口国家不一致，已阻止打开。"
+        case .unsupportedMode: return "桌面配置为 API 或模式未确认；订阅保护入口不会接管该模式。"
         }
     }
 }
@@ -119,8 +121,12 @@ public struct GuardReceipt: Codable, Equatable {
     public var config: SafetyConfig
     public var decision: SafetyDecision
     public var termination: String
-    public init(checkedAt: Date = Date(), config: SafetyConfig, decision: SafetyDecision, termination: String = "not_needed") {
+    public var desktopScope: DesktopProtectionScope?
+    public var desktopManaged: Bool?
+    public init(checkedAt: Date = Date(), config: SafetyConfig, decision: SafetyDecision, termination: String = "not_needed",
+                desktopScope: DesktopProtectionScope = .subscription, desktopManaged: Bool = false) {
         self.checkedAt = checkedAt; self.config = config; self.decision = decision; self.termination = termination
+        self.desktopScope = desktopScope; self.desktopManaged = desktopManaged
     }
     public func isFresh(for expected: SafetyConfig, now: Date = Date()) -> Bool {
         let age = now.timeIntervalSince(checkedAt)
@@ -130,10 +136,16 @@ public struct GuardReceipt: Codable, Equatable {
 
 public enum LaunchGate {
     public static func evaluate(config: SafetyConfig, registered: Bool, receipt: GuardReceipt?,
-                                network: NetworkObservation, now: Date = Date()) -> SafetyDecision {
+                                network: NetworkObservation, now: Date = Date(), target: ProtectedTarget = .desktop,
+                                desktopScope: DesktopProtectionScope? = nil) -> SafetyDecision {
         guard config.enabled else { return SafetyDecision(.disabled) }
         guard registered else { return SafetyDecision(.guardUnavailable) }
         guard receipt?.isFresh(for: config, now: now) == true else { return SafetyDecision(.staleReceipt) }
+        guard receipt?.termination != "failed" else { return SafetyDecision(.terminationFailed) }
+        if target == .desktop {
+            let scope = desktopScope ?? receipt?.desktopScope ?? .unknown
+            guard scope == .subscription, receipt?.desktopScope == scope else { return SafetyDecision(.unsupportedMode) }
+        }
         return SafetyPolicy.evaluate(config, network)
     }
 
@@ -151,10 +163,14 @@ public enum LaunchGate {
 
 public enum GuardEngine {
     public static func tick(config: SafetyConfig, network: NetworkObservation,
-                            stop: () async -> String, now: Date = Date()) async -> GuardReceipt {
+                            stop: () async -> String, now: Date = Date(),
+                            desktopScope: DesktopProtectionScope = .subscription,
+                            desktopManaged: Bool = true) async -> GuardReceipt {
         let decision = SafetyPolicy.evaluate(config, network)
-        let action = config.enabled && !decision.allowed ? await stop() : "not_needed"
-        return GuardReceipt(checkedAt: now, config: config, decision: decision, termination: action)
+        let shouldStop = config.enabled && desktopManaged && desktopScope == .subscription && !decision.allowed
+        let action = shouldStop ? await stop() : "not_needed"
+        return GuardReceipt(checkedAt: now, config: config, decision: decision, termination: action,
+                            desktopScope: desktopScope, desktopManaged: desktopManaged)
     }
 }
 
@@ -169,16 +185,20 @@ public enum AccountIdentity {
     }
 }
 
-public struct SafetyFiles {
+public struct SafetyFiles: Sendable {
     public let directory: URL
     public var configURL: URL { directory.appendingPathComponent("protection.json") }
     public var receiptURL: URL { directory.appendingPathComponent("guard-status.json") }
+    public var managedDesktopURL: URL { directory.appendingPathComponent("managed-desktop.json") }
     public init(directory: URL) { self.directory = directory }
     public func loadConfig() throws -> SafetyConfig {
         try JSONDecoder().decode(SafetyConfig.self, from: Data(contentsOf: configURL)).validated()
     }
     public func loadReceipt() -> GuardReceipt? {
         (try? Data(contentsOf: receiptURL)).flatMap { try? JSONDecoder().decode(GuardReceipt.self, from: $0) }
+    }
+    public func loadManagedDesktop() -> ManagedDesktopSession? {
+        (try? Data(contentsOf: managedDesktopURL)).flatMap { try? JSONDecoder().decode(ManagedDesktopSession.self, from: $0) }
     }
     public func save<T: Encodable>(_ value: T, to url: URL) throws {
         let fm = FileManager.default

@@ -15,6 +15,7 @@ struct ManualNetworkCheck {
 final class ProtectionController: ObservableObject {
     @Published var country = "SG"
     @Published private(set) var activeCountry: String?
+    @Published private(set) var activeProxyMode: ProxyMode?
     @Published var mode: ProxyMode = .shadowrocket
     @Published var status = "保护未启用"
     @Published var enabled = false
@@ -25,23 +26,35 @@ final class ProtectionController: ObservableObject {
     @Published private(set) var lastCheckedAt: Date?
     @Published private(set) var lastCheckReport: ManualNetworkCheck?
     @Published var lastDecision = SafetyDecision(.disabled)
+    @Published private(set) var operationError: String?
+    @Published private(set) var desktopScope: DesktopProtectionScope = .unknown
+    @Published private(set) var desktopScopeDetail: String?
+    @Published private(set) var desktopManaged = false
+    @Published private(set) var apiConfiguration: APIConfigurationStatus = .unconfirmed
     private let demo: Bool
     private var demoNetwork = NetworkObservation(proxyConnected: true, tunOnline: true, country: "SG")
     private var timer: Timer?
+    private var refreshing = false
+    private let worker: any GuardWorking
     let files: SafetyFiles
     let service: GuardService
+    var hasUnsavedChanges: Bool {
+        country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != activeCountry || mode != activeProxyMode
+    }
     var exitStatusText: String {
         if !enabled { return "保护未启用" }
         return guardOnline ? "后台保护继续运行" : "保护状态待确认"
     }
 
-    init(demo: Bool = false) {
+    init(demo: Bool = false, testFiles: SafetyFiles? = nil, worker: (any GuardWorking)? = nil) {
         self.demo = demo
-        files = SafetyFiles(directory: FileManager.default.homeDirectoryForCurrentUser
+        files = testFiles ?? SafetyFiles(directory: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/ClaudeSwitcher"))
         service = GuardService(files: files, helper: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/ClaudeGuard"))
+        self.worker = worker ?? GuardWorker(directory: files.directory, helper: service.helper)
         if demo {
-            enabled = true; guardOnline = true; activeCountry = "SG"; status = "守卫在线 · 目标 SG · 退出界面后继续保护"
+            desktopScope = .subscription; desktopManaged = true; apiConfiguration = .subscription
+            enabled = true; guardOnline = true; activeCountry = "SG"; activeProxyMode = .shadowrocket; status = "守卫在线 · 目标 SG · 退出界面后继续保护"
             lastDecision = SafetyDecision(.allowed, expected: "SG", observed: "SG")
             if CommandLine.arguments.contains("--demo-blocked") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewBlocked") as? Bool == true {
                 demoNetwork.country = "JP"
@@ -51,6 +64,18 @@ final class ProtectionController: ObservableObject {
             if CommandLine.arguments.contains("--demo-guard-unknown") {
                 guardOnline = false; lastDecision = SafetyDecision(.staleReceipt)
                 status = "演示：守卫回执过期，保护状态待确认。"
+            }
+            if CommandLine.arguments.contains("--demo-api") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewAPI") as? Bool == true {
+                desktopScope = .api; desktopManaged = false
+                switch Bundle.main.object(forInfoDictionaryKey: "CSPreviewAPIManager") as? String {
+                case "ccswitch": apiConfiguration = .ccSwitch
+                case "unknown": apiConfiguration = .unknownAPI
+                default: apiConfiguration = .magpie
+                }
+                desktopScopeDetail = "演示：API 桌面不纳入订阅守护；CLI 同步与核验单独检查默认订阅配置。"
+            }
+            if CommandLine.arguments.contains("--demo-unmanaged") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewUnmanaged") as? Bool == true {
+                desktopManaged = false; desktopScopeDetail = "演示：当前桌面未接管；从候选入口重新启动后纳入。"
             }
             if CommandLine.arguments.contains("--demo-unprotected") {
                 enabled = false; guardOnline = false; lastDecision = SafetyDecision(.disabled)
@@ -66,57 +91,129 @@ final class ProtectionController: ObservableObject {
     }
     deinit { timer?.invalidate() }
 
+    func clearOperationError() { operationError = nil }
+
+    private func applySaved(_ config: SafetyConfig?) {
+        activeCountry = config?.expectedCountry
+        activeProxyMode = config?.proxyMode
+    }
+
+    /// Called only after the UI's explicit subscription-mode confirmation.
+    func protectCurrentDesktop() async {
+        guard !working else { return }
+        operationError = nil
+        if demo {
+            guard enabled, guardOnline, desktopScope == .subscription else {
+                operationError = "演示：保护服务或订阅配置未就绪。"; return
+            }
+            desktopManaged = true; desktopScopeDetail = "演示：当前订阅桌面已由用户确认纳入保护。"; return
+        }
+        guard let config = try? files.loadConfig(), config.enabled,
+              await worker.registered(), files.loadReceipt()?.isFresh(for: config) == true else {
+            operationError = "保护服务或配置尚未就绪，未改变当前桌面的保护范围。"; return
+        }
+        guard !working, (try? files.loadConfig()) == config else { return }
+        working = true; defer { working = false }
+        do {
+            let record = try currentSubscriptionDesktopRecord()
+            try files.save(record, to: files.managedDesktopURL)
+            guard files.loadManagedDesktop() == record, managedDesktopApplication(files) != nil else {
+                throw SafetyError("桌面进程或配置已变化，尚未确认保护范围，请重试。")
+            }
+            await refreshStatusAsync(afterOperation: true)
+        } catch { operationError = error.localizedDescription }
+    }
+
+    private func refreshScope() {
+        desktopScope = DesktopModeInspector.read(support: files.directory.deletingLastPathComponent())
+        apiConfiguration = APIConfigurationInspector.read(support: files.directory.deletingLastPathComponent(), scope: desktopScope)
+        desktopManaged = managedDesktopApplication(files) != nil
+        switch desktopScope {
+        case .api: desktopScopeDetail = "API 配置不纳入订阅桌面守护；从原工具启动的进程不会被接管。"
+        case .unknown: desktopScopeDetail = "无法确认订阅配置，桌面入口暂停；不会按进程名关闭现有客户端。"
+        case .subscription:
+            desktopScopeDetail = desktopManaged ? "只管理本候选入口记录的订阅桌面进程。" : "订阅配置已识别；当前桌面未保护，可在设置中确认保护，或退出后从本入口打开。"
+        }
+    }
+
     func refreshStatus() {
         guard !demo else { return }
-        guardOnline = false
-        let savedConfig = try? files.loadConfig()
-        activeCountry = savedConfig?.expectedCountry
-        if FileManager.default.fileExists(atPath: files.configURL.path), savedConfig == nil {
-            enabled = service.registered; lastDecision = SafetyDecision(.invalidConfig)
-            status = "保护配置无效；已注册的守卫会按失败处理，请保存配置或明确停止保护。"; return
+        // Expiry remains visible even if a service query is still waiting off the UI actor.
+        if let config = try? files.loadConfig(), config.enabled,
+           files.loadReceipt()?.isFresh(for: config) != true {
+            guardOnline = false; lastDecision = SafetyDecision(.staleReceipt); status = lastDecision.message
         }
-        guard let config = savedConfig, config.enabled else {
-            enabled = false; lastDecision = SafetyDecision(.disabled); status = "保护未启用 · 打开与切换将被拦截"; return
+        guard !refreshing, !working else { return }
+        refreshing = true
+        Task { await refreshStatusAsync(); refreshing = false }
+    }
+    private func refreshStatusAsync(afterOperation: Bool = false) async {
+        guard !demo, !working || afterOperation else { return }
+        let saved = try? files.loadConfig()
+        if let saved {
+            if files.loadReceipt()?.isFresh(for: saved) != true { guardOnline = false }
+        } else { guardOnline = false }
+        let registered = await worker.registered()
+        guard !working || afterOperation else { return }
+        let latest = try? files.loadConfig()
+        guard latest == saved else { applySaved(latest); guardOnline = false; return }
+        refreshScope(); applySaved(saved)
+        guard let config = saved else {
+            enabled = registered; guardOnline = false
+            lastDecision = SafetyDecision(registered || FileManager.default.fileExists(atPath: files.configURL.path) ? .invalidConfig : .disabled)
+            status = lastDecision.message; return
         }
-        enabled = true
-        guard service.registered else {
-            lastDecision = SafetyDecision(.guardUnavailable); status = lastDecision.message; return
+        enabled = config.enabled
+        guard config.enabled else {
+            guardOnline = false; lastDecision = SafetyDecision(.disabled); status = lastDecision.message; return
+        }
+        guard registered else {
+            guardOnline = false; lastDecision = SafetyDecision(.guardUnavailable); status = lastDecision.message; return
         }
         guard let receipt = files.loadReceipt(), receipt.isFresh(for: config) else {
-            lastDecision = SafetyDecision(.staleReceipt); status = lastDecision.message; return
+            guardOnline = false; lastDecision = SafetyDecision(.staleReceipt); status = lastDecision.message; return
         }
         guardOnline = true
         lastDecision = receipt.termination == "failed" ? SafetyDecision(.terminationFailed) : receipt.decision
-        status = lastDecision.allowed ? "守卫在线 · 目标 \(config.expectedCountry) · 退出界面后继续保护" : lastDecision.message
-        if receipt.termination == "closed" { status += " · Claude 已关闭" }
-        else if !lastDecision.allowed && receipt.termination == "not_running" { status += " · Claude 未运行" }
+        status = lastDecision.allowed ? "网络门禁已就绪 · 目标 \(config.expectedCountry)" : lastDecision.message
     }
 
     func enable() async {
+        guard !working else { return }
+        operationError = nil
         if demo {
             do {
                 let config = try SafetyConfig(enabled: true, expectedCountry: country, proxyMode: mode).validated()
-                country = config.expectedCountry
-                activeCountry = config.expectedCountry
+                if CommandLine.arguments.contains("--demo-operation-error") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewOperationError") as? Bool == true {
+                    throw SafetyError("演示：配置无法写入；保护设置没有改变。")
+                }
+                country = config.expectedCountry; activeCountry = config.expectedCountry; activeProxyMode = config.proxyMode
                 enabled = true; guardOnline = true; lastDecision = SafetyPolicy.evaluate(config, demoNetwork)
                 status = "演示：" + lastDecision.message
-            } catch { guardOnline = false; lastDecision = SafetyDecision(.invalidConfig); status = error.localizedDescription }
+            } catch { operationError = error.localizedDescription }
             return
         }
-        guard !working else { return }
         working = true; defer { working = false }
         do {
             let config = try SafetyConfig(enabled: true, expectedCountry: country, proxyMode: mode).validated()
-            try service.enable(config)
+            try await worker.enable(config)
             country = config.expectedCountry
-            refreshStatus()
-        } catch { refreshStatus(); status = error.localizedDescription; lastDecision = SafetyDecision(.guardUnavailable) }
+            await refreshStatusAsync(afterOperation: true)
+        } catch {
+            await refreshStatusAsync(afterOperation: true)
+            operationError = error.localizedDescription
+        }
     }
     func disable() {
-        if demo { enabled = false; guardOnline = false; lastDecision = SafetyDecision(.disabled); status = "演示：保护已停止"; return }
         guard !working else { return }
-        do { try service.disable(); refreshStatus() }
-        catch { refreshStatus(); status = error.localizedDescription }
+        operationError = nil
+        if demo { enabled = false; guardOnline = false; lastDecision = SafetyDecision(.disabled); status = "演示：保护已停止"; return }
+        working = true
+        Task {
+            defer { working = false }
+            do { try await worker.disable(); await refreshStatusAsync(afterOperation: true) }
+            catch { await refreshStatusAsync(afterOperation: true); operationError = error.localizedDescription }
+        }
     }
 
     /// Read-only diagnosis of the form's inputs; never starts the guard or changes its decision.
@@ -145,25 +242,27 @@ final class ProtectionController: ObservableObject {
         lastCheckReport = ManualNetworkCheck(checkedAt: checkedAt, targetCountry: config.expectedCountry,
                                             observation: observation, decision: decision, validationMessage: nil)
     }
-    func preflight() async -> SafetyDecision {
-        if demo { return lastDecision }
-        guardOnline = false
+    func preflight(target: ProtectedTarget = .desktop) async -> SafetyDecision {
+        if demo {
+            if target == .desktop && desktopScope != .subscription { return SafetyDecision(.unsupportedMode) }
+            return lastDecision
+        }
         func finish(_ decision: SafetyDecision) -> SafetyDecision {
             lastDecision = decision; status = decision.message; return decision
         }
-        guard let config = try? files.loadConfig() else { activeCountry = nil; return finish(SafetyDecision(.invalidConfig)) }
-        activeCountry = config.expectedCountry
-        enabled = config.enabled
+        guard !working else { return SafetyDecision(.guardUnavailable) }
+        guard let config = try? files.loadConfig() else { applySaved(nil); return finish(SafetyDecision(.invalidConfig)) }
+        applySaved(config); enabled = config.enabled; refreshScope()
         guard config.enabled else { return finish(SafetyDecision(.disabled)) }
-        guard service.registered else { return finish(SafetyDecision(.guardUnavailable)) }
-        // A foreground network check does not itself make a fresh, registered guard offline.
+        if target == .desktop && desktopScope != .subscription { return finish(SafetyDecision(.unsupportedMode)) }
+        guard await worker.registered() else { guardOnline = false; return finish(SafetyDecision(.guardUnavailable)) }
         guardOnline = files.loadReceipt()?.isFresh(for: config) == true
         let network = await NetworkProbe().observe(mode: config.proxyMode)
-        guard (try? files.loadConfig()) == config else { activeCountry = nil; return finish(SafetyDecision(.invalidConfig)) }
-        let registered = service.registered, receipt = files.loadReceipt()
+        guard (try? files.loadConfig()) == config else { applySaved(nil); return finish(SafetyDecision(.invalidConfig)) }
+        refreshScope()
+        let registered = await worker.registered(), receipt = files.loadReceipt()
         guardOnline = registered && receipt?.isFresh(for: config) == true
-        let decision = LaunchGate.evaluate(config: config, registered: registered,
-                                          receipt: receipt, network: network)
-        return finish(decision)
+        return finish(LaunchGate.evaluate(config: config, registered: registered, receipt: receipt,
+                                         network: network, target: target, desktopScope: desktopScope))
     }
 }

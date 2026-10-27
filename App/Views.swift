@@ -153,14 +153,82 @@ struct Header: View {
     }
 }
 
+@MainActor
 struct TerminalStrip: View {
     @ObservedObject var store: Store
+    @ObservedObject private var protection: ProtectionController
     @State private var hover = false
+
+    init(store: Store) {
+        self.store = store
+        self.protection = store.protection
+    }
+
+    private var status: String {
+        switch store.cliStatus {
+        case .unverified: return "登录待核验"
+        case .matched:
+            return protection.desktopScope == .api ? "订阅登录已核验" : "已与桌面一致"
+        case .different: return "与桌面不同"
+        case .needsLogin: return "需要登录"
+        case .otherAuthentication: return "检测到其他认证配置"
+        case .unsupportedStorage: return "存储暂不支持"
+        }
+    }
+
+    private var statusColor: Color {
+        switch store.cliStatus {
+        case .matched: return .good
+        case .different, .otherAuthentication, .unsupportedStorage: return .warn
+        case .unverified, .needsLogin: return .sub
+        }
+    }
+
+    private var accountDetail: String? {
+        let value = [store.cliProfile, store.cliEmail].compactMap { $0 }.joined(separator: "  ·  ")
+        return value.isEmpty ? nil : value
+    }
+
+    private var detail: String {
+        switch store.cliStatus {
+        case .unverified: return accountDetail ?? "默认保存登录待核验"
+        case .matched: return accountDetail ?? "默认保存登录已核验"
+        case .different: return accountDetail ?? "默认登录账号待确认"
+        case .needsLogin: return "未检测到订阅登录"
+        case .otherAuthentication: return "可能覆盖订阅"
+        case .unsupportedStorage: return "无法核验默认登录"
+        }
+    }
+
+    private var scopeHelp: String {
+        switch store.cliStatus {
+        case .unverified:
+            return "尚未核验切换器默认保存的 CLI 登录，不据此推断其他终端状态。"
+        case .matched:
+            if protection.desktopScope == .api {
+                return "仅表示切换器默认保存的 CLI 订阅登录已核验；桌面为 API 配置，没有可比的运行订阅账号，不代表任何已运行 CLI 任务的状态。"
+            }
+            return "仅表示切换器默认保存的 CLI 登录已核验并与当前桌面账号一致；不代表所有已运行的 CLI。"
+        case .different:
+            return "默认保存的 CLI 登录与当前桌面账号不同；同步只处理订阅 OAuth，不改 API key、环境变量或 provider 设置。"
+        case .needsLogin:
+            return "默认保存的 CLI 订阅登录需要登录；API 与 provider 配置保持原样。"
+        case .otherAuthentication:
+            return "检测到其他认证配置，可能覆盖订阅；不表示所有终端都使用 API。"
+        case .unsupportedStorage:
+            return "当前登录存储暂不支持，未将账号名称猜测为已同步。"
+        }
+    }
+
+    private var detailHelp: String {
+        [detail, store.cliStatusDetail, scopeHelp,
+         "CLI 仅核验/同步默认保存登录；未检测终端 shell 环境变量与各项目设置，不代表已运行 CLI 任务的状态，也不保护 CLI 进程。"]
+            .compactMap { $0 }
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
     var body: some View {
-        let mismatch = store.cliProfile != store.current
-        let status = store.cliEmail == nil ? "未检测到登录" : store.cliProfile == nil ? "账号待确认" : mismatch ? "与桌面不同" : "已与桌面同步"
-        let detail = store.cliEmail.map { "\(store.cliProfile ?? "未知账号")  ·  \($0)" }
-            ?? "未检测到 OAuth；API 与 provider 配置保持原样"
         HStack(spacing: 10) {
             Image(systemName: "terminal").font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
                 .frame(width: 28, height: 28)
@@ -169,13 +237,25 @@ struct TerminalStrip: View {
                 HStack(spacing: 6) {
                     Text("终端 OAuth").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
                     Text(status).font(.system(size: 10, weight: .medium))
-                        .foregroundColor(store.cliEmail == nil ? .sub : mismatch ? .warn : .good)
+                        .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
                 }
                 Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .lineLimit(1).truncationMode(.middle).help(detail)
+                    .lineLimit(2).truncationMode(.middle).help(detailHelp)
+                    .accessibilityHint(detailHelp)
             }
             Spacer(minLength: 6)
-            if mismatch {
+            if store.cliStatus == .unverified {
+                Button("核验登录") { Task { await store.verifyDefaultCLI() } }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(.claude)
+                    .padding(.horizontal, 6).padding(.vertical, 5)
+                    .contentShape(Rectangle())
+                    .disabled(store.busy != nil || store.refreshing)
+                    .opacity(store.busy == nil && !store.refreshing ? 1 : 0.45)
+                    .help("只读核验切换器默认保存的 CLI 登录；不检测或保护已运行的 CLI 任务")
+            }
+            if store.cliStatus == .different {
                 Button { Task { await store.moveTerminal(to: store.current) } } label: {
                     Text("同步到 \(store.current)").font(.system(size: 10.5, weight: .semibold))
                         .lineLimit(1).truncationMode(.middle)
@@ -415,6 +495,45 @@ struct Panel: View {
                     .padding(.horizontal, 10).padding(.vertical, 8)
                     .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))
             }
+            if let offer = store.desktopOnlyOffer {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.warn)
+                            .padding(.top, 1)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("CLI 准备未完成，可选择仅切换桌面")
+                                .font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
+                            Text("目标：\(offer.target)；CLI 保持原样")
+                                .font(.system(size: 10)).foregroundColor(.sub)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    HStack(spacing: 12) {
+                        Spacer(minLength: 0)
+                        Button("取消") { store.desktopOnlyOffer = nil }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(.sub)
+                        Button("仅切换桌面") {
+                            Task { await store.confirmDesktopOnlySwitch() }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundColor(.claude)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.claude.opacity(0.1)))
+                        .disabled(store.busy != nil || store.refreshing)
+                        .opacity(store.busy == nil && !store.refreshing ? 1 : 0.45)
+                    }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.65)))
+                .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.5), lineWidth: 1))
+                .help("原因：\(offer.reason)\n仅从 \(offer.source) 切换到 \(offer.target)；CLI 保持原样。")
+            }
             VStack(alignment: .leading, spacing: 9) {
                 HStack(spacing: 7) {
                     Text("账号").font(.system(size: 13, weight: .semibold)).foregroundColor(.txt)
@@ -481,32 +600,12 @@ struct DemoPanel: View {
     let initialViewportHeight: CGFloat
     let maxContentHeight: CGFloat
     let onContentHeightChange: (CGFloat) -> Void
-    @State private var contentHeight: CGFloat?
 
     var body: some View {
-        ScrollView {
-            Panel(store: store)
-                .fixedSize(horizontal: false, vertical: true)
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear
-                            .onAppear { reportContentHeight(geometry.size.height) }
-                            .onChange(of: geometry.size.height) { height in
-                                reportContentHeight(height)
-                            }
-                    }
-                }
-        }
-        .frame(width: 500, height: min(contentHeight ?? initialViewportHeight, maxContentHeight))
-        .background(Color.bg)
-    }
-
-    private func reportContentHeight(_ height: CGFloat) {
-        guard height.isFinite, height > 0 else { return }
-        DispatchQueue.main.async {
-            contentHeight = height
-            onContentHeightChange(height)
-        }
+        PanelViewport(store: store,
+                      initialViewportHeight: initialViewportHeight,
+                      maxContentHeight: maxContentHeight,
+                      onContentHeightChange: onContentHeightChange)
     }
 }
 

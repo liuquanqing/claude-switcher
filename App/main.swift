@@ -1,7 +1,8 @@
 import AppKit
 import SwiftUI
-import CommonCrypto
+import CryptoKit
 import ServiceManagement
+import Security
 import SwitcherCore
 
 // Claude Switcher — menu bar app that swaps Claude Desktop's data folder between accounts
@@ -21,6 +22,8 @@ let currentFile = parkDir.appendingPathComponent(".current")
 let cacheDir = parkDir.appendingPathComponent(".cache")
 let defaultProfiles = ["Personal", "Business"]
 let demoMode = CommandLine.arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewMode") as? Bool == true
+let demoPopover = demoMode && (CommandLine.arguments.contains("--demo-popover")
+    || Bundle.main.object(forInfoDictionaryKey: "CSPreviewPopover") as? Bool == true)
 
 // MARK: - Data
 
@@ -28,6 +31,9 @@ struct Window: Codable { var used: Double; var resetsAt: Date? }
 
 struct Snapshot: Codable {
     var email: String?
+    var accountID: String?
+    var organizationID: String?
+    var identityTokenDigest: String?
     var name: String?
     var plan: String?
     var session: Window?
@@ -35,6 +41,7 @@ struct Snapshot: Codable {
     var weeklyOpus: Window?
     var extraEnabled: Bool?
     var fetchedAt: Date
+    var identity: CLIIdentity { CLIIdentity(accountID: accountID, organizationID: organizationID, email: email) }
 }
 
 struct Profile: Identifiable {
@@ -50,6 +57,8 @@ func currentProfile() -> String {
     (try? String(contentsOf: currentFile, encoding: .utf8))?
         .trimmingCharacters(in: .whitespacesAndNewlines) ?? defaultProfiles[0]
 }
+
+func confirmedCurrentProfile() throws -> String { try ProfileTransaction.currentName(at: currentFile) }
 
 func profileDir(_ name: String) -> URL {
     name == currentProfile() ? liveDir : parkDir.appendingPathComponent(name)
@@ -70,67 +79,12 @@ func allProfileNames() -> [String] {
 
 // MARK: - Token decryption (Electron safeStorage: "v10" + AES-128-CBC, PBKDF2-SHA1 "saltysalt")
 
-var cachedSafeKey: Data?
-
-func safeStorageKey() throws -> Data {
-    if let k = cachedSafeKey { return k }
-    let q: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-                            kSecAttrService as String: "Claude Safe Storage",
-                            kSecReturnData as String: true]
-    var out: CFTypeRef?
-    let st = SecItemCopyMatching(q as CFDictionary, &out)
-    guard st == errSecSuccess, let pw = out as? Data else {
-        throw err("Keychain access denied (\(st)). Allow access to \"Claude Safe Storage\".")
-    }
-    var key = Data(count: 16)
-    let salt = Array("saltysalt".utf8)
-    let rc = key.withUnsafeMutableBytes { kp in
-        pw.withUnsafeBytes { pp in
-            CCKeyDerivationPBKDF(CCPBKDFAlgorithm(kCCPBKDF2), pp.baseAddress!.assumingMemoryBound(to: Int8.self), pw.count,
-                                 salt, salt.count, CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA1), 1003,
-                                 kp.baseAddress!.assumingMemoryBound(to: UInt8.self), 16)
-        }
-    }
-    guard rc == kCCSuccess else { throw err("Key derivation failed") }
-    cachedSafeKey = key
-    return key
-}
-
-func decrypt(_ b64: String) throws -> Data {
-    guard let raw = Data(base64Encoded: b64), raw.prefix(3) == Data("v10".utf8) else { throw err("Unknown token format") }
-    let body = raw.dropFirst(3)
-    let key = try safeStorageKey()
-    let iv = [UInt8](repeating: 0x20, count: 16)
-    var out = Data(count: body.count + 16)
-    var moved = 0
-    let outCap = out.count
-    let rc = out.withUnsafeMutableBytes { op in
-        body.withUnsafeBytes { bp in
-            key.withUnsafeBytes { kp in
-                CCCrypt(CCOperation(kCCDecrypt), CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionPKCS7Padding),
-                        kp.baseAddress, 16, iv, bp.baseAddress, body.count, op.baseAddress, outCap, &moved)
-            }
-        }
-    }
-    guard rc == kCCSuccess else { throw err("Token decrypt failed") }
-    return out.prefix(moved)
-}
+let desktopTokenReader = DesktopTokenReader()
 
 func err(_ s: String) -> NSError { NSError(domain: "switcher", code: 1, userInfo: [NSLocalizedDescriptionKey: s]) }
 
-/// Best non-expired token with user:profile scope from a profile's config.json, or nil if signed out.
-func token(for dir: URL) throws -> String? {
-    guard let data = try? Data(contentsOf: dir.appendingPathComponent("config.json")),
-          let cfg = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let enc = cfg["oauth:tokenCacheV2"] as? String else { return nil }
-    let dict = try JSONSerialization.jsonObject(with: try decrypt(enc)) as? [String: [String: Any]] ?? [:]
-    let now = Date().timeIntervalSince1970 * 1000
-    return dict.filter { $0.key.contains("user:profile") }
-        .compactMap { _, v -> (String, Double)? in
-            guard let t = v["token"] as? String, let e = v["expiresAt"] as? Double, e > now else { return nil }
-            return (t, e)
-        }
-        .max { $0.1 < $1.1 }?.0
+func token(for directory: URL, allowExpired: Bool = false) async throws -> String? {
+    try await desktopTokenReader.read(directory: directory, allowExpired: allowExpired)
 }
 
 func parseDate(_ s: Any?) -> Date? {
@@ -154,7 +108,7 @@ func getJSON(_ path: String, _ tok: String) async throws -> [String: Any] {
     r.timeoutInterval = 15
     let (data, resp) = try await URLSession.shared.data(for: r)
     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-    guard code == 200 else { throw err(code == 401 ? "Session expired — switch to it to re-auth" : "API error \(code)") }
+    guard code == 200 else { throw err(code == 401 ? "登录已过期，请在对应客户端确认登录后重试。" : "API error \(code)") }
     return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
 }
 
@@ -174,9 +128,11 @@ func fetchSnapshot(_ tok: String) async throws -> Snapshot {
     async let u = getJSON("usage", tok)
     async let p = getJSON("profile", tok)
     let (usage, prof) = try await (u, p)
-    let acct = prof["account"] as? [String: Any]
+    let identity = CLIIdentity.profile(prof)
     let org = prof["organization"] as? [String: Any]
-    return Snapshot(email: acct?["email"] as? String,
+    return Snapshot(email: identity.email,
+                    accountID: identity.accountID, organizationID: identity.organizationID,
+                    identityTokenDigest: desktopTokenDigest(tok),
                     name: org?["name"] as? String,
                     plan: planName(org),
                     session: window(usage["five_hour"]),
@@ -187,15 +143,23 @@ func fetchSnapshot(_ tok: String) async throws -> Snapshot {
 }
 
 func loadCache(_ name: String) -> Snapshot? {
+    guard ProfileTransaction.validName(name) else { return nil }
     guard let d = try? Data(contentsOf: cacheDir.appendingPathComponent("\(name).json")) else { return nil }
     let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
     return try? dec.decode(Snapshot.self, from: d)
 }
 
 func saveCache(_ name: String, _ s: Snapshot) {
-    try? fm.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+    guard ProfileTransaction.validName(name) else { return }
+    try? fm.createDirectory(at: cacheDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
-    try? enc.encode(s).write(to: cacheDir.appendingPathComponent("\(name).json"), options: .atomic)
+    let output = cacheDir.appendingPathComponent("\(name).json")
+    try? enc.encode(s).write(to: output, options: .atomic)
+    try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
+}
+
+func desktopTokenDigest(_ token: String) -> String {
+    SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
 }
 
 // MARK: - Store
@@ -211,11 +175,15 @@ final class Store: ObservableObject {
     @Published var openAtLogin = false
     @Published var cliProfile: String?     // profile the terminal `claude` is logged in as
     @Published var cliEmail: String?
+    @Published var cliStatus: CLILoginStatus = .unverified
+    @Published var cliStatusDetail: String?
+    @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?
     var onChange: (() -> Void)?
     let protection: ProtectionController
     let isDemo: Bool
     var sessionMigrationEnabled: Bool { false }
     @Published private(set) var refreshing = false
+    private var desktopObservation: DesktopLifecycleObservation?
 
     /// Fake accounts for README screenshots — touches no files, keychain or network.
     init(demo: Bool) {
@@ -238,10 +206,17 @@ final class Store: ObservableObject {
             Profile(name: "Business", snapshot: snap("ada@analytical.co", "Team", 86, 1.2, 74, 98), signedIn: true),
             Profile(name: "Side Project", snapshot: nil, signedIn: false),
         ]
+        for index in profiles.indices {
+            profiles[index].snapshot?.accountID = "demo-account-" + profiles[index].name
+            profiles[index].snapshot?.organizationID = "demo-org-" + profiles[index].name
+        }
+        cliStatus = .matched
+        cliStatusDetail = "演示：默认保存登录与桌面一致，不表示已运行的 CLI 会话。"
         // Model an externally changed terminal login only when explicitly requested for QA.
         if CommandLine.arguments.contains("--demo-cli-mismatch") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIMismatch") as? Bool == true {
             cliProfile = "Business"
             cliEmail = profiles.first { $0.name == cliProfile }?.snapshot?.email
+            cliStatus = .different
         }
         if CommandLine.arguments.contains("--demo-many") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewManyAccounts") as? Bool == true {
             profiles += (1...9).map { number in
@@ -270,6 +245,13 @@ final class Store: ObservableObject {
             try? fm.createDirectory(at: parkDir.appendingPathComponent(p), withIntermediateDirectories: true)
         }
         reloadList()
+        desktopObservation = DesktopLifecycleObservation(center: NSWorkspace.shared.notificationCenter) { [weak self] note in
+            MainActor.assumeIsolated {
+                guard let application = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      application.bundleIdentifier == bundleID else { return }
+                self?.reloadList(); self?.protection.refreshStatus()
+            }
+        }
         Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in Task { @MainActor in await self.refresh() } }
         Task { await refresh() }
     }
@@ -295,7 +277,9 @@ final class Store: ObservableObject {
         let decision = await protection.preflight()
         guard decision.allowed else {
             banner = decision.message
-            refreshCLI(); onChange?()
+            // API Desktop is outside the subscription Desktop gate. The default CLI
+            // can still be verified through its own network/registration gate.
+            await refreshCLI(verify: decision.reason == .unsupportedMode); onChange?()
             return
         }
         banner = nil
@@ -304,7 +288,7 @@ final class Store: ObservableObject {
                 let dir = profileDir(p.name)
                 g.addTask {
                     do {
-                        guard let tok = try token(for: dir) else { return (p.name, nil) }
+                        guard let tok = try await token(for: dir) else { return (p.name, nil) }
                         return (p.name, .success(try await fetchSnapshot(tok)))
                     } catch { return (p.name, .failure(error)) }
                 }
@@ -320,7 +304,7 @@ final class Store: ObservableObject {
                 }
             }
         }
-        refreshCLI()
+        await refreshCLI(verify: true)
         lastRefresh = Date()
         onChange?()
     }
@@ -345,134 +329,58 @@ final class Store: ObservableObject {
         let decision = await protection.preflight()
         guard decision.allowed else { banner = decision.message; return }
         if !isDemo {
-            do { try await launchClaude() } catch { banner = "打开 Claude 失败：" + error.localizedDescription }
+            do { try await launchProtectedDesktop(files: protection.files); protection.refreshStatus() } catch { banner = "打开 Claude 失败：" + error.localizedDescription }
         }
         reloadAfterOperation()
     }
 
     func switchTo(_ target: String) async {
         guard busy == nil else { return }
+        desktopOnlyOffer = nil
         banner = nil
         guard !refreshing else { banner = "用量正在刷新，请稍后切换账号。"; return }
         if isDemo {
             let decision = await protection.preflight()
             if decision.allowed {
+                if Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIFailure") as? Bool == true {
+                    let reason = "演示：目标 CLI 备份需要重新登录；账号目录和 CLI 登录尚未改变。"
+                    banner = reason
+                    desktopOnlyOffer = DesktopOnlySwitchOffer(source: current, target: target, reason: reason)
+                    return
+                }
                 current = target
                 cliProfile = target
                 cliEmail = profiles.first { $0.name == target }?.snapshot?.email
+                cliStatus = cliEmail == nil ? .needsLogin : .matched
             } else { banner = decision.message }
             return
         }
-        let cur = currentProfile()
+        guard let cur = try? confirmedCurrentProfile() else {
+            banner = "当前档案标记缺失、不可读或无效；未修改登录和目录，请先确认原工具的档案状态。"; return
+        }
+        guard ProfileTransaction.validName(cur), ProfileTransaction.validName(target) else {
+            banner = "档案标记或目标名称无效，未修改登录和目录。"; return
+        }
         if target == cur { await openProtectedClaude(); return }
         busy = "检查网络与地区…"
         defer { busy = nil }
         do {
             try await LaunchGate.run(check: { await self.protection.preflight() }, prepare: {
-                self.busy = "正在退出 Claude…"
-                guard await quitClaude() else { throw err("Claude didn't quit. Close it manually, then switch again.") }
-                self.busy = "正在切换到 \(target)…"
-                try ProfileTransaction(live: liveDir, parked: parkDir, marker: currentFile)
-                    .switchProfile(from: cur, to: target)
-                self.reloadList()
-                self.busy = "正在同步终端 OAuth…"
-                do { try await self.switchCLI(to: target) }
-                catch { throw err("桌面账号已切换，终端同步失败；Claude 未重新打开：" + error.localizedDescription) }
-            }, launch: { try await launchClaude() })
+                try await self.performLinkedDesktopSwitch(from: cur, to: target)
+            }, launch: { try await launchProtectedDesktop(files: self.protection.files); self.protection.refreshStatus() })
             reloadList()
             busy = nil
             await refresh()
-        } catch { banner = error.localizedDescription; reloadList() }
+        } catch {
+            banner = error.localizedDescription
+            if error is CLIPreparationFailure {
+                desktopOnlyOffer = DesktopOnlySwitchOffer(source: cur, target: target, reason: error.localizedDescription)
+            }
+            reloadList(); await refreshCLI(verify: false)
+        }
     }
 
     private func reloadAfterOperation() { if !isDemo { reloadList() } }
-
-    func refreshCLI() {
-        guard !isDemo else { return }
-        cliEmail = liveOauthAccount()?["emailAddress"] as? String
-        if let saved = (try? String(contentsOf: cliCurrentFile, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines), !saved.isEmpty {
-            cliProfile = saved
-        } else {
-            // First run: work out which profile the terminal is on from its email.
-            cliProfile = profiles.first { $0.snapshot?.email != nil && $0.snapshot?.email == cliEmail }?.name
-                ?? (cliEmail == nil ? current : nil)
-            if let p = cliProfile { try? p.write(to: cliCurrentFile, atomically: true, encoding: .utf8) }
-        }
-    }
-
-    /// Parks the terminal's Claude login under its current profile and restores `target`'s
-    /// (or logs the terminal out if `target` has none yet, so `claude /login` can set it up).
-    func switchCLI(to target: String) async throws {
-        refreshCLI()
-        guard let cur = cliProfile else {
-            throw err("Couldn't tell which profile the terminal is logged in as (\(cliEmail ?? "unknown")).")
-        }
-        var live = try readLiveCLICreds() ?? [:]
-        let previousToken = live
-        let previousIdentity = try Data(contentsOf: claudeJSON)
-        guard (try JSONSerialization.jsonObject(with: previousIdentity)) is [String: Any] else {
-            throw err("~/.claude.json 格式异常，未修改登录。")
-        }
-        if let oauth = live["claudeAiOauth"] as? [String: Any] {
-            // A still-running `claude` can re-save its old login after a switch. Make sure the
-            // login we're about to park really belongs to `cur` before filing it there.
-            guard let expected = profiles.first(where: { $0.name == cur })?.snapshot?.email,
-                  let tok = oauth["accessToken"] as? String, !tok.isEmpty else {
-                throw err("无法确认终端登录归属，未备份或覆盖凭据；请先刷新账号信息。")
-            }
-            let response = try await getJSON("profile", tok)
-            let actual = (response["account"] as? [String: Any])?["email"] as? String
-            try AccountIdentity.requireMatch(expected: expected, observed: actual)
-            if cur == target { return }
-            var parked: [String: Any] = ["claudeAiOauth": oauth]
-            parked["oauthAccount"] = liveOauthAccount()
-            try writeKeychain(service: switcherService, account: "cli-\(cur)", json: parked)
-        }
-        let restore = try readKeychain(service: switcherService, account: "cli-\(target)")
-        for payload in [live, restore ?? [:]] {
-            if let oauth = payload["claudeAiOauth"], !(oauth is [String: Any]) {
-                throw err("终端 OAuth 凭据格式不兼容，未修改登录。")
-            }
-        }
-        if let identity = restore?["oauthAccount"], !(identity is [String: Any]) {
-            throw err("目标终端身份格式不兼容，未修改登录。")
-        }
-        live["claudeAiOauth"] = restore?["claudeAiOauth"]
-        var tokenUpdated = false
-        do {
-            try writeKeychain(service: cliService, account: NSUserName(), json: live)
-            tokenUpdated = true
-            try setLiveOauthAccount(restore?["oauthAccount"] as? [String: Any])
-            try target.write(to: cliCurrentFile, atomically: true, encoding: .utf8)
-        } catch {
-            guard tokenUpdated else { throw error }
-            do {
-                try writeKeychain(service: cliService, account: NSUserName(), json: previousToken)
-                try previousIdentity.write(to: claudeJSON, options: .atomic)
-                try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: claudeJSON.path)
-            } catch { throw err("终端登录写入及还原失败，请保留现有数据并停止切换。") }
-            throw err("终端同步失败，已还原原登录。")
-        }
-        refreshCLI()
-    }
-
-    func moveTerminal(to target: String) async {
-        if isDemo {
-            banner = nil; cliProfile = target
-            cliEmail = profiles.first { $0.name == target }?.snapshot?.email
-            return
-        }
-        guard busy == nil else { return }
-        banner = nil
-        guard !refreshing else { banner = "用量正在刷新，请稍后同步终端登录。"; return }
-        busy = "检查网络与地区…"
-        defer { busy = nil }
-        let decision = await protection.preflight()
-        guard decision.allowed else { banner = decision.message; return }
-        busy = "正在同步终端 OAuth…"
-        do { try await switchCLI(to: target) } catch { banner = "Terminal not switched: \(error.localizedDescription)" }
-    }
 
     func scanThreads(_ profile: String) throws -> ThreadScan {
         if isDemo {
@@ -535,11 +443,12 @@ func quitClaude() async -> Bool {
     return running().isEmpty
 }
 
-func launchClaude() async throws {
+@discardableResult
+func launchClaude() async throws -> NSRunningApplication {
     guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
         throw err("未找到 Claude 桌面客户端，请先安装。")
     }
-    _ = try await NSWorkspace.shared.openApplication(at: url, configuration: .init())
+    return try await NSWorkspace.shared.openApplication(at: url, configuration: .init())
 }
 
 // MARK: - Terminal (Claude Code CLI) login
@@ -547,7 +456,7 @@ func launchClaude() async throws {
 // The CLI keeps its login in the keychain item "Claude Code-credentials" (key `claudeAiOauth`,
 // next to MCP server logins under `mcpOAuth`, which stay shared) and the account details in
 // ~/.claude.json `oauthAccount`. Parked logins go in our own keychain item, one per profile.
-// Everything goes through /usr/bin/security, which is how the CLI itself reads the item.
+// Native Security APIs update existing entries; only the owned OAuth field is swapped.
 
 let cliService = "Claude Code-credentials"
 let switcherService = "Claude Switcher"
@@ -582,22 +491,6 @@ func writeKeychain(service: String, account: String, json: [String: Any]) throws
     guard status == errSecSuccess else { throw err("无法保存钥匙串登录（状态 \(status)）。") }
 }
 
-func readLiveCLICreds() throws -> [String: Any]? { try readKeychain(service: cliService, account: NSUserName()) }
-
-func liveOauthAccount() -> [String: Any]? {
-    ((try? Data(contentsOf: claudeJSON)).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })?["oauthAccount"] as? [String: Any]
-}
-
-func setLiveOauthAccount(_ acct: [String: Any]?) throws {
-    guard var j = try JSONSerialization.jsonObject(with: Data(contentsOf: claudeJSON)) as? [String: Any] else {
-        throw err("Couldn't read ~/.claude.json")
-    }
-    j["oauthAccount"] = acct
-    try JSONSerialization.data(withJSONObject: j, options: [.prettyPrinted, .withoutEscapingSlashes])
-        .write(to: claudeJSON, options: .atomic)
-    try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: claudeJSON.path)
-}
-
 // Code session enumeration and copying live in SwitcherCore/ThreadRepository.swift.
 
 // MARK: - App
@@ -616,7 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.behavior = .transient
             popover.animates = true
             popover.appearance = NSAppearance(named: .darkAqua)
-            let host = NSHostingController(rootView: Panel(store: store))
+            let host = NSHostingController(rootView: MenuBarPanel(store: store))
             // Let the popover track the SwiftUI size; otherwise it's positioned at its initial
             // (too small) size and the grown content spills up past the menu bar.
             host.sizingOptions = [.preferredContentSize]
@@ -633,7 +526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             commands.addItem(withTitle: "退出界面（保护状态不变）", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             rootItem.submenu = commands
             NSApp.mainMenu = applicationMenu
-            if demoMode {
+            if demoMode && !demoPopover {
                 let initialViewportHeight = max(1, (NSScreen.main?.visibleFrame.height ?? 800) * 0.75)
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: initialViewportHeight),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -654,6 +547,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 window.center()
                 previewWindow = window
                 DispatchQueue.main.async { self.toggle() }
+            }
+            if demoPopover {
+                item.isVisible = false
+                let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 104),
+                                      styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+                window.title = "Claude Switcher · 弹层演示（假数据）"
+                window.isReleasedWhenClosed = false
+                window.appearance = NSAppearance(named: .darkAqua)
+                let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 104))
+                let note = NSTextField(labelWithString: "假数据演示，不操作真实账号")
+                note.font = .systemFont(ofSize: 11)
+                note.textColor = .secondaryLabelColor
+                note.alignment = .center
+                note.frame = NSRect(x: 12, y: 66, width: 276, height: 18)
+                content.addSubview(note)
+                let button = NSButton(title: "打开菜单弹层", target: self, action: #selector(openPreviewPopover(_:)))
+                button.bezelStyle = .rounded
+                button.font = .systemFont(ofSize: 13, weight: .medium)
+                button.frame = NSRect(x: 60, y: 20, width: 180, height: 32)
+                content.addSubview(button)
+                window.contentView = content
+                window.center()
+                if let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame {
+                    window.setFrameTopLeftPoint(NSPoint(x: visibleFrame.midX - window.frame.width / 2,
+                                                       y: visibleFrame.maxY - 12))
+                }
+                previewWindow = window
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+                DispatchQueue.main.async { self.openPreviewPopover(button) }
             }
         }
     }
@@ -714,6 +637,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 popover.contentSize = v.fittingSize
             }
             popover.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    @objc func openPreviewPopover(_ sender: NSButton) {
+        MainActor.assumeIsolated {
+            guard demoPopover else { return }
+            if popover.isShown { popover.performClose(nil) }
+            Task { await store.refresh() }
+            if let v = popover.contentViewController?.view {
+                v.layoutSubtreeIfNeeded()
+                popover.contentSize = v.fittingSize
+            }
+            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             NSApp.activate(ignoringOtherApps: true)
         }

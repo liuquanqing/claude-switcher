@@ -1,0 +1,102 @@
+{
+  "version": "1.3.0-local.5",
+  "date": "2026-10-27",
+  "scope": "local candidate only, original apps/accounts unchanged",
+  "xctest": 99,
+  "controller_checks": 33,
+  "strict_release": "PASS",
+  "app_signature": "ad-hoc verification PASS",
+  "live_accounts": "NOT_RUN",
+  "guard_deployment": "NOT_RUN",
+  "real_network_stop": "NOT_RUN",
+  "native_ui": "fake window and same transient parent at test anchor; real menu anchor NOT_RUN",
+  "offline_html_automatic_external_loads": 0,
+  "logs": {
+    "tests-desktop-only-flow.log": {
+      "sha256": "0cfb6c1f6fd4917a1305518ade7596bd127b12ff5504dfebc8e9564e1abb0521",
+      "last_lines": [
+        "Test Suite 'SwitcherCoreTests.xctest' passed at 2026-10-27 17:38:24.656.",
+        "\t Executed 99 tests, with 0 failures (0 unexpected) in 0.284 (0.296) seconds",
+        "Test Suite 'All tests' passed at 2026-10-27 17:38:24.656.",
+        "\t Executed 99 tests, with 0 failures (0 unexpected) in 0.284 (0.297) seconds",
+        "◇ Test run started.",
+        "↳ Testing Library Version: 2084",
+        "↳ Target Platform: arm64e-apple-macos14.0",
+        "✔ Test run with 0 tests in 0 suites passed after 0.001 seconds."
+      ]
+    },
+    "controller-accepted.log": {
+      "sha256": "2336bcc5652ad0be8f28e81236cdb0166f4c8ebf371bd7f5fa14a0f904b725ff",
+      "last_lines": [
+        "PASS: 33 controller/store checks; temporary files and fixture worker only. No live credential/service actions."
+      ]
+    },
+    "release-accepted.log": {
+      "sha256": "645c7af7a23797f53b07d76be88dd9772cb2495a331415f462a06ea3f73c356e",
+      "last_lines": [
+        "[10 / 14] ClaudeGuard-product",
+        "[13 / 16] ClaudeGuard-product",
+        "[15 / 16] ClaudeGuard-product",
+        "[15 / 16] ClaudeSwitcher-product",
+        "[17 / 19] ClaudeSwitcher-product",
+        "[18 / 19] ClaudeSwitcher-product",
+        "[20 / 20] ClaudeGuard-product",
+        "Build complete! (16.51 secs)"
+      ]
+    },
+    "bundle-accepted.log": {
+      "sha256": "2b8db25b7d9616ebf4bf61e66d5ab73e042241adbebbd441f04f9fdf1d374a59",
+      "last_lines": [
+        "Building for production...",
+        "[2 / 5] ClaudeGuard-product",
+        "[3 / 6] ClaudeGuard-product",
+        "[5 / 6] ClaudeGuard-product",
+        "Build complete! (0.95 secs)",
+        "/Users/liuquanqing/Projects/安全 AI/claude-switcher/build/Claude Switcher.app/Contents/Helpers/ClaudeGuard: replacing existing signature",
+        "/Users/liuquanqing/Projects/安全 AI/claude-switcher/build/Claude Switcher.app: replacing existing signature",
+        "Built /Users/liuquanqing/Projects/安全 AI/claude-switcher/build/Claude Switcher.app"
+      ]
+    }
+  },
+  "source_sha256": {
+    "App/APIManagement.swift": "171b408caf492532889b87c43f97b852da712a3be0ca03d73bdfa96349c7a6c8",
+    "App/CLILoginController.swift": "faa845a15e46241eb3955dd46aea5f106bc0e98b895ad50ca09e624f8ed2527a",
+    "App/DesktopLifecycle.swift": "6b5cd248bd2c1ba99539be81255b1b7168c6e22814e07aefe815d79c1bab996e",
+    "App/DesktopOnlySwitch.swift": "3c01c3da5f7822f720092d71c2604279d9324b1d24ea6235202ca3b583aabb3a",
+    "App/DesktopTokenReader.swift": "3a44b9ab485729e546b49be3ac9f2ee8733ffb2c6ea3dd93a8cab201c5a207b6",
+    "App/GuardWorker.swift": "b8a9c9eeda76280b26765a7795db6ee24de1ec840e5e05fb50eba76c7f6597f2",
+    "App/ManagedDesktop.swift": "7c1e95002a8dbf24c6df4f261a303363e63d9d6903c9e4996a216ba6132a3041",
+    "App/NativeCLIStorage.swift": "0039806792b71a90c5c24954a0ae7d3b4a9c0b68c0a3beff1c45db47a9dbecca",
+    "App/PanelPresentation.swift": "58c769173a2788003a9d1806c92c8c7902db821b3680cb9f35ffdb4dcdf5fb06",
+    "App/Protection.swift": "18595b1552471cec1390d6b2c54c91c5dbdf2d83bc494a1364c055998ac12826",
+    "App/ProtectionView.swift": "fffe14587b1ee1cf12a36715d1f118919e1e267052713f17a4e61d0aeb36efc4",
+    "App/Views.swift": "f5976655442ab1adff4d62eb380f3d9c68d02fa86dee009260d892461dd57898",
+    "App/main.swift": "436ad9c8afaa4050590e99b627817db7cb9cdd489360b4d210cf43fa5e4a063a",
+    "Sources/ClaudeGuard/GuardMain.swift": "6e0d7809c6249b60669c12cb9935af6c18d20a238e50b8b65b57ff35ff1ea61f",
+    "Sources/SwitcherCore/APIConfiguration.swift": "4bd84d5340c98f200a7add9f95c854da1e745b34b0c65f47d64d33b2991c5876",
+    "Sources/SwitcherCore/AuthenticationConfiguration.swift": "fa8a574c2f3b1b563a3235b488210dbf67a19447f13fe4401dc627dbd6847c7f",
+    "Sources/SwitcherCore/CLIModels.swift": "1fef978a690adb2d79bd1f8bf5f56b34f641dfd6e5e66cdd806513b89f7b83ac",
+    "Sources/SwitcherCore/CLITransaction.swift": "9456cf13b07227d62931a898fe8a6686fbdb36ac2e5e16c3cbd738c5ee53f8d9",
+    "Sources/SwitcherCore/DesktopOnlyFlow.swift": "ad50f65b66b0941ebd002c0f0ead3bbf2aa01cf1526e74eab905372acb790c1a",
+    "Sources/SwitcherCore/GuardService.swift": "5a69bb40976e5bafeee35adf38bac88a5667473901c13cd23974ddd29b4fe6a0",
+    "Sources/SwitcherCore/NetworkProbe.swift": "c6a0af104630602f4425b189c7844a2290f78794390c24ff2d1512a17ae517b7",
+    "Sources/SwitcherCore/ProfileTransaction.swift": "5e23d19d432d24a1cae692ff9fb306dd56919266b571adcf46d44a054605149f",
+    "Sources/SwitcherCore/Safety.swift": "3d4369f37898ce9cb9740393093446620921699f3be3c72f7b6627bba79f1f6f",
+    "Sources/SwitcherCore/ThreadRepository.swift": "e5e96e25861a3aae72ae30fd116e8593bcc25c54897afa3b58834be0bfeaeec8",
+    "Tests/SwitcherCoreTests/APIConfigurationTests.swift": "9e1e5c0c8711980d2771a7d84a841dfc30e2930a21826281d1b1c5517019feff",
+    "Tests/SwitcherCoreTests/CLITransactionTests.swift": "4bff6ccbc36a267654759eafedc1cbf0872ea66a11ea47c28c669e6792408df1",
+    "Tests/SwitcherCoreTests/ConfigurationScopeTests.swift": "36a701303e337773cdf9c8a95a164b3415e240c07e1cf6c5ab31f18a287ae53e",
+    "Tests/SwitcherCoreTests/DesktopOnlyFlowTests.swift": "810792a385f9dd144df5b481639b53b508c3dc85d98975fad8a441a34fafdca3",
+    "Tests/SwitcherCoreTests/FileTests.swift": "470dac318a8a0889347fc088aaceb8d3842c8e541a6ae4f4c75b173268dd71cf",
+    "Tests/SwitcherCoreTests/IdentityTests.swift": "f950fec88ad114523465048787638eec623ac8bc68c27c7ca863981459219384",
+    "Tests/SwitcherCoreTests/SafetyTests.swift": "4c6a3337406d528e0a9302ef68334f4fc178047b11c2bc3982cedd65a7f198a7",
+    "Tests/SwitcherCoreTests/ThreadTests.swift": "f4446047d1572186826d0be25e86c5e8be9ef50b867856621ebc76fd2b9c7af7",
+    "build.sh": "31faa159f57a90a344975c69aa249fb86dfeeb4ffb3dc4433adcbdee4b634da3",
+    "scripts/fixtures/controller-check.swift": "3a7b2ee599d01678dc96c5f7c803cf933de25d4c4716fc9c6009da4521e26a27",
+    "scripts/test-controller.sh": "e0a0bd073dc1f2bb29b329b9ac75449bf4ad24a38b720d78ec21a222a4fce52e"
+  },
+  "binary_sha256": {
+    "Contents/MacOS/ClaudeSwitcher": "89dc179d78c450a755343932ec45687fdaf83d44059d5e89cb5b78ae351df733",
+    "Contents/Helpers/ClaudeGuard": "3e6772d4a060e66f4cb811f2e0d331fdb7d40334cd7a451eedfe27a2447b25b8"
+  }
+}
