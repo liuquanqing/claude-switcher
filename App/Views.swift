@@ -84,14 +84,33 @@ struct Bar: View {
 
 struct Header: View {
     @ObservedObject var store: Store
+    @ObservedObject var protection: ProtectionController
+    let openClaude: () -> Void
+    @State private var openHover = false
+
+    private var appIcon: NSImage? {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("AppIcon.png") else { return nil }
+        return NSImage(contentsOf: url)
+    }
+
     var body: some View {
         let a = store.active, s = a?.snapshot
         HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 11).fill(Color.claude.opacity(0.13))
-                RoundedRectangle(cornerRadius: 11).stroke(Color.claude.opacity(0.35), lineWidth: 1)
-                Image(systemName: "sparkles").font(.system(size: 19, weight: .semibold)).foregroundColor(.claude)
-            }.frame(width: 42, height: 42)
+            Group {
+                if let appIcon {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .scaledToFit()
+                } else {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 11).fill(Color.claude.opacity(0.13))
+                        RoundedRectangle(cornerRadius: 11).stroke(Color.claude.opacity(0.35), lineWidth: 1)
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 19, weight: .semibold)).foregroundColor(.claude)
+                    }
+                }
+            }
+            .frame(width: 42, height: 42)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Claude Switcher").font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
                 HStack(spacing: 7) {
@@ -104,13 +123,29 @@ struct Header: View {
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 5) {
-                Text("Claude 桌面版").font(.system(size: 9.5)).foregroundColor(.sub)
                 HStack(spacing: 5) {
                     Circle().fill(store.claudeRunning ? Color.good : Color.sub).frame(width: 6, height: 6)
-                    Text(store.claudeRunning ? "运行中" : "已关闭")
+                    Text(store.claudeRunning ? "桌面版运行中" : "桌面版未运行")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(store.claudeRunning ? .good : .sub)
                 }
+                .help(store.isDemo ? "演示状态。正式版仅识别 Claude Desktop 进程，不代表已登录或聊天可用。" : "正式版仅识别 Claude Desktop 进程，不代表已登录或聊天可用。")
+                Button(action: openClaude) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "play.fill").font(.system(size: 8, weight: .bold))
+                        Text("检查并打开").font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundColor(.claude)
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.claude.opacity(openHover ? 0.25 : 0.16)))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.claude.opacity(0.24), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .disabled(store.busy != nil || protection.working)
+                .opacity(store.busy == nil && !protection.working ? 1 : 0.45)
+                .help("重新检查必要条件，满足门禁后打开当前账号")
+                .onHover { openHover = $0 }
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
@@ -137,12 +172,13 @@ struct TerminalStrip: View {
                         .foregroundColor(store.cliEmail == nil ? .sub : mismatch ? .warn : .good)
                 }
                 Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .lineLimit(1).truncationMode(.middle)
+                    .lineLimit(1).truncationMode(.middle).help(detail)
             }
             Spacer(minLength: 6)
             if mismatch {
                 Button { Task { await store.moveTerminal(to: store.current) } } label: {
                     Text("同步到 \(store.current)").font(.system(size: 10.5, weight: .semibold))
+                        .lineLimit(1).truncationMode(.middle)
                         .padding(.horizontal, 9).padding(.vertical, 6)
                         .foregroundColor(.claude)
                         .background(RoundedRectangle(cornerRadius: 7)
@@ -150,12 +186,12 @@ struct TerminalStrip: View {
                 }
                 .buttonStyle(.plain).disabled(store.busy != nil || store.refreshing)
                 .opacity(store.busy == nil && !store.refreshing ? 1 : 0.45)
-                .help("仅同步终端 OAuth 登录；不改 API key、环境变量或 provider 设置")
+                .help("同步到 \(store.current)：仅同步终端 OAuth 登录；不改 API key、环境变量或 provider 设置")
                 .onHover { hover = $0 }
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 9)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
+        .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -368,13 +404,12 @@ struct Panel: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Header(store: store)
-            ProtectionStrip(controller: protection, busy: store.busy != nil) {
+            Header(store: store, protection: protection) {
                 Task { await store.openProtectedClaude() }
             }
-            TerminalStrip(store: store)
+            TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil)
             if let b = store.banner {
-                Label(b, systemImage: "exclamationmark.triangle.fill").font(.system(size: 11))
+                Label("上次操作：\(b)", systemImage: "exclamationmark.triangle.fill").font(.system(size: 11))
                     .foregroundColor(.warn).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 8)
@@ -414,27 +449,21 @@ struct Panel: View {
                     store.toggleOpenAtLogin()
                 }
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
-                VStack(alignment: .trailing, spacing: 4) {
-                    Button { NSApp.terminate(nil) } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "power").font(.system(size: 11, weight: .medium))
-                            Text("退出界面").font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(quitHover ? .txt : .sub)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.stroke.opacity(quitHover ? 0.7 : 0.35)))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
+                Button { NSApp.terminate(nil) } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "power").font(.system(size: 11, weight: .medium))
+                        Text("退出界面").font(.system(size: 11, weight: .medium))
                     }
-                    .buttonStyle(.plain)
-                    .help("仅关闭界面，不更改保护状态")
-                    .disabled(store.busy != nil || protection.working)
-                    .onHover { quitHover = $0 }
-                    Text(protection.exitStatusText)
-                        .font(.system(size: 8.5))
-                        .foregroundColor(protection.enabled && !protection.guardOnline ? .warn : .sub)
-                        .lineLimit(1)
+                    .foregroundColor(quitHover ? .txt : .sub)
+                    .padding(.horizontal, 9).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.stroke.opacity(quitHover ? 0.7 : 0.35)))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
                 }
+                .buttonStyle(.plain)
+                .help("退出界面，不改变后台保护开关")
+                .disabled(store.busy != nil || protection.working)
+                .onHover { quitHover = $0 }
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))

@@ -2,6 +2,15 @@ import Foundation
 import SwiftUI
 import SwitcherCore
 
+struct ManualNetworkCheck {
+    let checkedAt: Date
+    let targetCountry: String?
+    let observation: NetworkObservation?
+    let decision: SafetyDecision
+    let validationMessage: String?
+    var passed: Bool { decision.allowed }
+}
+
 @MainActor
 final class ProtectionController: ObservableObject {
     @Published var country = "SG"
@@ -11,8 +20,13 @@ final class ProtectionController: ObservableObject {
     @Published var enabled = false
     @Published var guardOnline = false
     @Published var working = false
+    @Published private(set) var checking = false
+    @Published private(set) var lastCheckSummary: String?
+    @Published private(set) var lastCheckedAt: Date?
+    @Published private(set) var lastCheckReport: ManualNetworkCheck?
     @Published var lastDecision = SafetyDecision(.disabled)
     private let demo: Bool
+    private var demoNetwork = NetworkObservation(proxyConnected: true, tunOnline: true, country: "SG")
     private var timer: Timer?
     let files: SafetyFiles
     let service: GuardService
@@ -30,6 +44,7 @@ final class ProtectionController: ObservableObject {
             enabled = true; guardOnline = true; activeCountry = "SG"; status = "守卫在线 · 目标 SG · 退出界面后继续保护"
             lastDecision = SafetyDecision(.allowed, expected: "SG", observed: "SG")
             if CommandLine.arguments.contains("--demo-blocked") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewBlocked") as? Bool == true {
+                demoNetwork.country = "JP"
                 lastDecision = SafetyDecision(.countryMismatch, expected: "SG", observed: "JP")
                 status = "演示：出口 JP 与目标 SG 不一致，已阻止打开。"
             }
@@ -83,8 +98,8 @@ final class ProtectionController: ObservableObject {
                 let config = try SafetyConfig(enabled: true, expectedCountry: country, proxyMode: mode).validated()
                 country = config.expectedCountry
                 activeCountry = config.expectedCountry
-                enabled = true; guardOnline = true; lastDecision = SafetyDecision(.allowed, expected: country, observed: country)
-                status = "演示：守卫在线 · 目标 \(country)"
+                enabled = true; guardOnline = true; lastDecision = SafetyPolicy.evaluate(config, demoNetwork)
+                status = "演示：" + lastDecision.message
             } catch { guardOnline = false; lastDecision = SafetyDecision(.invalidConfig); status = error.localizedDescription }
             return
         }
@@ -102,6 +117,33 @@ final class ProtectionController: ObservableObject {
         guard !working else { return }
         do { try service.disable(); refreshStatus() }
         catch { refreshStatus(); status = error.localizedDescription }
+    }
+
+    /// Read-only diagnosis of the form's inputs; never starts the guard or changes its decision.
+    func checkNow() async {
+        guard !checking, !working else { return }
+        checking = true
+        defer { checking = false }
+        let config: SafetyConfig
+        do { config = try SafetyConfig(enabled: true, expectedCountry: country, proxyMode: mode).validated() }
+        catch {
+            lastCheckSummary = error.localizedDescription
+            let checkedAt = Date()
+            lastCheckedAt = checkedAt
+            lastCheckReport = ManualNetworkCheck(checkedAt: checkedAt, targetCountry: nil, observation: nil,
+                                                decision: SafetyDecision(.invalidConfig), validationMessage: error.localizedDescription)
+            return
+        }
+        let observation = demo ? demoNetwork : await NetworkProbe().observe(mode: config.proxyMode)
+        let decision = SafetyPolicy.evaluate(config, observation)
+        let route = observation.routesDisagree ? "各域名国家不一致" : (observation.country ?? "未知")
+        lastCheckSummary = "\(decision.allowed ? "网络检测通过" : "网络检测未通过") · 本次目标 \(config.expectedCountry)\n"
+            + "代理：\(observation.proxyConnected ? "已连接" : "未连接")；TUN：\(observation.tunOnline ? "在线" : "未检测到")；出口国家：\(route)。\n"
+            + "仅按当前输入检测；未保存设置或改变保护开关。"
+        let checkedAt = Date()
+        lastCheckedAt = checkedAt
+        lastCheckReport = ManualNetworkCheck(checkedAt: checkedAt, targetCountry: config.expectedCountry,
+                                            observation: observation, decision: decision, validationMessage: nil)
     }
     func preflight() async -> SafetyDecision {
         if demo { return lastDecision }

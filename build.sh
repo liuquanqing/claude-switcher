@@ -9,7 +9,10 @@ swift build -c release --product ClaudeSwitcher
 swift build -c release --product ClaudeGuard
 BIN="$(swift build -c release --show-bin-path)"
 APP="$PWD/build/Claude Switcher.app"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Helpers" "$APP/Contents/Resources"
+bash scripts/build-icon.sh
+cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp assets/icon-candidates/switcher-flow-v6.png "$APP/Contents/Resources/AppIcon.png"
 cp "$BIN/ClaudeSwitcher" "$APP/Contents/MacOS/ClaudeSwitcher"
 cp "$BIN/ClaudeGuard" "$APP/Contents/Helpers/ClaudeGuard"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
@@ -20,8 +23,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>dev.claudeswitcher.app</string>
 <key>CFBundleExecutable</key><string>ClaudeSwitcher</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.3.0-local.2</string>
-<key>CFBundleVersion</key><string>20261027.2</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
+<key>CFBundleShortVersionString</key><string>1.3.0-local.3</string>
+<key>CFBundleVersion</key><string>20261027.3</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 </dict></plist>

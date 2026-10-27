@@ -238,6 +238,11 @@ final class Store: ObservableObject {
             Profile(name: "Business", snapshot: snap("ada@analytical.co", "Team", 86, 1.2, 74, 98), signedIn: true),
             Profile(name: "Side Project", snapshot: nil, signedIn: false),
         ]
+        // Model an externally changed terminal login only when explicitly requested for QA.
+        if CommandLine.arguments.contains("--demo-cli-mismatch") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIMismatch") as? Bool == true {
+            cliProfile = "Business"
+            cliEmail = profiles.first { $0.name == cliProfile }?.snapshot?.email
+        }
         if CommandLine.arguments.contains("--demo-many") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewManyAccounts") as? Bool == true {
             profiles += (1...9).map { number in
                 Profile(name: "演示账号 \(number) · 较长名称", snapshot: snap("demo\(number)@example.com", "Max", 20, 2, 35, 72), signedIn: true)
@@ -334,6 +339,7 @@ final class Store: ObservableObject {
 
     func openProtectedClaude() async {
         guard busy == nil else { return }
+        banner = nil
         busy = "检查网络与地区…"
         defer { busy = nil }
         let decision = await protection.preflight()
@@ -346,10 +352,15 @@ final class Store: ObservableObject {
 
     func switchTo(_ target: String) async {
         guard busy == nil else { return }
+        banner = nil
         guard !refreshing else { banner = "用量正在刷新，请稍后切换账号。"; return }
         if isDemo {
             let decision = await protection.preflight()
-            if decision.allowed { current = target } else { banner = decision.message }
+            if decision.allowed {
+                current = target
+                cliProfile = target
+                cliEmail = profiles.first { $0.name == target }?.snapshot?.email
+            } else { banner = decision.message }
             return
         }
         let cur = currentProfile()
@@ -447,8 +458,13 @@ final class Store: ObservableObject {
     }
 
     func moveTerminal(to target: String) async {
-        if isDemo { cliProfile = target; return }
+        if isDemo {
+            banner = nil; cliProfile = target
+            cliEmail = profiles.first { $0.name == target }?.snapshot?.email
+            return
+        }
         guard busy == nil else { return }
+        banner = nil
         guard !refreshing else { banner = "用量正在刷新，请稍后同步终端登录。"; return }
         busy = "检查网络与地区…"
         defer { busy = nil }
