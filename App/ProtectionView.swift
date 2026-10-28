@@ -357,7 +357,8 @@ struct TerminalProtectionCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 TerminalStrip(store: store)
-                Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1, height: 36)
+                // Full-height divider: the terminal strip is now two tiers tall.
+                Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1).padding(.vertical, 10)
                 Button { showSettings.toggle() } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 6) {

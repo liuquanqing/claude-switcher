@@ -71,7 +71,7 @@ public struct PreparedCLISwitch {
         throw SafetyError("\(context) CLI 登录需要刷新或重新确认；旧备份保留，目录未移动。可先用原切换器切到对应档案，在 CLI 登录后再回来重试。")
     }
 
-    public func prepare(target: CLIProfileIdentity, profiles: [CLIProfileIdentity],
+    public func prepare(target: CLIProfileIdentity, profiles: [CLIProfileIdentity], requiresTargetLogin: Bool = false,
                         remote: (String) async throws -> CLIIdentity) async throws -> PreparedCLISwitch {
         let original = try readOwned()
         let originalMarker = try io.readMarker()
@@ -111,6 +111,9 @@ public struct PreparedCLISwitch {
             let checkedAt = checked.1 ? now() : (backup.verification?.checkedAt ?? now())
             targetUpgrade = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
         } else {
+            guard !requiresTargetLogin else {
+                throw SafetyError("桌面目标还没有保存的 CLI 登录；本次未同步、未清空原登录。请先在官方 CLI 登录该账号，再检查关联。")
+            }
             desired = CLIOwnedLogin(oauth: nil, metadata: nil); restoration = .needsLogin
         }
         guard try readOwned() == original, try normalized(io.readBackup(target.name)) == targetRaw,

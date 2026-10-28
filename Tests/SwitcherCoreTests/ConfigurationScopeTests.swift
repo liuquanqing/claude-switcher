@@ -39,16 +39,15 @@ final class ConfigurationScopeTests: FixtureTest {
             XCTAssertTrue(AuthenticationConfiguration.inspect(environment: [:], documents: [try CLIJSON.encode(object)]).otherAuthentication)
         }
     }
-    func testCustomOrFallbackStorageIsNotTreatedAsEmptyLogin() {
+    func testCustomStorageRemainsUnsupportedButDefaultFileIsEligibleForValidation() {
         XCTAssertTrue(AuthenticationConfiguration.inspect(environment: ["CLAUDE_CONFIG_DIR": "/fixture"], documents: []).unsupportedStorage)
-        XCTAssertTrue(AuthenticationConfiguration.inspect(environment: [:], documents: [], fallbackPresent: true).unsupportedStorage)
+        XCTAssertTrue(AuthenticationConfiguration.inspect(environment: [:], documents: [], fallbackPresent: true).allowsSubscriptionMutation)
     }
-    func testFileCredentialMarkerExplainsUnverifiedStateWithoutClaimingLogout() {
+    func testFilePresenceDoesNotProveOrPreventSubscriptionLogin() {
         let result = AuthenticationConfiguration.inspect(environment: [:], documents: [], fallbackPresent: true)
         XCTAssertTrue(result.fileCredentialsPresent); XCTAssertFalse(result.customDirectory)
-        XCTAssertTrue(result.explanation?.contains("CLI 凭据文件") == true)
-        XCTAssertTrue(result.explanation?.contains("不代表 CLI 已退出") == true)
-        XCTAssertFalse(result.allowsSubscriptionMutation)
+        XCTAssertNil(result.explanation)
+        XCTAssertTrue(result.allowsSubscriptionMutation)
         let custom = AuthenticationConfiguration.inspect(environment: ["CLAUDE_CONFIG_DIR": "/fixture/custom"], documents: [])
         XCTAssertTrue(custom.customDirectory); XCTAssertTrue(custom.explanation?.contains("自定义 CLI 配置目录") == true)
     }
@@ -65,7 +64,9 @@ final class ConfigurationScopeTests: FixtureTest {
         try writeJSON(["env": ["ANTHROPIC_AUTH_TOKEN": "fake"]], home.appendingPathComponent("project/.claude/settings.local.json"))
         XCTAssertTrue(AuthenticationConfiguration.read(home: home, cwd: cwd, environment: [:], managedSettings: nil).otherAuthentication)
         try writeJSON([:], home.appendingPathComponent(".claude/.credentials.json"))
-        XCTAssertTrue(AuthenticationConfiguration.read(home: home, cwd: cwd, environment: [:], managedSettings: nil).unsupportedStorage)
+        let result = AuthenticationConfiguration.read(home: home, cwd: cwd, environment: [:], managedSettings: nil)
+        XCTAssertTrue(result.fileCredentialsPresent)
+        XCTAssertTrue(result.otherAuthentication)
     }
     func testDesktopDefaultsAndConflicts() throws {
         XCTAssertEqual(DesktopModeInspector.classify([]), .subscription)

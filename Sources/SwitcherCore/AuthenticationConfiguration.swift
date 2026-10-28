@@ -12,8 +12,7 @@ public struct AuthenticationConfiguration: Equatable, Sendable {
     public var explanation: String? {
         if malformed { return "默认 CLI 配置无法读取或解析，未修改订阅登录。" }
         if unsupportedStorage {
-            if customDirectory { return "检测到自定义 CLI 配置目录；当前适配器只支持默认钥匙串，登录来源未核验，未修改登录。" }
-            if fileCredentialsPresent { return "检测到 CLI 凭据文件；当前适配器只支持默认钥匙串，登录来源未核验，不代表 CLI 已退出，未修改登录。" }
+            if customDirectory { return "检测到自定义 CLI 配置目录；当前适配器只支持默认目录，登录来源未核验，未修改登录。" }
             return "默认 CLI 登录存储未适配，未核验或修改登录。"
         }
         if otherAuthentication { return "默认 CLI 配置含其他认证来源，可能覆盖订阅登录；请继续用原工具处理。" }
@@ -45,7 +44,7 @@ public struct AuthenticationConfiguration: Equatable, Sendable {
                 || (object["primaryApiKey"] as? String)?.isEmpty == false
                 || ["console", "gateway"].contains(object["forceLoginMethod"] as? String ?? "")
         }
-        return Self(otherAuthentication: other, unsupportedStorage: custom || fallbackPresent, malformed: bad,
+        return Self(otherAuthentication: other, unsupportedStorage: custom, malformed: bad,
                     fileCredentialsPresent: fallbackPresent, customDirectory: custom)
     }
     /// Returns classification only. No key, provider URL or settings contents are logged.

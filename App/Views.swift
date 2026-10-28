@@ -168,10 +168,28 @@ struct TerminalStrip: View {
     @ObservedObject private var protection: ProtectionController
     @State private var hover = false
     @State private var showHelp = false
+    @State private var confirmSync = false
+    /// Account name pinned when the dialog opens, so a background refresh or external switch
+    /// can't make the user confirm X and sync Y.
+    @State private var syncTarget = ""
+    @State private var syncStale = false
 
     init(store: Store) {
         self.store = store
         self.protection = store.protection
+    }
+
+    private var controlsLocked: Bool { store.busy != nil || store.refreshing }
+
+    /// Sync is only offered after a check found a difference, and only against a subscription
+    /// desktop; API / unknown desktops have no subscription account to sync to.
+    private var canSync: Bool { store.cliStatus == .different && protection.desktopScope == .subscription }
+
+    private var checkHelp: String {
+        switch protection.desktopScope {
+        case .subscription: return "只读检查默认保存的 CLI 登录并与当前桌面比较；不会修改登录，也不检测已运行的 CLI 任务"
+        case .api, .unknown: return "只读检查默认保存的 CLI 订阅登录；当前桌面无订阅账号可比较，不会修改登录"
+        }
     }
 
     private var status: String {
@@ -221,13 +239,16 @@ struct TerminalStrip: View {
             }
             return "默认保存的 CLI 登录已核验，且与当前桌面账号一致。"
         case .different:
-            return "默认保存的 CLI 登录与当前桌面账号不同；同步只处理订阅 OAuth，不改 API key、环境变量或 provider。"
+            if protection.desktopScope != .subscription {
+                return "默认保存的 CLI 登录与桌面状态不同；当前桌面不是订阅账号，无可同步目标。"
+            }
+            return "默认保存的 CLI 登录与当前桌面账号不同；可点“同步”，同步只处理订阅 OAuth，不改 API key、环境变量或 provider。"
         case .needsLogin:
             return "默认保存的 CLI 订阅登录需要登录；API 与 provider 配置保持原样。"
         case .otherAuthentication:
             return "检测到其他认证配置，可能覆盖订阅。"
         case .unsupportedStorage:
-            return "仅能核验默认钥匙串里的 CLI 登录；此处保存方式暂不支持，未核验也未同步。不表示终端有问题，无需重新登录。"
+            return "仅支持默认位置的钥匙串或凭据文件；自定义目录等保存方式暂未适配，未核验也未同步。不表示终端有问题，无需重新登录。"
         }
     }
 
@@ -242,61 +263,102 @@ struct TerminalStrip: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        // Two tiers inside the strip: identity (icon + title/status + detail) on top, actions on
+        // their own row below. The title and status never compete with buttons for width.
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: "terminal").font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(0.1)))
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text("终端 OAuth").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
-                    Text(status).font(.system(size: 10, weight: .medium))
-                        .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
+            VStack(alignment: .leading, spacing: 5) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text("终端 OAuth").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                        Text(status).font(.system(size: 10, weight: .medium))
+                            .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
+                        Spacer(minLength: 0)
+                        Button { showHelp.toggle() } label: {
+                            Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
+                                .frame(width: 20, height: 16).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help("查看这项状态的说明")
+                        .accessibilityLabel("终端登录状态说明")
+                        .popover(isPresented: $showHelp, arrowEdge: .bottom) {
+                            Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
+                                .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                                .frame(width: 280, alignment: .leading).padding(12)
+                        }
+                    }
+                    Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
+                        .lineLimit(1).truncationMode(.middle).help(detailHelp)
+                        .accessibilityHint(detailHelp)
                 }
-                Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .lineLimit(2).truncationMode(.middle).help(detailHelp)
-                    .accessibilityHint(detailHelp)
-            }
-            Button { showHelp.toggle() } label: {
-                Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
-                    .frame(width: 22, height: 22).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("查看这项状态的说明")
-            .accessibilityLabel("终端登录状态说明")
-            .popover(isPresented: $showHelp, arrowEdge: .bottom) {
-                Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
-                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 280, alignment: .leading).padding(12)
-            }
-            Spacer(minLength: 6)
-            if store.cliStatus == .unverified {
-                Button("核验登录") { Task { await store.verifyDefaultCLI() } }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundColor(.claude)
-                    .padding(.horizontal, 6).padding(.vertical, 5)
-                    .contentShape(Rectangle())
-                    .disabled(store.busy != nil || store.refreshing)
-                    .opacity(store.busy == nil && !store.refreshing ? 1 : 0.45)
-                    .help("只读核验切换器默认保存的 CLI 登录；不检测或保护已运行的 CLI 任务")
-            }
-            if store.cliStatus == .different {
-                Button { Task { await store.moveTerminal(to: store.current) } } label: {
-                    Text("同步到 \(store.current)").font(.system(size: 10.5, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .foregroundColor(.claude)
-                        .background(RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.claude.opacity(hover ? 0.22 : 0.13)))
-                }
-                .buttonStyle(.plain).disabled(store.busy != nil || store.refreshing)
-                .opacity(store.busy == nil && !store.refreshing ? 1 : 0.45)
-                .help("同步到 \(store.current)：仅同步终端 OAuth 登录；不改 API key、环境变量或 provider 设置")
-                .onHover { hover = $0 }
+                actions
             }
         }
         .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Dialog and alert live on the container, not on the sync button, so a refresh that hides
+        // the button mid-dialog can't swallow the "state changed" notice.
+        .confirmationDialog("将默认 CLI 登录同步到 \(syncTarget)？", isPresented: $confirmSync,
+                            titleVisibility: .visible) {
+            Button("同步") {
+                // Re-validate at confirm time; the state may have changed while the dialog was open.
+                guard canSync, !controlsLocked, store.current == syncTarget else {
+                    syncStale = true
+                    return
+                }
+                let target = syncTarget
+                Task { await store.moveTerminal(to: target) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("会先备份当前 CLI 登录，再恢复 \(syncTarget) 的已保存登录并回读核验。不会关闭 CLI 任务，运行中的任务何时采用新登录由 CLI 决定；不改 API 设置。")
+        }
+        .alert("状态已变化，未同步", isPresented: $syncStale) {
+            Button("好") {}
+        } message: {
+            Text("当前账号或状态已变化，请重新检查后再同步。")
+        }
+    }
+
+    /// Normal state: one quiet check button. Different + subscription desktop: check + sync, side by side.
+    private var actions: some View {
+        HStack(spacing: 6) {
+            // Read-only, so it stays available in every state. Accent only while unverified.
+            Button { Task { await store.verifyDefaultCLI() } } label: {
+                Text(store.cliStatus == .unverified ? "核验登录" : "重新检查")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .lineLimit(1).fixedSize()
+                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .foregroundColor(store.cliStatus == .unverified ? .claude : .sub)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(store.cliStatus == .unverified ? Color.claude.opacity(0.13) : Color.white.opacity(0.06)))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(controlsLocked)
+            .opacity(controlsLocked ? 0.45 : 1)
+            .help(checkHelp)
+            .layoutPriority(1)
+            if canSync {
+                Button { syncTarget = store.current; confirmSync = true } label: {
+                    Text("同步到 \(store.current)").font(.system(size: 10.5, weight: .semibold))
+                        .lineLimit(1).truncationMode(.middle)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .foregroundColor(.claude)
+                        .background(RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.claude.opacity(hover ? 0.26 : 0.16)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(controlsLocked)
+                .opacity(controlsLocked ? 0.45 : 1)
+                .help("同步到 \(store.current)：仅同步终端 OAuth 登录；不改 API key、环境变量或 provider 设置")
+                .onHover { hover = $0 }
+            }
+            Spacer(minLength: 0)
+        }
     }
 }
 
