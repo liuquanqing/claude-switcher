@@ -44,13 +44,28 @@ struct Snapshot: Codable {
     var identity: CLIIdentity { CLIIdentity(accountID: accountID, organizationID: organizationID, email: email) }
 }
 
+enum ProfileUsageState: Equatable, Sendable { case notRequested, loading, cached, loaded, blocked, failed }
+
 struct Profile: Identifiable {
     var id: String { name }
     let name: String
     var snapshot: Snapshot?
     var signedIn: Bool
     var error: String?
-    var live: Bool { error == nil && snapshot.map { Date().timeIntervalSince($0.fetchedAt) < 600 } == true }
+    var usageState: ProfileUsageState = .notRequested
+    var live: Bool { usageState == .loaded && error == nil && snapshot.map { Date().timeIntervalSince($0.fetchedAt) < 600 } == true }
+    mutating func beginUsageRefresh() { usageState = .loading; error = nil }
+    mutating func blockUsageRefresh(_ reason: String) {
+        usageState = .blocked
+        if snapshot == nil { error = reason }
+    }
+    mutating func finishUsageRefresh(_ result: Result<Snapshot, Error>?) {
+        switch result {
+        case nil: signedIn = false; error = nil; usageState = .notRequested
+        case .success(let value)?: snapshot = value; signedIn = true; error = nil; usageState = .loaded
+        case .failure(let value)?: error = value.localizedDescription; usageState = .failed
+        }
+    }
 }
 
 func currentProfile() -> String {
@@ -178,6 +193,12 @@ final class Store: ObservableObject {
     @Published var cliStatus: CLILoginStatus = .unverified
     @Published var cliStatusDetail: String?
     @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?
+    @Published private(set) var importLanguage = "zh"
+    func setImportLanguage(_ value: String) {
+        guard ["zh", "en"].contains(value), value != importLanguage else { return }
+        importLanguage = value
+        if !isDemo { UserDefaults.standard.set(value, forKey: "importInterfaceLanguage") }
+    }
     var onChange: (() -> Void)?
     var onShowAccounts: (() -> Void)?
     func returnToAccounts() { onShowAccounts?() }
@@ -209,6 +230,7 @@ final class Store: ObservableObject {
             Profile(name: "Side Project", snapshot: nil, signedIn: false),
         ]
         for index in profiles.indices {
+            profiles[index].usageState = profiles[index].snapshot == nil ? .notRequested : .loaded
             profiles[index].snapshot?.accountID = "demo-account-" + profiles[index].name
             profiles[index].snapshot?.organizationID = "demo-org-" + profiles[index].name
         }
@@ -225,6 +247,12 @@ final class Store: ObservableObject {
                 Profile(name: "演示账号 \(number) · 较长名称", snapshot: snap("demo\(number)@example.com", "Max", 20, 2, 35, 72), signedIn: true)
             }
         }
+        if let state = Bundle.main.object(forInfoDictionaryKey: "CSPreviewUsageState") as? String,
+           let index = profiles.firstIndex(where: { $0.name == "Business" }) {
+            profiles[index].snapshot = nil
+            profiles[index].usageState = state == "loading" ? .loading : state == "failed" ? .failed : state == "blocked" ? .blocked : .notRequested
+            profiles[index].error = state == "blocked" ? "演示：保护检查未通过，尚未获取用量。" : state == "failed" ? "演示：用量请求失败。" : nil
+        }
     }
 
     func toggleOpenAtLogin() {
@@ -238,6 +266,8 @@ final class Store: ObservableObject {
     init() {
         isDemo = false
         protection = ProtectionController()
+        let savedLanguage = UserDefaults.standard.string(forKey: "importInterfaceLanguage") ?? "zh"
+        importLanguage = ["zh", "en"].contains(savedLanguage) ? savedLanguage : "zh"
         openAtLogin = SMAppService.mainApp.status == .enabled
         try? fm.createDirectory(at: parkDir, withIntermediateDirectories: true)
         if !fm.fileExists(atPath: currentFile.path) {
@@ -265,7 +295,9 @@ final class Store: ObservableObject {
         current = currentProfile()
         claudeRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
         profiles = allProfileNames().map { n in
-            profiles.first { $0.name == n } ?? Profile(name: n, snapshot: loadCache(n), signedIn: true)
+            if let existing = profiles.first(where: { $0.name == n }) { return existing }
+            let snapshot = loadCache(n)
+            return Profile(name: n, snapshot: snapshot, signedIn: true, usageState: snapshot == nil ? .notRequested : .cached)
         }
         onChange?()
     }
@@ -279,12 +311,14 @@ final class Store: ObservableObject {
         let decision = await protection.preflight()
         guard decision.allowed else {
             banner = decision.message
+            for index in profiles.indices { profiles[index].blockUsageRefresh(decision.message) }
             // API Desktop is outside the subscription Desktop gate. The default CLI
             // can still be verified through its own network/registration gate.
             await refreshCLI(verify: decision.reason == .unsupportedMode); onChange?()
             return
         }
         banner = nil
+        for index in profiles.indices { profiles[index].beginUsageRefresh() }
         await withTaskGroup(of: (String, Result<Snapshot, Error>?).self) { g in
             for p in profiles {
                 let dir = profileDir(p.name)
@@ -297,13 +331,9 @@ final class Store: ObservableObject {
             }
             for await (name, res) in g {
                 guard let i = profiles.firstIndex(where: { $0.name == name }) else { continue }
-                switch res {
-                case nil: profiles[i].signedIn = false; profiles[i].error = nil
-                case .success(let s)?: profiles[i].snapshot = s; profiles[i].signedIn = true; profiles[i].error = nil; saveCache(name, s)
-                case .failure(let e)?:
-                    profiles[i].error = e.localizedDescription
-                    if e.localizedDescription.contains("Keychain") { banner = e.localizedDescription }
-                }
+                profiles[i].finishUsageRefresh(res)
+                if case .success(let snapshot)? = res { saveCache(name, snapshot) }
+                if case .failure(let error)? = res, error.localizedDescription.contains("Keychain") { banner = error.localizedDescription }
             }
         }
         await refreshCLI(verify: true)

@@ -30,7 +30,7 @@ enum SessionTransferLocalization {
             "selectedCountOutside": "已选 {count} 项，含筛选外 {outside} 项",
             "copy": "开始导入",
             "processing": "正在处理…",
-            "copyForClaude": "复制指令…",
+            "copyForClaude": "复制指令",
             "viewBackup": "查看备份",
             "undo": "撤销导入",
             "recover": "处理未完成",
@@ -76,7 +76,7 @@ enum SessionTransferLocalization {
             "handoffTitle": "导入指令",
             "handoffNote": "指令仅在本地生成，不会自动执行或发送。",
             "copyInstructions": "复制指令",
-            "copiedInstructions": "已复制指令"
+            "copiedInstructions": "已复制"
         ],
         "en": [
             "windowTitle": "Import Claude Code sessions",
@@ -106,7 +106,7 @@ enum SessionTransferLocalization {
             "selectedCountOutside": "{count} selected · {outside} outside filter",
             "copy": "Start import",
             "processing": "Working…",
-            "copyForClaude": "Copy instructions…",
+            "copyForClaude": "Copy instructions",
             "viewBackup": "View backup",
             "undo": "Undo import",
             "recover": "Resolve",
@@ -152,7 +152,7 @@ enum SessionTransferLocalization {
             "handoffTitle": "Import instructions",
             "handoffNote": "Instructions are generated locally and are never run or sent automatically.",
             "copyInstructions": "Copy instructions",
-            "copiedInstructions": "Instructions copied"
+            "copiedInstructions": "Copied"
         ]
     ]
 

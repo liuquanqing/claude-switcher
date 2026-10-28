@@ -6,7 +6,10 @@ case "${1:-}" in
   --dry-run) DRY_RUN=1 ;;
   *) echo 'Usage: migrate-legacy-guard.sh [--dry-run]' >&2; exit 2 ;;
 esac
-if pgrep -f '^/Applications/Claude.app/Contents/MacOS/Claude' >/dev/null; then
+desktop_is_running() {
+  /bin/ps -axww -o comm= | /usr/bin/awk '/\/Contents\/MacOS\/Claude$/ { found = 1 } END { exit !found }'
+}
+if desktop_is_running; then
   if [ "$DRY_RUN" = 1 ]; then
     echo 'Dry run: Claude is active; a real migration would refuse to proceed. No service changed.'
     exit 0
@@ -24,6 +27,11 @@ fi
 sudo /bin/bash -s -- "$BACKUP" <<'ROOT'
 set -euo pipefail
 backup="$1"
+# The admin authorization prompt may take time; recheck before changing any job.
+if /bin/ps -axww -o comm= | /usr/bin/awk '/\/Contents\/MacOS\/Claude$/ { found = 1 } END { exit !found }'; then
+  echo 'Claude was reopened during preparation. No service changed.' >&2
+  exit 1
+fi
 [ ! -e "$backup" ] || { echo 'Backup already exists.' >&2; exit 1; }
 install -d -o root -g wheel -m 700 "$backup"
 for label in local.claude-bodyguard local.tz-watchdog; do

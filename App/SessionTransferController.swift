@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import Combine
 import SwitcherCore
 
 struct TransferLocationOption: Identifiable, Sendable { let id: String; let name: String }
@@ -118,7 +119,8 @@ actor SessionTransferWorker {
     @Published private(set) var backupInformation: String?
     @Published private(set) var backupItems: [TransferSessionItem] = []
     @Published private(set) var handoffInformation: String?
-    @Published var language = "zh"
+    @Published var language = "zh" // Legacy per-window control remains until Kimi moves it into preferences.
+    private var languageObservation: AnyCancellable?
     private let store: Store
     private let worker: SessionTransferWorker
     private let fixedEnvironment: SessionTransferEnvironment?
@@ -160,6 +162,8 @@ actor SessionTransferWorker {
             fixedEnvironment = nil; demoRoot = nil
             self.worker = worker ?? SessionTransferWorker()
         }
+        language = store.importLanguage
+        languageObservation = store.$importLanguage.removeDuplicates().sink { [weak self] value in self?.language = value }
     }
     deinit { if let demoRoot { try? FileManager.default.removeItem(at: demoRoot) } }
     var visibleRows: [SessionTransferRow] {
@@ -383,7 +387,11 @@ actor SessionTransferWorker {
     func dismissBackup() { backupInformation = nil }
     func dismissHandoff() { handoffInformation = nil }
     func exportInstructions() async {
-        guard canExport, let env = environment, let source = chosen(sourceSpaceID), let target = chosen(targetSpaceID) else { return }
+        handoffInformation = await generateInstructions()
+    }
+    /// Produces local text only. Clipboard presentation belongs to the view.
+    func generateInstructions() async -> String? {
+        guard canExport, let env = environment, let source = chosen(sourceSpaceID), let target = chosen(targetSpaceID) else { return nil }
         let intent = refreshID
         let identities = Dictionary(uniqueKeysWithValues: rows.filter { picked.contains($0.id) }.map { ($0.id, $0.identity) })
         isWorking = true; errorMessage = nil
@@ -391,7 +399,7 @@ actor SessionTransferWorker {
         do {
             let plan = try await worker.plan(env, source: source, target: target, selected: picked, updates: updateExisting, expectedSourceIdentities: identities)
             guard refreshID == intent else { throw SessionTransferFailure("选择已变化，请重新生成指令。") }
-            handoffInformation = try await worker.export(env, plan: plan, command: commandURL)
-        } catch { errorMessage = error.localizedDescription }
+            return try await worker.export(env, plan: plan, command: commandURL)
+        } catch { errorMessage = error.localizedDescription; return nil }
     }
 }

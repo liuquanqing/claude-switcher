@@ -107,7 +107,12 @@ import SwitcherCore
         if !configuration.allowsSubscriptionMutation {
             cliProfile = nil; cliEmail = nil
             cliStatus = configuration.malformed ? .unverified : (configuration.unsupportedStorage ? .unsupportedStorage : .otherAuthentication)
-            cliStatusDetail = configuration.explanation; return
+            cliStatusDetail = configuration.explanation
+            // File/custom storage blocks mutations, not the CLI's own local query.
+            if configuration.unsupportedStorage && !configuration.malformed && !configuration.otherAuthentication && !configuration.customDirectory {
+                await readReportedCLIStatus(configuration: configuration)
+            }
+            return
         }
         let io = NativeCLIStorage()
         do {
@@ -142,6 +147,54 @@ import SwitcherCore
             cliStatusDetail = "仅核验默认保存登录；未检测终端 shell 环境和各项目设置，不代表已运行的 CLI 任务。"
         } catch {
             cliProfile = nil; cliStatus = .unverified; cliStatusDetail = "CLI 登录核验未完成，未修改登录。"
+        }
+    }
+
+    private func readReportedCLIStatus(configuration: AuthenticationConfiguration) async {
+        do {
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let marker = try confirmedCurrentProfile()
+            let report = try await CLIStatusReader.read(home: home)
+            guard report.usesConfigurationDirectory(home.appendingPathComponent(".claude")), !configuration.customDirectory else {
+                cliStatus = .unsupportedStorage; cliStatusDetail = "CLI 使用了不同配置目录；未按默认账号猜测配对，未修改登录。"; return
+            }
+            guard report.loggedIn else {
+                cliStatus = .needsLogin; cliStatusDetail = "CLI 本次只读报告默认配置未登录；未执行登录或注销。"; return
+            }
+            guard report.authMethod == "claude.ai", !configuration.otherAuthentication else {
+                cliStatus = .otherAuthentication; cliStatusDetail = "CLI 报告已登录，但不是可自动同步的默认订阅来源；保留现状。"; return
+            }
+            let document = try NativeCLIStorage().readIdentityDocument()
+            let metadata = try CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
+            let record = report.savedRecord(matching: metadata)
+            cliEmail = report.identity.email
+            let matches = profiles.filter { profile in
+                guard let desktop = profile.snapshot?.identity, let record else { return false }
+                return desktop.samePrincipal(as: record)
+            }
+            cliProfile = matches.count == 1 ? matches.first?.name : nil
+            var comparison = "身份记录尚未能完整配对到桌面档案。"
+            if marker == current, try confirmedCurrentProfile() == marker, DesktopModeInspector.read(support: support) == .subscription {
+                let cached = profiles.first { $0.name == marker }?.snapshot?.identity
+                let config = try? CLIJSON.object(Data(contentsOf: liveDir.appendingPathComponent("config.json")))
+                let desktop = CLIIdentity(accountID: config?["lastKnownAccountUuid"] as? String ?? cached?.accountID,
+                    organizationID: config?["lastKnownOrganizationUuid"] as? String ?? cached?.organizationID, email: cached?.email)
+                if let record, desktop.samePrincipal(as: record) {
+                    comparison = "账号与组织的保存记录与桌面一致。"
+                } else if CLIReportedStatus.sameAccountRecord(record, desktop) == true {
+                    comparison = desktop.isComplete && record?.isComplete == true
+                        ? "账号 ID 相同，但组织保存记录不同。"
+                        : "账号 ID 保存记录与桌面一致；组织仍未确认。"
+                } else if CLIReportedStatus.sameAccountRecord(record, desktop) == false {
+                    comparison = "CLI 与桌面的账号 ID 保存记录不同。"
+                }
+            }
+            // Keep this weaker than .matched: a local status report cannot prove
+            // token validity, the selected storage backend or already running tasks.
+            cliStatus = .unverified
+            cliStatusDetail = "CLI 已报告订阅登录。" + comparison + "凭据文件的自动同步仍未适配，未改写登录；不代表所有已运行终端任务。"
+        } catch {
+            cliStatus = .unverified; cliStatusDetail = "CLI 本地状态读取未完成，未修改登录。" + (configuration.explanation ?? "")
         }
     }
 

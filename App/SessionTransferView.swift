@@ -64,6 +64,8 @@ struct CopyThreadsView: View {
     @ObservedObject private var controller: SessionTransferController
     @FocusState private var modalCancelFocused: Bool
     @State private var handoffCopied = false
+    @State private var instructionsCopied = false
+    @State private var instructionCopySequence = 0
     private let store: Store
 
     init(store: Store) {
@@ -301,8 +303,8 @@ struct CopyThreadsView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 4)
-                Button(text("copyForClaude")) {
-                    Task { await controller.exportInstructions() }
+                Button(text(instructionsCopied ? "copiedInstructions" : "copyForClaude")) {
+                    copyInstructions()
                 }
                 .buttonStyle(.link)
                 .font(.system(size: 11))
@@ -355,6 +357,27 @@ struct CopyThreadsView: View {
     private func pickedBinding(_ row: SessionTransferRow) -> Binding<Bool> {
         Binding(get: { controller.picked.contains(row.id) },
                 set: { controller.setPicked(row.id, selected: $0) })
+    }
+
+    private func copyInstructions() {
+        instructionCopySequence += 1
+        let sequence = instructionCopySequence
+        instructionsCopied = false
+        Task {
+            guard let instructions = await controller.generateInstructions(),
+                  !instructions.isEmpty,
+                  sequence == instructionCopySequence else { return }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            guard pasteboard.setString(instructions, forType: .string),
+                  sequence == instructionCopySequence else { return }
+            instructionsCopied = true
+            Task {
+                try? await Task.sleep(nanoseconds: 1_600_000_000)
+                guard sequence == instructionCopySequence else { return }
+                instructionsCopied = false
+            }
+        }
     }
 
     private func text(_ key: String, arguments: [String: String] = [:]) -> String {

@@ -251,7 +251,12 @@ final class ProtectionController: ObservableObject {
             lastDecision = decision; status = decision.message; return decision
         }
         guard !working else { return SafetyDecision(.guardUnavailable) }
-        guard let config = try? files.loadConfig() else { applySaved(nil); return finish(SafetyDecision(.invalidConfig)) }
+        guard let config = try? files.loadConfig() else {
+            let exists = FileManager.default.fileExists(atPath: files.configURL.path)
+            let registered = await worker.registered()
+            applySaved(nil)
+            return finish(SafetyDecision(exists || registered ? .invalidConfig : .disabled))
+        }
         applySaved(config); enabled = config.enabled; refreshScope()
         guard config.enabled else { return finish(SafetyDecision(.disabled)) }
         if target == .desktop && desktopScope != .subscription { return finish(SafetyDecision(.unsupportedMode)) }

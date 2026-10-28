@@ -43,6 +43,15 @@ final class ConfigurationScopeTests: FixtureTest {
         XCTAssertTrue(AuthenticationConfiguration.inspect(environment: ["CLAUDE_CONFIG_DIR": "/fixture"], documents: []).unsupportedStorage)
         XCTAssertTrue(AuthenticationConfiguration.inspect(environment: [:], documents: [], fallbackPresent: true).unsupportedStorage)
     }
+    func testFileCredentialMarkerExplainsUnverifiedStateWithoutClaimingLogout() {
+        let result = AuthenticationConfiguration.inspect(environment: [:], documents: [], fallbackPresent: true)
+        XCTAssertTrue(result.fileCredentialsPresent); XCTAssertFalse(result.customDirectory)
+        XCTAssertTrue(result.explanation?.contains("CLI 凭据文件") == true)
+        XCTAssertTrue(result.explanation?.contains("不代表 CLI 已退出") == true)
+        XCTAssertFalse(result.allowsSubscriptionMutation)
+        let custom = AuthenticationConfiguration.inspect(environment: ["CLAUDE_CONFIG_DIR": "/fixture/custom"], documents: [])
+        XCTAssertTrue(custom.customDirectory); XCTAssertTrue(custom.explanation?.contains("自定义 CLI 配置目录") == true)
+    }
     func testMalformedOrUnreadableSettingsStopMutations() throws {
         for data in [Data("bad".utf8), try CLIJSON.encode(["env": "invalid"]), try CLIJSON.encode(["apiKeyHelper": ["invalid": true]])] {
             let result = AuthenticationConfiguration.inspect(environment: [:], documents: [data])
