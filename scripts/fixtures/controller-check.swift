@@ -340,6 +340,47 @@ actor FixtureGuardWorker: GuardWorking {
   let absentProtection = ProtectionController(testFiles: absentProtectionFiles, worker: absentProtectionWorker)
   let absentDecision = await absentProtection.preflight()
   require(absentDecision.reason == .disabled, "first-time missing configuration with no registered guard is not misreported as malformed")
+  let quietStore = Store(demo: true)
+  let priorEmail = quietStore.cliEmail, priorCheckedAt = quietStore.cliStatusCheckedAt
+  let quietRefresh = Task { @MainActor in
+   await quietStore.updateCLIStatus {
+    try? await Task.sleep(nanoseconds: 180_000_000)
+    return CLIStatusPresentation(status: .different, profile: "Business", email: "new@example.test", detail: "fixture completed")
+   }
+  }
+  try await Task.sleep(nanoseconds: 50_000_000)
+  require(quietStore.cliStatusRefreshing && quietStore.cliStatus == .matched, "background refresh retains the last completed conclusion while evaluating")
+  require(quietStore.cliEmail == priorEmail && quietStore.cliStatusCheckedAt == priorCheckedAt, "intermediate evaluation cannot replace identity or completion time")
+  await quietRefresh.value
+  require(!quietStore.cliStatusRefreshing && quietStore.cliStatus == .different && quietStore.cliEmail == "new@example.test", "completed result publishes the new conclusion and identity together")
+  await quietStore.updateCLIStatus { CLIStatusPresentation(status: .unverified, detail: "fixture failed") }
+  require(quietStore.cliStatus == .unverified && quietStore.cliProfile == nil, "failed or unknown completion cannot retain a green match")
+  let changedContext = Task { @MainActor in
+   await quietStore.updateCLIStatus {
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    return CLIStatusPresentation(status: .matched, profile: "Personal", email: "old@example.test")
+   }
+  }
+  try await Task.sleep(nanoseconds: 30_000_000); quietStore.current = "Business"
+  await changedContext.value
+  require(quietStore.cliStatus == .unverified && quietStore.cliEmail == nil && quietStore.cliStatusCheckedAt == nil, "a changed desktop profile rejects an in-flight old match")
+  let invalidatedContext = Task { @MainActor in
+   await quietStore.updateCLIStatus {
+    try? await Task.sleep(nanoseconds: 100_000_000)
+    return CLIStatusPresentation(status: .matched, profile: "Business")
+   }
+  }
+  try await Task.sleep(nanoseconds: 30_000_000); quietStore.invalidateCLIStatus()
+  await invalidatedContext.value
+  require(quietStore.cliStatus == .unverified && quietStore.cliStatusCheckedAt == nil, "a scope/context invalidation rejects an in-flight old result even if the profile name stayed the same")
+  await quietStore.updateCLIStatus { CLIStatusPresentation(status: .unverified, email: "api-cli@example.test", standaloneVerified: true) }
+  require(quietStore.cliStandaloneVerified && quietStore.cliStatus != .matched, "verified standalone CLI identity is distinct from a desktop match")
+  quietStore.invalidateCLIStatus()
+  require(!quietStore.cliStandaloneVerified && quietStore.cliEmail == nil, "context invalidation clears standalone verification as well as identity")
+  let passiveStore = Store(demo: true), passiveTime = Date()
+  passiveStore.lastRefresh = passiveTime
+  for _ in 0..<3 { passiveStore.panelWillOpen() }
+  require(passiveStore.lastRefresh == passiveTime && !passiveStore.cliStatusRefreshing && passiveStore.cliStatus == .matched, "opening a panel is passive and never starts a full CLI refresh")
   print("PASS: \(checks) controller/store checks; temporary files and fixture worker only. No live credential/service actions.")
  }
 }

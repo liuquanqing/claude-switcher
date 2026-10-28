@@ -107,96 +107,131 @@ import SwitcherCore
         }
     }
 
-    /// Reads metadata without trusting the marker. Authenticated verification is gated.
+    /// Complete a display-only refresh without replacing known results with a transient state.
+    /// The operation remains injectable so tests use fictional data, never the live login stores.
+    func updateCLIStatus(using operation: () async -> CLIStatusPresentation) async {
+        guard !cliStatusRefreshing else { return }
+        let profileAtStart = current
+        let generationAtStart = cliStatusGeneration
+        cliStatusRefreshing = true
+        defer { cliStatusRefreshing = false }
+        let result = await operation()
+        guard current == profileAtStart, cliStatusGeneration == generationAtStart else { invalidateCLIStatus(); return }
+        cliProfile = result.profile; cliEmail = result.email; cliStatusDetail = result.detail
+        cliStatus = result.status; cliStandaloneVerified = result.standaloneVerified; cliStatusCheckedAt = Date()
+    }
+
+    func invalidateCLIStatus() {
+        cliStatusGeneration += 1
+        cliProfile = nil; cliEmail = nil; cliStatusDetail = nil
+        cliStatus = .unverified; cliStandaloneVerified = false; cliStatusCheckedAt = nil
+    }
+
+    func observeCLIStatusScope() {
+        cliScopeObservation = protection.$desktopScope.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.invalidateCLIStatus()
+        }
+    }
+
+    /// Network verification is still gated. Only its final result is published to the UI.
     func refreshCLI(verify: Bool = false) async {
         guard !isDemo else { return }
-        cliStatus = .unverified; cliStatusDetail = "默认保存身份尚未核验；未检测终端 shell 环境和各项目设置，不代表已运行的 CLI 任务。"
+        await updateCLIStatus { await evaluateCLIStatus(verify: verify) }
+    }
+
+    private func evaluateCLIStatus(verify: Bool) async -> CLIStatusPresentation {
+        var result = CLIStatusPresentation()
+        result.detail = "默认保存身份尚未核验；未检测终端 shell 环境和各项目设置，不代表已运行的 CLI 任务。"
         let configuration = cliConfiguration()
         if !configuration.allowsSubscriptionMutation {
-            cliProfile = nil; cliEmail = nil
-            cliStatus = configuration.malformed ? .unverified : (configuration.unsupportedStorage ? .unsupportedStorage : .otherAuthentication)
-            cliStatusDetail = configuration.explanation
-            return
+            result.profile = nil; result.email = nil
+            result.status = configuration.malformed ? .unverified : (configuration.unsupportedStorage ? .unsupportedStorage : .otherAuthentication)
+            result.detail = configuration.explanation
+            return result
         }
         if configuration.fileCredentialsPresent {
-            let defaultSubscription = await readReportedCLIStatus(configuration: configuration)
-            guard verify, defaultSubscription else { return }
+            let reported = await reportedCLIStatus(configuration: configuration)
+            result = reported.presentation
+            guard verify, reported.defaultSubscription else { return result }
         }
         let io = NativeCLIStorage()
         do {
             let document = try io.readIdentityDocument()
             let metadata = try CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
-            cliEmail = metadata?.email
+            result.email = metadata?.email
             let matches = profiles.filter { snapshot in
                 guard let identity = snapshot.snapshot?.identity, let metadata else { return false }
                 return identity.samePrincipal(as: metadata)
             }
-            cliProfile = matches.count == 1 ? matches.first?.name : nil
-            guard verify else { return }
+            result.profile = matches.count == 1 ? matches.first?.name : nil
+            guard verify else { return result }
             let gate = await protection.preflight(target: .cli)
-            guard gate.allowed else { return }
+            guard gate.allowed else { result.detail = gate.message; return result }
             let live = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
             guard live.hasSecrets else {
-                cliStatus = .needsLogin; cliProfile = nil; cliStatusDetail = "当前默认存储没有可用订阅登录，请在 CLI 中登录。"; return
+                result.status = .needsLogin; result.profile = nil; result.detail = "当前默认存储没有可用订阅登录，请在 CLI 中登录。"; return result
             }
             guard let access = live.usableAccessToken(now: Date()) else {
-                cliStatusDetail = "保存的访问凭据需要由 CLI 刷新，再核验默认登录。"; return
+                result.detail = "保存的访问凭据需要由 CLI 刷新，再核验默认登录。"; return result
             }
             let actual = CLIIdentity.profile(try await getJSON("profile", access))
             guard try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument()) == live else {
                 throw SafetyError("CLI 登录在核验期间变化；请重新检查，未修改登录。")
             }
             guard actual.isComplete, let paired = try live.identity, actual.samePrincipal(as: paired) else {
-                cliStatus = .different; cliStatusDetail = "CLI 凭据与身份信息不一致；未保存或覆盖任何登录。"; return
+                result.status = .different; result.detail = "CLI 凭据与身份信息不一致；未保存或覆盖任何登录。"; return result
             }
             let marker = try confirmedCurrentProfile()
             if DesktopModeInspector.read(support: support) == .subscription {
                 let desktop = try await profileDescriptor(marker)
-                guard try confirmedCurrentProfile() == marker, let identity = desktop.identity, identity.isComplete else {
+                guard marker == current, try confirmedCurrentProfile() == marker, let identity = desktop.identity, identity.isComplete else {
                     throw SafetyError("桌面身份在检查期间变化或未确认；未同步登录。")
                 }
                 guard try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument()) == live else {
                     throw SafetyError("CLI 登录在桌面核验期间变化；请重新检查，未修改登录。")
                 }
                 let candidates = profiles.filter { $0.snapshot?.identity.samePrincipal(as: actual) == true }
-                cliProfile = candidates.count == 1 ? candidates.first?.name : nil
-                cliEmail = actual.email
-                cliStatus = identity.samePrincipal(as: actual) ? .matched : .different
+                result.profile = candidates.count == 1 ? candidates.first?.name : nil
+                result.email = actual.email
+                result.status = identity.samePrincipal(as: actual) ? .matched : .different
             } else {
-                cliEmail = actual.email; cliProfile = nil
-                cliStatusDetail = "默认 CLI 订阅身份已核验；桌面为 API 或模式未知，不做桌面账号比较。"
-                return
+                result.email = actual.email; result.profile = nil
+                result.standaloneVerified = true
+                result.detail = "默认 CLI 订阅身份已经远端核验；未检测终端 shell 环境和各项目设置。"
+                return result
             }
-            cliStatusDetail = "仅核验默认保存登录；未检测终端 shell 环境和各项目设置，不代表已运行的 CLI 任务。"
+            result.detail = "仅核验默认保存登录；未检测终端 shell 环境和各项目设置，不代表已运行的 CLI 任务。"
         } catch {
-            cliProfile = nil; cliStatus = .unverified
-            cliStatusDetail = (error as? SafetyError)?.localizedDescription ?? "CLI 登录核验未完成，未修改登录。"
+            result.profile = nil; result.status = .unverified
+            result.detail = (error as? SafetyError)?.localizedDescription ?? "CLI 登录核验未完成，未修改登录。"
         }
+        return result
     }
 
-    private func readReportedCLIStatus(configuration: AuthenticationConfiguration) async -> Bool {
+    private func reportedCLIStatus(configuration: AuthenticationConfiguration) async -> (presentation: CLIStatusPresentation, defaultSubscription: Bool) {
+        var result = CLIStatusPresentation()
         do {
             let home = FileManager.default.homeDirectoryForCurrentUser
             let marker = try confirmedCurrentProfile()
             let report = try await CLIStatusReader.read(home: home)
             guard report.usesConfigurationDirectory(home.appendingPathComponent(".claude")), !configuration.customDirectory else {
-                cliStatus = .unsupportedStorage; cliStatusDetail = "CLI 使用了不同配置目录；未按默认账号猜测配对，未修改登录。"; return false
+                result.status = .unsupportedStorage; result.detail = "CLI 使用了不同配置目录；未按默认账号猜测配对，未修改登录。"; return (result, false)
             }
             guard report.loggedIn else {
-                cliStatus = .needsLogin; cliStatusDetail = "CLI 本次只读报告默认配置未登录；未执行登录或注销。"; return false
+                result.status = .needsLogin; result.detail = "CLI 本次只读报告默认配置未登录；未执行登录或注销。"; return (result, false)
             }
             guard report.authMethod == "claude.ai", !configuration.otherAuthentication else {
-                cliStatus = .otherAuthentication; cliStatusDetail = "CLI 报告已登录，但不是可自动同步的默认订阅来源；保留现状。"; return false
+                result.status = .otherAuthentication; result.detail = "CLI 报告已登录，但不是可自动同步的默认订阅来源；保留现状。"; return (result, false)
             }
             let document = try NativeCLIStorage().readIdentityDocument()
             let metadata = try CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
             let record = report.savedRecord(matching: metadata)
-            cliEmail = report.identity.email
+            result.email = report.identity.email
             let matches = profiles.filter { profile in
                 guard let desktop = profile.snapshot?.identity, let record else { return false }
                 return desktop.samePrincipal(as: record)
             }
-            cliProfile = matches.count == 1 ? matches.first?.name : nil
+            result.profile = matches.count == 1 ? matches.first?.name : nil
             var comparison = "身份记录尚未能完整配对到桌面档案。"
             if marker == current, try confirmedCurrentProfile() == marker, DesktopModeInspector.read(support: support) == .subscription {
                 let cached = profiles.first { $0.name == marker }?.snapshot?.identity
@@ -215,12 +250,12 @@ import SwitcherCore
             }
             // Keep this weaker than .matched: a local status report cannot prove
             // token validity, the selected storage backend or already running tasks.
-            cliStatus = .unverified
-            cliStatusDetail = "CLI 已报告订阅登录。" + comparison + "本地报告尚未验证凭据，未改写登录；不代表所有已运行终端任务。"
-            return true
+            result.status = .unverified
+            result.detail = "CLI 已报告订阅登录。" + comparison + "本地报告尚未验证凭据，未改写登录；不代表所有已运行终端任务。"
+            return (result, true)
         } catch {
-            cliStatus = .unverified; cliStatusDetail = "CLI 本地状态读取未完成，未修改登录。" + (configuration.explanation ?? "")
-            return false
+            result.status = .unverified; result.detail = "CLI 本地状态读取未完成，未修改登录。" + (configuration.explanation ?? "")
+            return (result, false)
         }
     }
 

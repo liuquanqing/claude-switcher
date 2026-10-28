@@ -3,6 +3,7 @@ import SwiftUI
 import CryptoKit
 import ServiceManagement
 import Security
+import Combine
 import SwitcherCore
 
 // Claude Switcher — menu bar app that swaps Claude Desktop's data folder between accounts
@@ -192,6 +193,11 @@ final class Store: ObservableObject {
     @Published var cliEmail: String?
     @Published var cliStatus: CLILoginStatus = .unverified
     @Published var cliStatusDetail: String?
+    @Published var cliStandaloneVerified = false
+    @Published var cliStatusRefreshing = false
+    @Published var cliStatusCheckedAt: Date?
+    var cliStatusGeneration = 0
+    var cliScopeObservation: AnyCancellable?
     @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?
     @Published private(set) var importLanguage = "zh"
     func setImportLanguage(_ value: String) {
@@ -238,7 +244,19 @@ final class Store: ObservableObject {
             profiles[index].snapshot?.organizationID = "demo-org-" + profiles[index].name
         }
         cliStatus = .matched
+        cliStatusCheckedAt = now
+        if Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIUnverified") as? Bool == true {
+            cliStatus = .unverified; cliStatusCheckedAt = nil
+        }
+        if Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIRefreshing") as? Bool == true {
+            cliStatusRefreshing = true
+        }
         cliStatusDetail = "演示：默认保存登录与桌面一致，不表示已运行的 CLI 会话。"
+        if cliStatus == .unverified { cliStatusDetail = nil }
+        if protection.desktopScope != .subscription {
+            cliStatus = .unverified; cliStandaloneVerified = true; cliProfile = nil
+            cliStatusDetail = nil
+        }
         // Model an externally changed terminal login only when explicitly requested for QA.
         if CommandLine.arguments.contains("--demo-cli-mismatch") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIMismatch") as? Bool == true {
             cliProfile = "Business"
@@ -256,6 +274,7 @@ final class Store: ObservableObject {
             profiles[index].usageState = state == "loading" ? .loading : state == "failed" ? .failed : state == "blocked" ? .blocked : .notRequested
             profiles[index].error = state == "blocked" ? "演示：保护检查未通过，尚未获取用量。" : state == "failed" ? "演示：用量请求失败。" : nil
         }
+        observeCLIStatusScope()
     }
 
     func toggleOpenAtLogin() {
@@ -269,6 +288,7 @@ final class Store: ObservableObject {
     init() {
         isDemo = false
         protection = ProtectionController()
+        observeCLIStatusScope()
         let savedLanguage = UserDefaults.standard.string(forKey: "importInterfaceLanguage") ?? "zh"
         importLanguage = ["zh", "en"].contains(savedLanguage) ? savedLanguage : "zh"
         openAtLogin = SMAppService.mainApp.status == .enabled
@@ -293,9 +313,17 @@ final class Store: ObservableObject {
 
     var active: Profile? { profiles.first { $0.name == current } }
 
+    /// Opening a panel updates local facts only; startup, the timer and explicit refresh do the I/O round.
+    func panelWillOpen() {
+        reloadList()
+        protection.refreshStatus()
+    }
+
+
     func reloadList() {
         guard !isDemo else { return }
-        current = currentProfile()
+        let observedProfile = currentProfile()
+        if current != observedProfile { current = observedProfile; invalidateCLIStatus() }
         claudeRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
         profiles = allProfileNames().map { n in
             if let existing = profiles.first(where: { $0.name == n }) { return existing }
@@ -624,7 +652,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             if popover.isShown { popover.performClose(nil); return }
             guard let b = item.button else { return }
-            Task { await store.refresh() }
+            store.panelWillOpen()
             if let v = popover.contentViewController?.view {
                 v.layoutSubtreeIfNeeded()
                 popover.contentSize = v.fittingSize
@@ -639,7 +667,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated {
             guard demoPopover else { return }
             if popover.isShown { popover.performClose(nil) }
-            Task { await store.refresh() }
+            store.panelWillOpen()
             if let v = popover.contentViewController?.view {
                 v.layoutSubtreeIfNeeded()
                 popover.contentSize = v.fittingSize

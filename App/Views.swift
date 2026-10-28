@@ -249,6 +249,27 @@ struct TerminalStrip: View {
 
     private var controlsLocked: Bool { store.busy != nil || store.refreshing }
 
+    /// A background check is in flight. The strip keeps showing the last finished result; only the
+    /// info popover mentions the check, so periodic refreshes never reshape the card.
+    private var checking: Bool { store.cliStatusRefreshing }
+
+    private static let checkedFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        f.doesRelativeDateFormatting = true
+        return f
+    }()
+
+    /// When the last full check finished. Says nothing about whether it succeeded.
+    private var checkedLine: String {
+        guard let date = store.cliStatusCheckedAt else {
+            return checking ? "首次检查进行中，完成后更新。" : "尚未完成过检查。"
+        }
+        let when = "最近一次检查完成于 \(Self.checkedFormatter.string(from: date))，以上为该次结论，不是实时状态。"
+        return checking ? when + "\n新的检查进行中，完成后更新。" : when
+    }
+
     /// Sync is only offered after a check found a difference, and only against a subscription
     /// desktop; API / unknown desktops have no subscription account to sync to.
     private var canSync: Bool { store.cliStatus == .different && protection.desktopScope == .subscription }
@@ -260,14 +281,23 @@ struct TerminalStrip: View {
         }
     }
 
+    /// Green needs a real comparison against a subscription desktop. A `matched` seen under another
+    /// scope is stale (the backend invalidates on scope change) and is never shown as a match.
+    private var matched: Bool { store.cliStatus == .matched && protection.desktopScope == .subscription }
+
+    /// Identity verified remotely, but an API / unknown desktop left nothing to compare. Taken only
+    /// from the backend flag, never from email, cache or detail text, and never treated as a match.
+    private var standaloneVerified: Bool {
+        store.cliStatus == .unverified && store.cliStandaloneVerified && protection.desktopScope != .subscription
+    }
+
     private var status: String {
         switch store.cliStatus {
-        case .unverified: return "登录待核验"
-        case .matched:
-            return protection.desktopScope == .api ? "订阅登录已核验" : "已与桌面一致"
+        case .unverified: return standaloneVerified ? "身份已核验" : "未核验"
+        case .matched: return matched ? "已与桌面一致" : "未核验"
         case .different: return "与桌面不同"
         case .needsLogin: return "需要登录"
-        case .otherAuthentication: return "检测到其他认证配置"
+        case .otherAuthentication: return "其他认证配置"
         // A limit of this app's checker, not a terminal fault: neutral colour, no "unsupported" alarm.
         case .unsupportedStorage: return "暂未核验"
         }
@@ -275,7 +305,7 @@ struct TerminalStrip: View {
 
     private var statusColor: Color {
         switch store.cliStatus {
-        case .matched: return .good
+        case .matched: return matched ? .good : .sub
         case .different, .otherAuthentication: return .warn
         case .unverified, .needsLogin, .unsupportedStorage: return .sub
         }
@@ -288,8 +318,11 @@ struct TerminalStrip: View {
 
     private var detail: String {
         switch store.cliStatus {
-        case .unverified: return accountDetail ?? "默认保存登录待核验"
-        case .matched: return accountDetail ?? "默认保存登录已核验"
+        case .unverified:
+            if let accountDetail { return accountDetail }
+            if standaloneVerified { return "桌面无订阅账号可比较" }
+            return store.cliStatusCheckedAt == nil ? "尚未完成检查" : "上次检查未能核验，原因见 ⓘ"
+        case .matched: return matched ? accountDetail ?? "与当前桌面账号一致" : "桌面不是订阅模式，待重新检查"
         case .different: return accountDetail ?? "默认登录账号待确认"
         case .needsLogin: return "未检测到订阅登录"
         case .otherAuthentication: return "可能覆盖订阅"
@@ -300,11 +333,12 @@ struct TerminalStrip: View {
     private var scopeHelp: String {
         switch store.cliStatus {
         case .unverified:
+            if standaloneVerified {
+                return "当前桌面为 API 或模式未知，没有可比较的订阅账号；这不表示与桌面一致。"
+            }
             return "尚未核验切换器默认保存的 CLI 登录，不据此推断其他终端状态。"
         case .matched:
-            if protection.desktopScope == .api {
-                return "已核验默认保存的 CLI 订阅登录；桌面为 API 配置，无可比较的订阅账号。"
-            }
+            guard matched else { return "当前桌面不是订阅模式，上次比较不再适用；请重新检查。" }
             return "默认保存的 CLI 登录已核验，且与当前桌面账号一致。"
         case .different:
             if protection.desktopScope != .subscription {
@@ -330,14 +364,9 @@ struct TerminalStrip: View {
         return lines.joined(separator: "\n")
     }
 
-    /// The inline action row is for states that need a remedy. When matched (or not checkable) the
-    /// footer refresh re-verifies the CLI; a manual re-check stays available inside the info popover.
-    private var showsActions: Bool {
-        switch store.cliStatus {
-        case .matched, .unsupportedStorage: return false
-        case .unverified, .different, .needsLogin, .otherAuthentication: return true
-        }
-    }
+    /// The only inline action is the sync remedy. Checking runs in the background (and from the
+    /// footer refresh); a manual check lives in the info popover, so no state grows a button row.
+    private var showsActions: Bool { canSync }
 
     var body: some View {
         // Two tiers inside the strip: identity (icon + title/status + detail) on top, actions on
@@ -365,26 +394,26 @@ struct TerminalStrip: View {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
                                     .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                                if !showsActions {
-                                    Divider().opacity(0.6)
-                                    HStack(spacing: 8) {
-                                        Text("底部刷新会一并核验。").font(.system(size: 10)).foregroundColor(.sub)
-                                        Spacer(minLength: 4)
-                                        Button {
-                                            showHelp = false
-                                            Task { await store.verifyDefaultCLI() }
-                                        } label: {
-                                            Text("立即核验").font(.system(size: 10.5, weight: .medium))
-                                                .padding(.horizontal, 10).frame(height: 24)
-                                                .foregroundColor(.txt)
-                                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)))
-                                                .contentShape(Rectangle())
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(controlsLocked)
-                                        .opacity(controlsLocked ? 0.45 : 1)
-                                        .help(checkHelp)
+                                Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
+                                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                                Divider().opacity(0.6)
+                                HStack(spacing: 8) {
+                                    Text("后台会定期检查，底部刷新也会检查。").font(.system(size: 10)).foregroundColor(.sub)
+                                    Spacer(minLength: 4)
+                                    Button {
+                                        showHelp = false
+                                        Task { await store.verifyDefaultCLI() }
+                                    } label: {
+                                        Text(checking ? "检查中…" : "立即检查").font(.system(size: 10.5, weight: .medium))
+                                            .padding(.horizontal, 10).frame(height: 24)
+                                            .foregroundColor(.txt)
+                                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)))
+                                            .contentShape(Rectangle())
                                     }
+                                    .buttonStyle(.plain)
+                                    .disabled(controlsLocked || checking)
+                                    .opacity(controlsLocked || checking ? 0.45 : 1)
+                                    .help(checkHelp)
                                 }
                             }
                             .frame(width: 280, alignment: .leading).padding(12)
@@ -405,7 +434,7 @@ struct TerminalStrip: View {
                             titleVisibility: .visible) {
             Button("同步") {
                 // Re-validate at confirm time; the state may have changed while the dialog was open.
-                guard canSync, !controlsLocked, store.current == syncTarget else {
+                guard canSync, !controlsLocked, !checking, store.current == syncTarget else {
                     syncStale = true
                     return
                 }
@@ -423,41 +452,23 @@ struct TerminalStrip: View {
         }
     }
 
-    /// Shown only when something needs attention: verify / re-check, plus sync when the login differs
-    /// from a subscription desktop.
+    /// Shown only for a confirmed difference against a subscription desktop: the sync remedy.
+    /// Disabled (not hidden) while a check runs, so the row doesn't flicker mid-refresh.
     private var actions: some View {
         HStack(spacing: 6) {
-            // Read-only, so it stays available in every state. Accent only while unverified.
-            Button { Task { await store.verifyDefaultCLI() } } label: {
-                Text(store.cliStatus == .unverified ? "核验登录" : "重新检查")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .lineLimit(1).fixedSize()
+            Button { syncTarget = store.current; confirmSync = true } label: {
+                Text("同步到 \(store.current)").font(.system(size: 10.5, weight: .semibold))
+                    .lineLimit(1).truncationMode(.middle)
                     .padding(.horizontal, 9).padding(.vertical, 4)
-                    .foregroundColor(store.cliStatus == .unverified ? .claude : .sub)
+                    .foregroundColor(.claude)
                     .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(store.cliStatus == .unverified ? Color.claude.opacity(0.13) : Color.white.opacity(0.06)))
+                        .fill(Color.claude.opacity(hover ? 0.26 : 0.16)))
                     .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .disabled(controlsLocked)
-            .opacity(controlsLocked ? 0.45 : 1)
-            .help(checkHelp)
-            .layoutPriority(1)
-            if canSync {
-                Button { syncTarget = store.current; confirmSync = true } label: {
-                    Text("同步到 \(store.current)").font(.system(size: 10.5, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .foregroundColor(.claude)
-                        .background(RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.claude.opacity(hover ? 0.26 : 0.16)))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).disabled(controlsLocked)
-                .opacity(controlsLocked ? 0.45 : 1)
-                .help("同步到 \(store.current)：仅同步终端 OAuth 登录；不改 API key、环境变量或 provider 设置")
-                .onHover { hover = $0 }
-            }
+            .buttonStyle(.plain).disabled(controlsLocked || checking)
+            .opacity(controlsLocked || checking ? 0.45 : 1)
+            .help("同步到 \(store.current)：仅同步终端 OAuth 登录；不改 API key、环境变量或 provider 设置")
+            .onHover { hover = $0 }
             Spacer(minLength: 0)
         }
     }
