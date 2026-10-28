@@ -507,6 +507,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             commands.addItem(.separator())
             commands.addItem(withTitle: "退出界面（保护状态不变）", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             rootItem.submenu = commands
+            ApplicationMenus.addEditMenu(to: applicationMenu)
             NSApp.mainMenu = applicationMenu
             let transferPreview = demoMode && Bundle.main.object(forInfoDictionaryKey: "CSPreviewTransfer") as? Bool == true
             if transferPreview {

@@ -58,6 +58,15 @@ func ago(_ d: Date?) -> String {
     return "\(s / 86400) 天前"
 }
 
+/// Identity line for a profile. Loading wording only appears while a request is really running;
+/// otherwise a missing identity is just "no account info".
+func accountLine(_ p: Profile?) -> String? {
+    guard let p else { return nil }
+    if !p.signedIn { return "尚未登录" }
+    if let email = p.snapshot?.email { return email }
+    return p.usageState == .loading ? "正在读取账号信息…" : "暂无账号信息"
+}
+
 // MARK: - Views
 
 struct Pill: View {
@@ -110,14 +119,14 @@ struct Header: View {
                     }
                 }
             }
-            .frame(width: 42, height: 42)
+            .frame(width: 38, height: 38)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Claude Switcher").font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
                 HStack(spacing: 7) {
                     Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
                     Text("当前账号").font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude)
                 }
-                Text([s?.email ?? (a?.signedIn == false ? "尚未登录" : "账号信息读取中"), s?.plan]
+                Text([accountLine(a), s?.plan]
                     .compactMap { $0 }.joined(separator: "  ·  "))
                     .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
             }
@@ -148,7 +157,7 @@ struct Header: View {
                 .onHover { openHover = $0 }
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
     }
 }
@@ -158,6 +167,7 @@ struct TerminalStrip: View {
     @ObservedObject var store: Store
     @ObservedObject private var protection: ProtectionController
     @State private var hover = false
+    @State private var showHelp = false
 
     init(store: Store) {
         self.store = store
@@ -172,15 +182,16 @@ struct TerminalStrip: View {
         case .different: return "与桌面不同"
         case .needsLogin: return "需要登录"
         case .otherAuthentication: return "检测到其他认证配置"
-        case .unsupportedStorage: return "存储暂不支持"
+        // A limit of this app's checker, not a terminal fault: neutral colour, no "unsupported" alarm.
+        case .unsupportedStorage: return "暂未核验"
         }
     }
 
     private var statusColor: Color {
         switch store.cliStatus {
         case .matched: return .good
-        case .different, .otherAuthentication, .unsupportedStorage: return .warn
-        case .unverified, .needsLogin: return .sub
+        case .different, .otherAuthentication: return .warn
+        case .unverified, .needsLogin, .unsupportedStorage: return .sub
         }
     }
 
@@ -196,7 +207,7 @@ struct TerminalStrip: View {
         case .different: return accountDetail ?? "默认登录账号待确认"
         case .needsLogin: return "未检测到订阅登录"
         case .otherAuthentication: return "可能覆盖订阅"
-        case .unsupportedStorage: return "无法核验默认登录"
+        case .unsupportedStorage: return accountDetail ?? "切换器暂无法核验；不代表终端有问题"
         }
     }
 
@@ -206,26 +217,28 @@ struct TerminalStrip: View {
             return "尚未核验切换器默认保存的 CLI 登录，不据此推断其他终端状态。"
         case .matched:
             if protection.desktopScope == .api {
-                return "仅表示切换器默认保存的 CLI 订阅登录已核验；桌面为 API 配置，没有可比的运行订阅账号，不代表任何已运行 CLI 任务的状态。"
+                return "已核验默认保存的 CLI 订阅登录；桌面为 API 配置，无可比较的订阅账号。"
             }
-            return "仅表示切换器默认保存的 CLI 登录已核验并与当前桌面账号一致；不代表所有已运行的 CLI。"
+            return "默认保存的 CLI 登录已核验，且与当前桌面账号一致。"
         case .different:
-            return "默认保存的 CLI 登录与当前桌面账号不同；同步只处理订阅 OAuth，不改 API key、环境变量或 provider 设置。"
+            return "默认保存的 CLI 登录与当前桌面账号不同；同步只处理订阅 OAuth，不改 API key、环境变量或 provider。"
         case .needsLogin:
             return "默认保存的 CLI 订阅登录需要登录；API 与 provider 配置保持原样。"
         case .otherAuthentication:
-            return "检测到其他认证配置，可能覆盖订阅；不表示所有终端都使用 API。"
+            return "检测到其他认证配置，可能覆盖订阅。"
         case .unsupportedStorage:
-            return "当前登录存储暂不支持，未将账号名称猜测为已同步。"
+            return "仅能核验默认钥匙串里的 CLI 登录；此处保存方式暂不支持，未核验也未同步。不表示终端有问题，无需重新登录。"
         }
     }
 
+    /// Popover text: the row already shows `detail`, so only add the backend note and the
+    /// scope once, then a single short disclaimer.
     private var detailHelp: String {
-        [detail, store.cliStatusDetail, scopeHelp,
-         "CLI 仅核验/同步默认保存登录；未检测终端 shell 环境变量与各项目设置，不代表已运行 CLI 任务的状态，也不保护 CLI 进程。"]
-            .compactMap { $0 }
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+        var lines = [store.cliStatusDetail, scopeHelp].compactMap { $0 }.filter { !$0.isEmpty }
+        var seen = Set<String>()
+        lines = lines.filter { seen.insert($0).inserted }
+        lines.append("仅针对默认保存的登录，不代表已运行的 CLI 任务，也不保护 CLI 进程。")
+        return lines.joined(separator: "\n")
     }
 
     var body: some View {
@@ -242,6 +255,18 @@ struct TerminalStrip: View {
                 Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
                     .lineLimit(2).truncationMode(.middle).help(detailHelp)
                     .accessibilityHint(detailHelp)
+            }
+            Button { showHelp.toggle() } label: {
+                Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
+                    .frame(width: 22, height: 22).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("查看这项状态的说明")
+            .accessibilityLabel("终端登录状态说明")
+            .popover(isPresented: $showHelp, arrowEdge: .bottom) {
+                Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
+                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                    .frame(width: 280, alignment: .leading).padding(12)
             }
             Spacer(minLength: 6)
             if store.cliStatus == .unverified {
@@ -282,11 +307,11 @@ struct UsageMetric: View {
     var prominent = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 4) {
             Text(title).font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(pct(value)).font(.system(size: prominent ? 30 : 23, weight: .bold, design: .rounded))
-                Text("%").font(.system(size: prominent ? 13 : 11, weight: .semibold, design: .rounded))
+                Text(pct(value)).font(.system(size: prominent ? 28 : 22, weight: .bold, design: .rounded))
+                Text("%").font(.system(size: prominent ? 12 : 11, weight: .semibold, design: .rounded))
             }
             .foregroundColor(levelColor(value))
             Bar(value: value, color: levelColor(value), height: 3)
@@ -304,9 +329,53 @@ struct ProfileCard: View {
     let onSwitch: () -> Void
     @State private var hover = false
 
+    /// Every account card shares one height, so empty / loading / failed cards sit on the same
+    /// row rhythm as data cards instead of floating at their own height.
+    static let height: CGFloat = 156
+
+    private struct Placeholder {
+        let icon: String
+        let title: String
+        var detail: String?
+        var color: Color = .sub
+        var spinner = false
+    }
+
+    private var placeholder: Placeholder {
+        if !p.signedIn { return Placeholder(icon: "person.crop.circle.badge.plus", title: "切换后，在 Claude 中登录") }
+        switch p.usageState {
+        case .loading: return Placeholder(icon: "", title: "正在读取用量…", spinner: true)
+        case .blocked: return Placeholder(icon: "shield.lefthalf.filled", title: "未请求用量", detail: "保护检查通过后再读取")
+        case .failed: return Placeholder(icon: "exclamationmark.triangle", title: "用量读取失败",
+                                         detail: p.error, color: .warn)
+        case .notRequested, .cached, .loaded: return Placeholder(icon: "chart.bar", title: "暂无用量数据")
+        }
+    }
+
+    @ViewBuilder private func usageFooter(_ snapshot: Snapshot) -> some View {
+        let age = ago(snapshot.fetchedAt)
+        switch p.usageState {
+        case .loading:
+            HStack(spacing: 5) {
+                ProgressView().controlSize(.mini)
+                Text("正在更新…")
+            }.foregroundColor(.sub.opacity(0.8))
+        case .failed:
+            Label("刷新失败 · 显示\(age)的缓存", systemImage: "exclamationmark.triangle.fill")
+                .foregroundColor(.warn).lineLimit(1).help(p.error ?? "用量请求失败")
+        case .blocked:
+            Text("未刷新 · \(age)的缓存").foregroundColor(.sub.opacity(0.8))
+                .help("保护检查未通过，本次没有请求用量；原因见顶部提示。")
+        case .loaded where p.live:
+            Text("\(age)更新").foregroundColor(.sub.opacity(0.8))
+        case .notRequested, .cached, .loaded:
+            Text("缓存 · \(age)更新").foregroundColor(.sub.opacity(0.8))
+        }
+    }
+
     var body: some View {
         let s = p.snapshot
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
@@ -321,7 +390,7 @@ struct ProfileCard: View {
                                 .foregroundColor(.sub)
                                 .background(RoundedRectangle(cornerRadius: 4).fill(Color.stroke.opacity(0.7)))
                         }
-                        Text(p.signedIn ? (s?.email ?? "账号信息读取中") : "尚未登录")
+                        Text(accountLine(p) ?? "")
                             .font(.system(size: 10)).foregroundColor(.sub)
                             .lineLimit(1).truncationMode(.middle)
                     }
@@ -341,37 +410,35 @@ struct ProfileCard: View {
                 HStack(alignment: .top, spacing: 12) {
                     UsageMetric(title: "5 小时剩余", value: left(snapshot.session),
                                 reset: countdown(snapshot.session?.resetsAt), prominent: true)
-                    Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 73)
+                    Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 58)
                     UsageMetric(title: "每周剩余", value: left(snapshot.weekly),
                                 reset: snapshot.weekly?.resetsAt.map { "\(weekdayTime($0)) 重置" } ?? "重置时间未知")
                 }
-                .padding(.top, 2)
-                Group {
-                    if let e = p.error {
-                        Label(e, systemImage: "exclamationmark.triangle.fill")
-                            .font(.system(size: 9.5)).foregroundColor(.warn)
-                            .lineLimit(1).truncationMode(.tail).help(e)
+                Spacer(minLength: 0)
+                usageFooter(snapshot).font(.system(size: 9.5))
+                    .frame(height: 12, alignment: .leading)
+            } else {
+                let ph = placeholder
+                Spacer(minLength: 0)
+                VStack(spacing: 6) {
+                    if ph.spinner {
+                        ProgressView().controlSize(.small)
                     } else {
-                        Text(p.live ? "\(ago(snapshot.fetchedAt))更新" : "缓存 · \(ago(snapshot.fetchedAt))更新")
-                            .font(.system(size: 9.5)).foregroundColor(.sub.opacity(0.8))
+                        Image(systemName: ph.icon).font(.system(size: 18, weight: .light)).foregroundColor(ph.color)
+                    }
+                    Text(ph.title).font(.system(size: 10.5, weight: .medium)).foregroundColor(ph.color)
+                    if let detail = ph.detail {
+                        Text(detail).font(.system(size: 9.5)).foregroundColor(.sub)
+                            .multilineTextAlignment(.center).lineLimit(2).help(detail)
                     }
                 }
-                .frame(height: 12, alignment: .leading)
-                Spacer(minLength: 0)
-            } else {
-                Spacer(minLength: 4)
-                VStack(spacing: 7) {
-                    Image(systemName: p.signedIn ? "arrow.triangle.2.circlepath" : "person.crop.circle.badge.plus")
-                        .font(.system(size: 22, weight: .light)).foregroundColor(.sub)
-                    Text(p.error ?? (p.signedIn ? "正在读取用量…" : "切换后，在 Claude 中登录"))
-                        .font(.system(size: 10.5)).foregroundColor(p.error == nil ? .sub : .warn)
-                        .multilineTextAlignment(.center).lineLimit(2)
-                }.frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity)
+                .help(p.usageState == .blocked ? "保护检查未通过，本次没有请求用量；原因见顶部提示。" : "")
                 Spacer(minLength: 0)
             }
         }
-        .padding(14)
-        .frame(height: p.signedIn && s != nil ? 188 : 132)
+        .padding(12)
+        .frame(height: Self.height)
         .background(RoundedRectangle(cornerRadius: 14).fill(active ? Color.cardHi : Color.card))
         .overlay(RoundedRectangle(cornerRadius: 14)
             .stroke(active ? Color.claude.opacity(0.65) : Color.stroke.opacity(0.32), lineWidth: 1))
@@ -381,7 +448,10 @@ struct ProfileCard: View {
     }
 }
 
-struct AddAccountCard: View {
+/// "账号 N 个" section header with a compact add entry. Adding is occasional, so it no longer
+/// takes a whole grid cell; the name field expands inline below the header only while editing.
+struct AccountsHeader: View {
+    let count: Int
     let onAdd: (String) -> Void
     @State private var editing = false
     @State private var name = ""
@@ -390,48 +460,49 @@ struct AddAccountCard: View {
     private var valid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 7) {
+                Text("账号").font(.system(size: 13, weight: .semibold)).foregroundColor(.txt)
+                Text("\(count) 个").font(.system(size: 10)).foregroundColor(.sub)
+                Spacer(minLength: 6)
+                if !editing {
+                    Button { editing = true } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "plus").font(.system(size: 9, weight: .semibold))
+                            Text("添加账号").font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(hover ? .txt : .sub)
+                        .padding(.horizontal, 9).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.stroke.opacity(hover ? 0.7 : 0.35)))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("新建一个空账号，切换过去后在 Claude 中登录")
+                    .onHover { hover = $0 }
+                }
+            }
+            .padding(.horizontal, 2)
             if editing {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("新账号", systemImage: "plus")
-                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.sub)
+                HStack(spacing: 8) {
                     TextField("名称，例如：客户 A", text: $name)
                         .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundColor(.txt)
                         .focused($focused).onSubmit(commit)
-                        .padding(.horizontal, 9).padding(.vertical, 7)
+                        .padding(.horizontal, 9).padding(.vertical, 6)
                         .background(RoundedRectangle(cornerRadius: 7).fill(Color.bg))
                         .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
-                    HStack(spacing: 10) {
-                        Spacer()
-                        Button("取消", action: reset).buttonStyle(.plain)
-                            .font(.system(size: 10.5)).foregroundColor(.sub)
-                        Button("添加", action: commit).buttonStyle(.plain)
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundColor(valid ? .white : .sub)
-                            .padding(.horizontal, 10).padding(.vertical, 5)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(valid ? Color.claude : Color.stroke))
-                            .disabled(!valid)
-                    }
+                    Button("取消", action: reset).buttonStyle(.plain)
+                        .font(.system(size: 10.5)).foregroundColor(.sub)
+                    Button("添加", action: commit).buttonStyle(.plain)
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundColor(valid ? .white : .sub)
+                        .padding(.horizontal, 10).padding(.vertical, 5)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(valid ? Color.claude : Color.stroke))
+                        .disabled(!valid)
                 }
-                .padding(13)
-            } else {
-                Button { editing = true } label: {
-                    VStack(spacing: 7) {
-                        Image(systemName: "plus").font(.system(size: 18, weight: .light))
-                        Text("添加账号").font(.system(size: 11.5, weight: .medium))
-                    }
-                    .foregroundColor(.sub)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.card))
             }
         }
-        .frame(height: 132)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.card.opacity(editing || hover ? 1 : 0.5)))
-        .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(Color.stroke.opacity(editing ? 0.9 : hover ? 0.75 : 0.5), lineWidth: 1))
-        .onHover { hover = $0 }
         .onChange(of: editing) { value in if value { focused = true } }
     }
 
@@ -465,7 +536,11 @@ struct Panel: View {
     @ObservedObject var store: Store
     @ObservedObject var protection: ProtectionController
     @State private var quitHover = false
-    let cols = [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)]
+    let cols = [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)]
+
+    private var importLanguageBinding: Binding<String> {
+        Binding(get: { store.importLanguage }, set: { store.setImportLanguage($0) })
+    }
     init(store: Store) {
         self.store = store
         self.protection = store.protection
@@ -478,7 +553,6 @@ struct Panel: View {
                     Task { await store.switchTo(p.name) }
                 }
             }
-            AddAccountCard { store.addProfile($0) }
         }
     }
 
@@ -535,13 +609,9 @@ struct Panel: View {
                 .help("原因：\(offer.reason)\n仅从 \(offer.source) 切换到 \(offer.target)；CLI 保持原样。")
             }
             VStack(alignment: .leading, spacing: 9) {
-                HStack(spacing: 7) {
-                    Text("账号").font(.system(size: 13, weight: .semibold)).foregroundColor(.txt)
-                    Text("\(store.profiles.count) 个").font(.system(size: 10)).foregroundColor(.sub)
-                }
-                .padding(.horizontal, 2)
-                if store.profiles.count + 1 > 4 {
-                    ScrollView { accountGrid }.frame(height: 386)
+                AccountsHeader(count: store.profiles.count) { store.addProfile($0) }
+                if store.profiles.count > 4 {
+                    ScrollView { accountGrid }.frame(height: 2 * ProfileCard.height + 10 + 44) // third row peeks to signal scrolling
                 } else {
                     accountGrid
                 }
@@ -570,6 +640,20 @@ struct Panel: View {
                              help: store.openAtLogin ? "已设置登录时打开界面，点击关闭" : "设置登录时打开界面") {
                     store.toggleOpenAtLogin()
                 }
+                // Rarely used preferences live here rather than on the import page. Only the session
+                // import page is bilingual so far; the label says so instead of implying app-wide English.
+                Menu {
+                    Picker("会话导入页语言（仅导入页）", selection: importLanguageBinding) {
+                        Text("中文").tag("zh")
+                        Text("English").tag("en")
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.system(size: 13, weight: .medium)).foregroundColor(.sub)
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden)
+                .fixedSize().frame(width: 28, height: 28)
+                .help("偏好：会话导入页语言（其余界面暂仅中文）")
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {
                     HStack(spacing: 5) {

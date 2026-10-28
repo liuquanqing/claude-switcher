@@ -154,12 +154,6 @@ struct CopyThreadsView: View {
                 .foregroundColor(.sub)
                 .help(text("backHelp"))
                 Spacer()
-                Button(controller.language == "zh" ? "EN" : "中文") {
-                    controller.language = controller.language == "zh" ? "en" : "zh"
-                }
-                .buttonStyle(.link)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.sub)
             }
 
             HStack(alignment: .center, spacing: 10) {
