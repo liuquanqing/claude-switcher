@@ -20,11 +20,14 @@
     "API identity verified is neutral; no match claim"
   ],
   "actualAccountsUsedAsFixtures": false,
-  "installed": false,
+  "installed": true,
   "screenshots": [
     "checking-main.png",
     "checking-info.png",
     "unverified-main.png",
     "api-main.png"
-  ]
+  ],
+  "installationBuild": "20261029.6.7",
+  "helpersUnchanged": true,
+  "guardStillRegistered": true
 }
