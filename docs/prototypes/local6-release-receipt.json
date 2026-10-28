@@ -20,5 +20,9 @@
   "installedCandidateBuild": "20261029.6.7",
   "helpersPreserved": true,
   "guardUnchanged": true,
-  "realAccountOrSessionAcceptancePerformed": false
+  "realAccountOrSessionAcceptancePerformed": false,
+  "githubCILatestResult": "success",
+  "githubCILatestCommit": "d63f77a3807981371315a58dc4556894faa75829",
+  "githubCILatestURL": "https://github.com/liuquanqing/claude-switcher/actions/runs/40747931686",
+  "githubCILatestCompletedAtSingapore": "2026-10-29T02:48:59+08:00"
 }
