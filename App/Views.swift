@@ -544,11 +544,8 @@ struct ProfileCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack(spacing: 6) {
-                        Text(p.name).font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(active ? .claude : .txt).lineLimit(1)
-                        if active { Pill(text: "当前", fg: .claude, bg: .claude.opacity(0.12)) }
-                    }
+                    Text(p.name).font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.txt).lineLimit(1)
                     HStack(spacing: 5) {
                         if let plan = s?.plan {
                             Text(plan).font(.system(size: 9, weight: .medium))
@@ -562,7 +559,19 @@ struct ProfileCard: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if !active {
+                // The top-right slot is shared: other cards put "切换" here, the current card a plain
+                // status mark (dot + text, no fill) so it never reads as a second, selectable control.
+                if active {
+                    HStack(spacing: 4) {
+                        Circle().fill(Color.claude).frame(width: 5, height: 5)
+                        Text("当前").font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.claude)
+                    .padding(.vertical, 4)
+                    .help("正在使用的账号")
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("当前账号")
+                } else {
                     Button(action: onSwitch) {
                         Pill(text: "切换", fg: .txt, bg: hover ? Color(hex: 0x45423C) : .stroke)
                     }
@@ -605,19 +614,17 @@ struct ProfileCard: View {
         }
         .padding(12)
         .frame(height: Self.height)
+        // Current card: one warm hairline and a slightly lifted surface; the mark above names it.
         .background(RoundedRectangle(cornerRadius: 14).fill(active ? Color.cardHi : Color.card))
         .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(active ? Color.claude.opacity(0.65) : Color.stroke.opacity(0.32), lineWidth: 1))
-        .overlay(alignment: .leading) {
-            if active { Capsule().fill(Color.claude).frame(width: 3, height: 40) }
-        }
+            .stroke(active ? Color.claude.opacity(0.42) : Color.stroke.opacity(0.32), lineWidth: 1))
     }
 }
 
-/// "账号 N 个" section header with a compact add entry. Adding is occasional, so it no longer
-/// takes a whole grid cell; the name field expands inline below the header only while editing.
-struct AccountsHeader: View {
-    let count: Int
+/// The original "add another account" entry: always the last cell of the account grid, at today's
+/// compact card height, whatever the account count. Idle it is one button; editing it holds the name
+/// field, Return adds, Esc or 取消 leaves without adding.
+struct AddAccountEntry: View {
     let onAdd: (String) -> Void
     @State private var editing = false
     @State private var name = ""
@@ -626,50 +633,66 @@ struct AccountsHeader: View {
     private var valid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack(spacing: 7) {
-                Text("账号").font(.system(size: 13, weight: .semibold)).foregroundColor(.txt)
-                Text("\(count) 个").font(.system(size: 10)).foregroundColor(.sub)
-                Spacer(minLength: 6)
-                if !editing {
-                    Button { editing = true } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "plus").font(.system(size: 9, weight: .semibold))
-                            Text("添加账号").font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(hover ? .txt : .sub)
-                        .padding(.horizontal, 9).padding(.vertical, 5)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.stroke.opacity(hover ? 0.7 : 0.35)))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("新建一个空账号，切换过去后在 Claude 中登录")
-                    .onHover { hover = $0 }
-                }
-            }
-            .padding(.horizontal, 2)
-            if editing {
-                HStack(spacing: 8) {
-                    TextField("名称，例如：客户 A", text: $name)
-                        .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundColor(.txt)
-                        .focused($focused).onSubmit(commit)
-                        .padding(.horizontal, 9).padding(.vertical, 6)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.bg))
-                        .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
-                    Button("取消", action: reset).buttonStyle(.plain)
-                        .font(.system(size: 10.5)).foregroundColor(.sub)
-                    Button("添加", action: commit).buttonStyle(.plain)
-                        .font(.system(size: 10.5, weight: .semibold))
-                        .foregroundColor(valid ? .white : .sub)
-                        .padding(.horizontal, 10).padding(.vertical, 5)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(valid ? Color.claude : Color.stroke))
-                        .disabled(!valid)
-                }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 10).fill(Color.card))
-            }
+        Group {
+            if editing { editor } else { idle }
         }
-        .onChange(of: editing) { value in if value { focused = true } }
+        .frame(maxWidth: .infinity)
+        .frame(height: ProfileCard.height)
+        .background(RoundedRectangle(cornerRadius: 14)
+            .fill(Color.card.opacity(editing || hover ? 1 : 0.55)))
+        .overlay(RoundedRectangle(cornerRadius: 14)
+            .stroke(Color.stroke.opacity(editing ? 0.6 : 1),
+                    style: StrokeStyle(lineWidth: 1, dash: editing ? [] : [4, 3])))
+    }
+
+    private var idle: some View {
+        Button { editing = true } label: {
+            VStack(spacing: 7) {
+                Image(systemName: "plus").font(.system(size: 17, weight: .light))
+                Text("添加账号").font(.system(size: 11.5, weight: .medium))
+            }
+            .foregroundColor(hover ? .txt : .sub)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help("新建一个空账号；切换过去后在 Claude 中登录")
+    }
+
+    private var field: some View {
+        TextField("账号名称，如 客户 A", text: $name)
+            .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundColor(.txt)
+            .focused($focused)
+            .onSubmit(commit)
+            .onExitCommand(perform: reset)
+            .padding(.horizontal, 9).frame(height: 26)
+            .background(RoundedRectangle(cornerRadius: 7).fill(Color.bg))
+            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
+            .onAppear { DispatchQueue.main.async { focused = true } }
+            .accessibilityLabel("新账号名称")
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 10) {
+            Button("取消", action: reset).buttonStyle(.plain)
+                .font(.system(size: 10.5)).foregroundColor(.sub)
+            Button("添加", action: commit).buttonStyle(.plain)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundColor(valid ? .white : .sub)
+                .padding(.horizontal, 11).frame(height: 24)
+                .background(RoundedRectangle(cornerRadius: 6).fill(valid ? Color.claude : Color.stroke))
+                .disabled(!valid)
+        }
+    }
+
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            Text("新账号").font(.system(size: 11, weight: .semibold)).foregroundColor(.sub)
+            field
+            HStack { Spacer(minLength: 0); buttons }
+        }
+        .padding(.horizontal, 14)
     }
 
     func commit() {
@@ -730,6 +753,7 @@ struct Panel: View {
         self.protection = store.protection
     }
 
+    /// Cards in their original order, then the add entry as the last grid cell.
     private var accountGrid: some View {
         LazyVGrid(columns: cols, spacing: 10) {
             ForEach(store.profiles) { p in
@@ -737,6 +761,7 @@ struct Panel: View {
                     Task { await store.switchTo(p.name) }
                 }
             }
+            AddAccountEntry { store.addProfile($0) }
         }
     }
 
@@ -792,13 +817,11 @@ struct Panel: View {
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.5), lineWidth: 1))
                 .help("原因：\(offer.reason)\n仅从 \(offer.source) 切换到 \(offer.target)；CLI 保持原样。")
             }
-            VStack(alignment: .leading, spacing: 9) {
-                AccountsHeader(count: store.profiles.count) { store.addProfile($0) }
-                if store.profiles.count > 4 {
-                    ScrollView { accountGrid }.frame(height: 2 * ProfileCard.height + 10 + 44) // third row peeks to signal scrolling
-                } else {
-                    accountGrid
-                }
+            // Capacity counts every grid cell, including the add entry: more than two rows (4 cells) scrolls.
+            if store.profiles.count + 1 > 2 * cols.count {
+                ScrollView { accountGrid }.frame(height: 2 * ProfileCard.height + 10 + 44) // third row peeks to signal scrolling
+            } else {
+                accountGrid
             }
             HStack(spacing: 7) {
                 FooterButton(icon: "folder", help: "显示账号目录") {

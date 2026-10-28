@@ -12,6 +12,7 @@ struct TerminalProtectionCard: View {
     @State private var showProxyHelp = false
     @State private var helpHover = false
     @State private var takeoverHover = false
+    @State private var settingsHover = false
     /// The report does not record the proxy mode, so remember the mode the check ran with; the picker
     /// is disabled while checking, so the value read on completion is the one that was used.
     @State private var checkedMode: ProxyMode?
@@ -19,6 +20,8 @@ struct TerminalProtectionCard: View {
     /// (pass, fail or invalid input) re-expands it; after that only the user folds it.
     @State private var resultsExpanded = true
     @State private var resultsHover = false
+    /// Shared by the open column and the panel beneath it, so the two read as one region.
+    private let panelTint = Color.white.opacity(0.03)
 
     // MARK: Network check results
 
@@ -256,10 +259,10 @@ struct TerminalProtectionCard: View {
         VStack(alignment: .leading, spacing: 9) {
             helpRow("仅检查网络", "按当前输入只读诊断；不保存、不启用保护、不打开 Claude。")
             helpRow("顶部 打开 / 显示", "按已保存配置复查门禁；未运行则打开当前账号，已纳入保护的桌面切到前台。")
-            helpRow("未保护 · 纳入…", "把已在运行的订阅桌面纳入守卫，需确认一次。")
+            helpRow("纳入保护", "把已在运行的订阅桌面交给守卫，需确认一次。")
             Divider().opacity(0.6)
             Text("后台守卫约每 \(Int(SafetyConfig.interval)) 秒复查一次，非实时；失败或未知均不放行。")
-            // The current desktop's scope detail lives on the scope line's hover help; not repeated here.
+            // The current desktop's scope detail lives on the column / switch hover help; not repeated here.
             Text("只保护订阅桌面；API 桌面不纳入，CLI 只核验默认登录、不保护 CLI 进程。")
         }
         .font(.system(size: 10.5)).foregroundColor(.sub)
@@ -278,29 +281,8 @@ struct TerminalProtectionCard: View {
 
     // MARK: Scope
 
-    private var desktopScopeShort: String {
-        switch controller.desktopScope {
-        case .subscription: return "范围：订阅桌面"
-        case .api: return "API 模式"
-        case .unknown: return "桌面范围待确认"
-        }
-    }
-
-    private var desktopScopeSummary: String {
-        switch controller.desktopScope {
-        case .subscription: return "保护范围：本入口启动或用户确认的订阅桌面"
-        case .api: return "保护范围：桌面 API 配置未纳入订阅守护"
-        case .unknown: return "保护范围：桌面配置待确认，不视为已纳入"
-        }
-    }
-
-    private var desktopScopeColor: Color {
-        switch controller.desktopScope {
-        case .subscription: return .sub
-        case .api, .unknown: return .warn
-        }
-    }
-
+    /// The scope is spelled out only on demand (column hover, switch hover, check help), never as a
+    /// standing line: the column title already names the desktop where it matters.
     private var desktopScopeHelp: String {
         let summary: String
         switch controller.desktopScope {
@@ -344,6 +326,34 @@ struct TerminalProtectionCard: View {
 
     // MARK: Notices
 
+    /// The live problem behind an exception title (guard offline / blocked), with its next step.
+    /// API / unknown scope already say everything in the column, so their generic message is skipped.
+    private var issueText: String? {
+        guard controller.enabled, !controller.working else { return nil }
+        guard !controller.guardOnline || !controller.lastDecision.allowed else { return nil }
+        if controller.guardOnline, controller.desktopScope != .subscription,
+           controller.lastDecision.reason == .unsupportedMode { return nil }
+        return controller.status
+    }
+
+    /// Problems first, then a dismissible failed-operation note. Placed under the header when folded and
+    /// at the top of the settings panel when open, so the panel stays attached to the column above it.
+    @ViewBuilder private var notices: some View {
+        if let issueText {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.circle.fill").font(.system(size: 10)).padding(.top, 1)
+                Text(issueText).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .font(.system(size: 10)).foregroundColor(statusColor)
+            .help(issueText)
+            .accessibilityElement(children: .combine)
+        }
+        operationErrorFeedback
+    }
+
+    private var hasNotices: Bool { issueText != nil || controller.operationError != nil }
+
     /// A failed save/enable/takeover is history, not the live state: say so and let the user dismiss it.
     /// Nothing here clears it automatically, a passing network check included.
     @ViewBuilder private var operationErrorFeedback: some View {
@@ -374,84 +384,71 @@ struct TerminalProtectionCard: View {
             }
             .padding(.leading, 10).padding(.trailing, 2).padding(.vertical, 4)
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.bad.opacity(0.08)))
-            .padding(.horizontal, 10).padding(.bottom, 10)
         }
     }
 
-    /// Status and action in one: when the running subscription desktop can be taken over, the status
-    /// line itself is the takeover button ("未保护 · 纳入…"). It is a sibling of the settings button,
-    /// never inside it. Only for a running subscription desktop while the guard is online and the
-    /// network currently passes; the confirmation dialog is the only place that explains the effect.
-    private var takeoverStatusButton: some View {
+    /// The one action the column can offer: put the running subscription desktop under the guard.
+    /// A separate sibling below the settings button, never inside it, and it only opens the
+    /// confirmation dialog. Only shown while `offerDesktopProtection` holds.
+    private var takeoverButton: some View {
         let disabled = busy || controller.working
         return Button { confirmProtectCurrentDesktop = true } label: {
-            HStack(spacing: 6) {
-                Image(systemName: statusIcon).font(.system(size: 12, weight: .semibold))
-                    .frame(width: 16, height: 16)
-                    .foregroundColor(statusColor)
-                Text("未保护").font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(statusColor).lineLimit(1)
-                Spacer(minLength: 4)
-                Text("纳入…").font(.system(size: 10.5, weight: .semibold))
-                    .foregroundColor(.claude).lineLimit(1).fixedSize()
-                    .opacity(disabled ? 0.55 : 1)
+            HStack(spacing: 5) {
+                Image(systemName: "plus").font(.system(size: 8.5, weight: .bold))
+                Text("纳入保护").font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
             }
-            .padding(.leading, 4).padding(.trailing, 7)
-            .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+            .foregroundColor(.claude)
+            .frame(maxWidth: .infinity).frame(height: 24)
             .background(RoundedRectangle(cornerRadius: 6)
-                .fill(Color.claude.opacity(disabled ? 0.06 : (takeoverHover ? 0.2 : 0.11))))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.claude.opacity(0.22), lineWidth: 1))
+                .fill(Color.claude.opacity(disabled ? 0.05 : (takeoverHover ? 0.2 : 0.12))))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(disabled)
+        .opacity(disabled ? 0.5 : 1)
         .onHover { takeoverHover = $0 }
-        .help("当前桌面未保护；点击纳入保护（需确认）")
-        .accessibilityLabel("当前桌面未保护，纳入保护")
-        .accessibilityHint("会先弹出确认")
+        .help("把正在运行的订阅桌面交给后台守卫；点击后先确认")
+        .accessibilityLabel("纳入保护")
+        .accessibilityHint("会先弹出确认，取消不做任何改动")
     }
 
-    /// Opens or folds the settings section. When the takeover button is shown above it, the status line
-    /// moves into that button and this one covers only the scope and target rows.
-    private var settingsButton: some View {
-        let offer = offerDesktopProtection
-        return Button { showSettings.toggle() } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                if !offer {
-                    HStack(spacing: 6) {
-                        Image(systemName: statusIcon).font(.system(size: 12, weight: .semibold))
-                            .frame(width: 16, height: 16)
-                        Text(statusTitle).font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1).minimumScaleFactor(0.85)
-                    }
-                    .foregroundColor(statusColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                Text(desktopScopeShort)
-                    .font(.system(size: 9.5, weight: .medium)).foregroundColor(desktopScopeColor)
-                    .lineLimit(1).minimumScaleFactor(0.85)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 4) {
-                    Text("目标 \(controller.activeCountry ?? "未设置")")
-                        .font(.system(size: 10)).foregroundColor(.sub).lineLimit(1)
+    /// The column header: what the guard means for the desktop right now (line 1) and the one fact or
+    /// next step that matters in that state (line 2). The whole block is the settings disclosure; its
+    /// only open/close affordance is the chevron beside the title, and the open panel visually extends
+    /// from this column, so entry and fold belong to the same place.
+    private var statusButton: some View {
+        Button { showSettings.toggle() } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
+                        .frame(width: 14, height: 14)
+                    Text(statusTitle).font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1).minimumScaleFactor(0.85)
                     Spacer(minLength: 2)
-                    Text(showSettings ? "收起" : "设置")
-                        .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                    Image(systemName: showSettings ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 7, weight: .semibold)).foregroundColor(.sub)
-                        .frame(width: 8)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .rotationEffect(.degrees(showSettings ? 180 : 0))
+                        .foregroundColor(settingsHover || showSettings ? .txt : .sub)
+                        .frame(width: 12)
                 }
+                .foregroundColor(statusColor)
+                // Sized to fit the 164pt column; nothing here is allowed to end in "…".
+                Text(statusDetail)
+                    .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                    .lineLimit(1).fixedSize()
+                    .padding(.leading, 20)
             }
-            .padding(.horizontal, 10).padding(.top, offer ? 4 : 8).padding(.bottom, 8)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 6).padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .background(RoundedRectangle(cornerRadius: 7)
+                .fill(Color.white.opacity(settingsHover && !showSettings ? 0.045 : 0)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help((showSettings ? "收起保护设置" : "保护设置与网络检查") + "\n" + desktopScopeHelp)
-        .accessibilityLabel(offer
-            ? "保护设置：\(desktopScopeShort)，目标 \(controller.activeCountry ?? "未设置")"
-            : "保护：\(statusTitle)，\(desktopScopeShort)，目标 \(controller.activeCountry ?? "未设置")")
-        .accessibilityHint(showSettings ? "收起保护设置" : "展开保护设置与网络检查")
+        .onHover { settingsHover = $0 }
+        .help((showSettings ? "收起保护设置" : "展开保护设置") + "\n" + desktopScopeHelp)
+        .accessibilityLabel("保护：\(statusTitle)，\(statusDetail)")
+        .accessibilityHint(showSettings ? "收起保护设置" : "展开保护设置：开关、目标国家、代理模式与网络检查")
     }
 
     // MARK: State
@@ -486,18 +483,37 @@ struct TerminalProtectionCard: View {
         if !store.claudeRunning && controller.lastDecision.allowed { return .good }
         return .warn
     }
+    /// Titles describe the guard against the desktop only. "Protected" always names the desktop, so it
+    /// can't be read as covering the terminal strip beside it or the account as a whole.
     private var statusTitle: String {
         if controller.working { return "正在更新设置" }
         if !controller.enabled { return "保护未启用" }
         if !controller.guardOnline { return "保护状态待确认" }
         if controller.lastDecision.reason == .terminationFailed { return "急停失败" }
-        if controller.desktopScope == .api { return "当前桌面未纳入" }
+        if controller.desktopScope == .api { return "API 桌面未纳入" }
         if controller.desktopScope == .unknown { return "桌面范围待确认" }
-        if desktopPendingTakeover { return "当前桌面未保护" }
+        if desktopPendingTakeover { return "当前桌面未纳入" }
         if !controller.lastDecision.allowed { return "已拦截" }
         if !store.claudeRunning { return "守护已就绪" }
-        if protectedDesktop { return "后台保护中" }
+        if protectedDesktop { return "桌面保护中" }
         return "保护状态待确认"
+    }
+    /// The one useful fact per state. The target shown is always the saved one the guard runs with,
+    /// never the draft in the settings field.
+    private var statusDetail: String {
+        let target = "目标 \(controller.activeCountry ?? "未设置")"
+        if controller.working { return target }
+        if !controller.enabled { return showSettings ? "在下方打开开关" : "点此设置并开启" }
+        if !controller.guardOnline || controller.lastDecision.reason == .terminationFailed { return target }
+        switch controller.desktopScope {
+        case .api: return "守卫只管订阅桌面"
+        case .unknown: return "确认前不算受保护"
+        case .subscription: break
+        }
+        if desktopPendingTakeover { return "守卫在线 · " + target }
+        if !controller.lastDecision.allowed { return target }
+        if !store.claudeRunning { return target + " · 桌面未运行" }
+        return target
     }
     private var statusIcon: String {
         if controller.working { return "arrow.triangle.2.circlepath" }
@@ -508,11 +524,19 @@ struct TerminalProtectionCard: View {
         }
         return protectedDesktop ? "checkmark.shield.fill" : "shield"
     }
-    private var shortStatus: String? {
-        if controller.working { return nil }
-        if !controller.enabled { return "打开与切换将被拦截；可在设置中启用保护。" }
-        if !controller.guardOnline || !controller.lastDecision.allowed { return controller.status }
-        return nil
+    private func modeName(_ mode: ProxyMode?) -> String {
+        switch mode {
+        case .shadowrocket: return "Shadowrocket"
+        case .auto: return "自动识别 TUN"
+        case nil: return "未设置"
+        }
+    }
+    /// Shown only while the form differs from the saved config. States the saved values only;
+    /// whether the guard is actually running is shown by the status block, not here.
+    private var unsavedNote: String? {
+        guard controller.enabled, controller.hasUnsavedChanges else { return nil }
+        guard let active = controller.activeCountry else { return "未保存 · 尚无已保存设置" }
+        return "未保存 · 已保存为 \(active) · \(modeName(controller.activeProxyMode))"
     }
     private var modeDetail: String {
         switch controller.mode {
@@ -527,39 +551,40 @@ struct TerminalProtectionCard: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
                 TerminalStrip(store: store)
-                // Full-height divider between the terminal strip and the protection column.
-                Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1).padding(.vertical, 10)
-                // Two sibling hit areas, never nested: the takeover status line (only when offered)
-                // and the settings toggle below it.
-                VStack(alignment: .leading, spacing: 0) {
-                    if offerDesktopProtection {
-                        takeoverStatusButton
-                            .padding(.horizontal, 6).padding(.top, 7)
+                    // Open: the line closes off the terminal side only, so the tinted column runs
+                    // straight into the panel below it like a tab.
+                    .overlay(alignment: .bottom) {
+                        if showSettings { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
                     }
-                    settingsButton
+                Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
+                    .padding(.vertical, showSettings ? 0 : 10)
+                // Two sibling hit areas, never nested: the status block (settings disclosure) on top
+                // and, only when offered, the takeover action under it.
+                VStack(alignment: .leading, spacing: 5) {
+                    statusButton
+                    if offerDesktopProtection {
+                        takeoverButton.padding(.horizontal, 6)
+                    }
+                    Spacer(minLength: 0)
                 }
-                .frame(width: 154)
+                .padding(.horizontal, 4).padding(.vertical, 4)
+                .frame(width: 164)
                 .frame(maxHeight: .infinity)
+                .background(showSettings ? panelTint : Color.clear)
             }
             .fixedSize(horizontal: false, vertical: true)
 
-            operationErrorFeedback
-
-            if let shortStatus, !showSettings {
+            if showSettings {
+                settings.background(panelTint)
+            } else if hasNotices {
                 Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1)
-                Text(shortStatus).font(.system(size: 10)).foregroundColor(statusColor)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 8) { notices }
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(shortStatus)
-            }
-
-            if showSettings {
-                Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1)
-                settings
             }
         }
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .onChange(of: controller.lastCheckReport?.checkedAt) { _ in
             checkedMode = controller.mode
             resultsExpanded = true
@@ -583,36 +608,33 @@ struct TerminalProtectionCard: View {
     }
 
     private var settings: some View {
+        // Controls only: status, scope and target are the column's job and are not repeated here.
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 12) {
-                    Text("订阅桌面保护")
+            if hasNotices {
+                VStack(alignment: .leading, spacing: 8) { notices }
+            }
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("后台保护")
                         .font(.system(size: 11.5, weight: .semibold)).foregroundColor(.txt)
-                    Spacer()
-                    Toggle("订阅桌面保护", isOn: protectionEnabled)
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                        .disabled(busy || controller.working)
+                    if !controller.enabled {
+                        Text("填好目标国家和代理模式，再打开右侧开关。")
+                            .font(.system(size: 9.5)).foregroundColor(.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-                Text(desktopScopeSummary)
-                    .font(.system(size: 9.5)).foregroundColor(desktopScopeColor)
-                    .lineLimit(1).minimumScaleFactor(0.9)
-                    .help(desktopScopeHelp)
-                if controller.activeCountry == nil {
-                    Text("首次使用：设置目标国家和代理模式，再开启订阅桌面保护。")
-                        .font(.system(size: 9.5)).foregroundColor(.sub)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Spacer()
+                Toggle("后台保护", isOn: protectionEnabled)
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .disabled(busy || controller.working)
+                    .help("开启后按下方设置保存并启动守卫；关闭前会先确认。\n" + desktopScopeHelp
+                          + "\n终端只核验默认保存的登录，不停止运行中的 CLI。")
             }
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Text("目标国家").font(.system(size: 10)).foregroundColor(.sub)
-                        if controller.hasUnsavedChanges {
-                            Text("未保存").font(.system(size: 8.5, weight: .medium)).foregroundColor(.warn)
-                        }
-                    }
-                    .frame(height: 22)
+                    Text("目标国家").font(.system(size: 10)).foregroundColor(.sub)
+                        .frame(height: 22)
                     TextField("SG", text: $controller.country)
                         .textFieldStyle(.plain)
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
@@ -675,6 +697,12 @@ struct TerminalProtectionCard: View {
                     .opacity(busy || controller.working ? 0.55 : 1)
                     .help(controller.hasUnsavedChanges ? "保存当前输入并应用保护；顶部目标在保存后更新" : "国家与代理模式均已保存")
                 }
+            }
+            if let unsavedNote {
+                Text(unsavedNote)
+                    .font(.system(size: 9.5)).foregroundColor(.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, -4)
             }
             HStack(spacing: 8) {
                 Button { Task { await controller.checkNow() } } label: {

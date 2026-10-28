@@ -25,7 +25,7 @@ import SwitcherCore
     let current = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
     if !current.isEmpty {
         guard let owned = managedDesktopApplication(files) else {
-            throw err("当前桌面未保护，未切到前台。可在保护卡片点“纳入…”确认，无需退出；确认前不接管、不关闭。")
+            throw err("当前桌面未保护，未切到前台。可在保护卡片点“纳入保护”，无需退出重开；确认前不接管、不关闭。")
         }
         owned.activate(options: []); return
     }
