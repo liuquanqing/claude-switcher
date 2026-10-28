@@ -1,7 +1,7 @@
 {
   "date": "2026-10-29",
   "build": "20261029.6.6",
-  "installed": false,
+  "installed": true,
   "frontendAndProductCopyAuthor": "official local Claude Code",
   "originalReferenceCommit": "b7df18c5d7077c47425e6ce8f98c6b21ee729b79",
   "controllerChecks": 97,
@@ -50,5 +50,27 @@
     "local6-ui-refinement.png",
     "local6-settings-unified.png",
     "local6-protected-summary.png"
-  ]
+  ],
+  "installation": {
+    "date": "2026-10-29",
+    "target": "/Applications/Claude Switcher 候选版.app",
+    "fromBuild": "20261028.6.4",
+    "toBuild": "20261029.6.6",
+    "changedFiles": [
+      "Contents/Info.plist",
+      "Contents/MacOS/ClaudeSwitcher"
+    ],
+    "forceQuitUsed": false,
+    "helperBytesInodesAndModificationTimesUnchanged": true,
+    "originalApplicationsVerifiedUnchanged": true,
+    "guardConfigurationAndOwnershipFilesUnchanged": true,
+    "guardCommandsRun": false,
+    "accountAndSessionDirectoriesAccessed": false,
+    "candidateLaunched": true,
+    "installedMainSHA256": "9acde8481254d3679b2e4b4c23374ecd276a6ddc8154a2c16cb3403e9a86a750",
+    "guardRegisteredAfterRestart": true,
+    "guardReceiptAgeSecondsAtVerification": 3.5,
+    "guardDecisionAtVerification": "allowed",
+    "desktopManagedAtVerification": false
+  }
 }

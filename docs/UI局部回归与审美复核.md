@@ -93,3 +93,7 @@
 这是20261029.6.6构建，当前真实候选仍为20261028.6.4，尚未替换。布局和产品文案均由官方Claude Code设计与定稿，Codex只负责原版来源回核、行为审查、接线与测试，没有自行重写产品措辞。
 
 [最终主页](prototypes/local6-ui-refinement.png) · [统一设置](prototypes/local6-settings-unified.png) · [生效后的摘要](prototypes/local6-protected-summary.png) · [验证清单](prototypes/local6-ui-refinement-validation.json)。
+
+## 6.6安装回读
+
+用户随后明确要求更新应用程序里的候选版并重启。现已完成：20261029.6.6正常退出/重启，原版全部文件摘要不变；只换Info.plist和主程序，守卫/helper文件与保护配置/归属保持原样。新守卫持续运行，没有真实切号或会话测试，未代为纳入现有桌面。详见[安装记录](prototypes/local6-ui-refinement-validation.json)。
