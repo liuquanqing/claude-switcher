@@ -96,66 +96,134 @@ struct Header: View {
     @ObservedObject var protection: ProtectionController
     let openClaude: () -> Void
     @State private var openHover = false
+    @State private var showAbout = false
 
     private var appIcon: NSImage? {
         guard let url = Bundle.main.resourceURL?.appendingPathComponent("AppIcon.png") else { return nil }
         return NSImage(contentsOf: url)
     }
 
+    private var versionText: String? {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String
+        let build = info?["CFBundleVersion"] as? String
+        switch (short, build) {
+        case (let s?, let b?) where s != b: return "版本 \(s)（\(b)）"
+        case (let s?, _): return "版本 \(s)"
+        case (nil, let b?): return "版本 \(b)"
+        default: return nil
+        }
+    }
+
+    // MARK: Desktop control
+    //
+    // One control carries both the process state and the action. The action always goes through
+    // `openClaude` (Store.openProtectedClaude → network gate first); "显示" is only a label for the
+    // running case, never a shortcut around the gate or around the takeover confirmation.
+
+    private var running: Bool { store.claudeRunning }
+    private var controlLocked: Bool { store.busy != nil || protection.working }
+
+    private var actionTitle: String { running ? "显示" : "打开" }
+    private var actionIcon: String { running ? "macwindow" : "play.fill" }
+
+    private var desktopHelp: String {
+        var lines: [String]
+        if !running {
+            lines = ["先检查网络门禁，通过后打开 \(store.current)。"]
+        } else if protection.desktopScope == .subscription && !protection.desktopManaged {
+            lines = ["先检查网络门禁；当前桌面尚未纳入保护，会提示先在保护卡片中确认纳入，不会自动接管或关闭。"]
+        } else {
+            lines = ["先检查网络门禁，通过后把已纳入保护的桌面切到前台。"]
+        }
+        if protection.desktopScope != .subscription { lines.append("当前桌面不是已确认的订阅配置，门禁会拦下。") }
+        lines.append((store.isDemo ? "演示状态。" : "") + "“运行中”只表示进程存在，不代表已登录、网络可用或已保护。")
+        return lines.joined(separator: "\n")
+    }
+
+    private var desktopControl: some View {
+        Button(action: openClaude) {
+            HStack(spacing: 0) {
+                HStack(spacing: 5) {
+                    Circle().fill(running ? Color.good : Color.sub.opacity(0.7)).frame(width: 6, height: 6)
+                    Text(running ? "桌面运行中" : "桌面未运行")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundColor(running ? .txt : .sub)
+                        .lineLimit(1).fixedSize()
+                }
+                .padding(.leading, 10).padding(.trailing, 9)
+                Rectangle().fill(Color.claude.opacity(0.28)).frame(width: 1, height: 16)
+                HStack(spacing: 5) {
+                    Image(systemName: actionIcon).font(.system(size: running ? 9.5 : 8, weight: .bold))
+                    Text(actionTitle).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                }
+                .foregroundColor(.claude)
+                .padding(.leading, 9).padding(.trailing, 11)
+            }
+            .frame(height: 30)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(openHover ? 0.2 : 0.1)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.claude.opacity(0.26), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(controlLocked)
+        .opacity(controlLocked ? 0.45 : 1)
+        .help(desktopHelp)
+        .onHover { openHover = $0 }
+        .accessibilityLabel("Claude 桌面\(running ? "运行中" : "未运行")，\(actionTitle)")
+        .accessibilityHint(desktopHelp)
+    }
+
+    // MARK: Body
+
+    private var iconView: some View {
+        Group {
+            if let appIcon {
+                Image(nsImage: appIcon)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 11).fill(Color.claude.opacity(0.13))
+                    RoundedRectangle(cornerRadius: 11).stroke(Color.claude.opacity(0.35), lineWidth: 1)
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 19, weight: .semibold)).foregroundColor(.claude)
+                }
+            }
+        }
+        .frame(width: 38, height: 38)
+    }
+
     var body: some View {
         let a = store.active, s = a?.snapshot
         HStack(spacing: 12) {
-            Group {
-                if let appIcon {
-                    Image(nsImage: appIcon)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 11).fill(Color.claude.opacity(0.13))
-                        RoundedRectangle(cornerRadius: 11).stroke(Color.claude.opacity(0.35), lineWidth: 1)
-                        Image(systemName: "arrow.triangle.2.circlepath")
-                            .font(.system(size: 19, weight: .semibold)).foregroundColor(.claude)
+            // The product name lives on the icon (hover / click), so the account is the only title.
+            Button { showAbout.toggle() } label: { iconView.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .help("Claude Switcher" + (versionText.map { " · \($0)" } ?? ""))
+                .accessibilityLabel("关于 Claude Switcher")
+                .popover(isPresented: $showAbout, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Claude Switcher").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+                        if let versionText {
+                            Text(versionText).font(.system(size: 10, design: .monospaced)).foregroundColor(.sub)
+                        }
+                        Text("多账号切换与订阅桌面保护").font(.system(size: 10.5)).foregroundColor(.sub)
                     }
+                    .frame(width: 200, alignment: .leading).padding(12)
                 }
-            }
-            .frame(width: 38, height: 38)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Claude Switcher").font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
-                HStack(spacing: 7) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
                     Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
-                    Text("当前账号").font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude)
+                    Text("当前账号").font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude.opacity(0.85))
+                        .fixedSize()
                 }
                 Text([accountLine(a), s?.plan]
                     .compactMap { $0 }.joined(separator: "  ·  "))
                     .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 5) {
-                HStack(spacing: 5) {
-                    Circle().fill(store.claudeRunning ? Color.good : Color.sub).frame(width: 6, height: 6)
-                    Text(store.claudeRunning ? "桌面版运行中" : "桌面版未运行")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(store.claudeRunning ? .good : .sub)
-                }
-                .help(store.isDemo ? "演示状态。正式版仅识别 Claude Desktop 进程，不代表已登录或聊天可用。" : "正式版仅识别 Claude Desktop 进程，不代表已登录或聊天可用。")
-                Button(action: openClaude) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "play.fill").font(.system(size: 8, weight: .bold))
-                        Text("检查并打开").font(.system(size: 11, weight: .semibold))
-                    }
-                    .foregroundColor(.claude)
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.claude.opacity(openHover ? 0.25 : 0.16)))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.claude.opacity(0.24), lineWidth: 1))
-                }
-                .buttonStyle(.plain)
-                .disabled(store.busy != nil || protection.working)
-                .opacity(store.busy == nil && !protection.working ? 1 : 0.45)
-                .help("重新检查必要条件，满足门禁后打开当前账号")
-                .onHover { openHover = $0 }
-            }
+            desktopControl
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))

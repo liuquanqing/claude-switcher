@@ -64,7 +64,7 @@ final class ProtectionController: ObservableObject {
             if Bundle.main.object(forInfoDictionaryKey: "CSPreviewProxyDisconnected") as? Bool == true {
                 demoNetwork = NetworkObservation(proxyConnected: false, tunOnline: false, country: nil)
                 lastDecision = SafetyDecision(.proxyDisconnected)
-                status = "演示：代理未连接。"
+                status = "演示：模拟代理未连接。"
             }
             if CommandLine.arguments.contains("--demo-guard-unknown") {
                 guardOnline = false; lastDecision = SafetyDecision(.staleReceipt)
@@ -80,7 +80,7 @@ final class ProtectionController: ObservableObject {
                 desktopScopeDetail = "演示：API 桌面不纳入订阅守护；CLI 同步与核验单独检查默认订阅配置。"
             }
             if CommandLine.arguments.contains("--demo-unmanaged") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewUnmanaged") as? Bool == true {
-                desktopManaged = false; desktopScopeDetail = "演示：当前桌面未接管；从候选入口重新启动后纳入。"
+                desktopManaged = false; desktopScopeDetail = "演示：当前桌面未保护，确认纳入前不接管。"
             }
             if CommandLine.arguments.contains("--demo-unprotected") {
                 enabled = false; guardOnline = false; lastDecision = SafetyDecision(.disabled)
@@ -137,7 +137,7 @@ final class ProtectionController: ObservableObject {
         case .api: desktopScopeDetail = "API 配置不纳入订阅桌面守护；从原工具启动的进程不会被接管。"
         case .unknown: desktopScopeDetail = "无法确认订阅配置，桌面入口暂停；不会按进程名关闭现有客户端。"
         case .subscription:
-            desktopScopeDetail = desktopManaged ? "只管理本候选入口记录的订阅桌面进程。" : "订阅配置已识别；当前桌面未保护，可在设置中确认保护，或退出后从本入口打开。"
+            desktopScopeDetail = desktopManaged ? "只管理本候选入口记录的订阅桌面进程。" : "订阅配置已识别；当前桌面未保护，确认纳入前不接管。"
         }
     }
 

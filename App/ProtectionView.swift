@@ -15,6 +15,10 @@ struct TerminalProtectionCard: View {
     /// The report does not record the proxy mode, so remember the mode the check ran with; the picker
     /// is disabled while checking, so the value read on completion is the one that was used.
     @State private var checkedMode: ProxyMode?
+    /// The result block folds on its own, independent of the settings section. Every finished round
+    /// (pass, fail or invalid input) re-expands it; after that only the user folds it.
+    @State private var resultsExpanded = true
+    @State private var resultsHover = false
 
     // MARK: Network check results
 
@@ -126,14 +130,26 @@ struct TerminalProtectionCard: View {
         return (failureText(report.decision), .bad, "xmark.circle.fill")
     }
 
+    /// The inputs changed after the last round, so its result no longer describes them.
+    private var resultStale: Bool {
+        guard let report = controller.lastCheckReport, report.validationMessage == nil,
+              let target = report.targetCountry else { return false }
+        let draft = controller.country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        return draft != target || (checkedMode != nil && checkedMode != controller.mode)
+    }
+
+    /// The headline used both expanded and folded. A stale pass must never read as a fresh one,
+    /// so a stale result loses its verdict colour and icon in either state.
+    private var displayVerdict: (text: String, color: Color, icon: String) {
+        if resultStale { return ("输入已修改，请重新检查", .warn, "arrow.triangle.2.circlepath") }
+        return verdict
+    }
+
     /// One line of context only when the result could be misread against the current inputs.
     private var reportContextNote: String? {
         guard let report = controller.lastCheckReport, report.validationMessage == nil,
               let target = report.targetCountry else { return nil }
-        let draft = controller.country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        if draft != target || (checkedMode != nil && checkedMode != controller.mode) {
-            return "输入已修改；以上是上次输入的结果，请重新检查。"
-        }
+        if resultStale { return "以下是上次输入（目标 \(target)）的结果，不代表当前输入。" }
         if controller.hasUnsavedChanges { return "按未保存的输入检查；保存前顶部目标不变。" }
         return nil
     }
@@ -156,52 +172,81 @@ struct TerminalProtectionCard: View {
         .accessibilityLabel("\(item.title)：\(item.value)，\(item.status.spoken)")
     }
 
-    /// Shown in place as soon as a check runs: verdict, the three real results, then one footnote.
+    /// The verdict row doubles as the fold toggle: the whole row is the hit area, and folded it is the
+    /// one-line summary (verdict + time). While checking it never shows the previous round's verdict.
+    private var resultHeaderRow: some View {
+        let result = displayVerdict
+        let checking = controller.checking
+        return Button { resultsExpanded.toggle() } label: {
+            HStack(spacing: 6) {
+                if checking {
+                    ProgressView().controlSize(.small)
+                    Text("正在检查代理、TUN 和出口国家…").foregroundColor(.sub).lineLimit(1)
+                } else {
+                    Image(systemName: result.icon)
+                    Text(result.text)
+                        .lineLimit(resultsExpanded ? 2 : 1).truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 6)
+                if !checking, let date = controller.lastCheckReport?.checkedAt {
+                    Text(date, style: .time).font(.system(size: 9.5, weight: .regular)).foregroundColor(.sub)
+                }
+                Image(systemName: resultsExpanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 8, weight: .semibold)).foregroundColor(resultsHover ? .txt : .sub)
+                    .frame(width: 12)
+            }
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundColor(checking ? .sub : result.color)
+            .frame(maxWidth: .infinity, minHeight: 28, alignment: .leading)
+            .padding(.horizontal, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { resultsHover = $0 }
+        .help(resultsExpanded ? "收起检查结果" : "展开检查结果")
+        .accessibilityLabel(checking ? "网络检查进行中" : "网络检查：\(result.text)")
+        .accessibilityHint(resultsExpanded ? "收起检查结果" : "展开检查结果")
+    }
+
+    /// Shown in place as soon as a check runs. Expanded: verdict, the three real results, one footnote.
+    /// Folded: just the verdict row, so the result stays visible without its detail.
     @ViewBuilder private var checkResults: some View {
         if controller.checking || controller.lastCheckReport != nil {
-            let result = verdict
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    if controller.checking {
-                        ProgressView().controlSize(.small)
-                        Text("正在检查代理、TUN 和出口国家…").foregroundColor(.sub)
-                    } else {
-                        Image(systemName: result.icon)
-                        Text(result.text).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            let borderColor = controller.checking ? Color.stroke : displayVerdict.color
+            VStack(alignment: .leading, spacing: 0) {
+                resultHeaderRow
+                if resultsExpanded {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if controller.checking || controller.lastCheckReport?.validationMessage == nil {
+                            HStack(spacing: 6) {
+                                ForEach(networkItems, id: \.title) { networkCell($0) }
+                            }
+                            // Previous inputs' cells stay readable but visibly not current.
+                            .opacity(resultStale && !controller.checking ? 0.45 : 1)
+                        }
+                        if let note = reportContextNote, !controller.checking {
+                            Text(note).font(.system(size: 9.5)).foregroundColor(.warn)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("仅诊断，不改变设置与保护状态。")
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Link("IP / WebRTC ↗", destination: URL(string: "https://ip.net.coffee/claude/")!)
+                                .foregroundColor(.claude)
+                                .help("第三方网页体检，结果仅供参考，不作为打开 Claude 的门禁")
+                                .accessibilityLabel("第三方 IP 与 WebRTC 体检，仅供参考")
+                        }
+                        .font(.system(size: 9.5)).foregroundColor(.sub)
                     }
-                    Spacer(minLength: 6)
-                    if !controller.checking, let date = controller.lastCheckReport?.checkedAt {
-                        Text(date, style: .time).font(.system(size: 9.5)).foregroundColor(.sub)
-                    }
+                    .padding(.horizontal, 10).padding(.bottom, 10).padding(.top, 2)
                 }
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundColor(controller.checking ? .sub : result.color)
-                .accessibilityElement(children: .combine)
-                if controller.checking || controller.lastCheckReport?.validationMessage == nil {
-                    HStack(spacing: 6) {
-                        ForEach(networkItems, id: \.title) { networkCell($0) }
-                    }
-                }
-                if let note = reportContextNote, !controller.checking {
-                    Text(note).font(.system(size: 9.5)).foregroundColor(.warn)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text("仅诊断，不改变设置与保护状态。")
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    Link("IP / WebRTC ↗", destination: URL(string: "https://ip.net.coffee/claude/")!)
-                        .foregroundColor(.claude)
-                        .help("第三方网页体检，结果仅供参考，不作为打开 Claude 的门禁")
-                        .accessibilityLabel("第三方 IP 与 WebRTC 体检，仅供参考")
-                }
-                .font(.system(size: 9.5)).foregroundColor(.sub)
             }
-            .padding(10)
+            .padding(.top, 2).padding(.bottom, resultsExpanded ? 0 : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 8).fill(Color.bg.opacity(0.55)))
-            .overlay(RoundedRectangle(cornerRadius: 8)
-                .stroke((controller.checking ? Color.stroke : result.color).opacity(0.35), lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(borderColor.opacity(0.35), lineWidth: 1))
         }
     }
 
@@ -210,8 +255,8 @@ struct TerminalProtectionCard: View {
     private var checkHelpContent: some View {
         VStack(alignment: .leading, spacing: 9) {
             helpRow("仅检查网络", "按当前输入只读诊断；不保存、不启用保护、不打开 Claude。")
-            helpRow("检查并打开", "按已保存配置复查，门禁通过才打开当前账号。")
-            helpRow("纳入保护", "把已在运行的订阅桌面纳入守卫，需确认一次。")
+            helpRow("顶部 打开 / 显示", "按已保存配置复查门禁；未运行则打开当前账号，已纳入保护的桌面切到前台。")
+            helpRow("未保护 · 纳入…", "把已在运行的订阅桌面纳入守卫，需确认一次。")
             Divider().opacity(0.6)
             Text("后台守卫约每 \(Int(SafetyConfig.interval)) 秒复查一次，非实时；失败或未知均不放行。")
             // The current desktop's scope detail lives on the scope line's hover help; not repeated here.
@@ -333,37 +378,80 @@ struct TerminalProtectionCard: View {
         }
     }
 
-    /// Visible next to "当前桌面未保护" without opening settings. Only for a running subscription desktop
-    /// while the guard is online and the network currently passes; the confirmation dialog still decides.
-    @ViewBuilder private var desktopTakeoverOffer: some View {
-        if offerDesktopProtection {
-            Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1)
-            HStack(spacing: 10) {
-                Text("当前桌面未纳入保护")
-                    .font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button { confirmProtectCurrentDesktop = true } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.shield").font(.system(size: 10, weight: .semibold))
-                        Text("纳入保护").font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
-                    }
-                    .fixedSize()
-                    .padding(.horizontal, 10).frame(height: 28)
-                    .foregroundColor(.claude)
-                    .background(RoundedRectangle(cornerRadius: 7).fill(Color.claude.opacity(takeoverHover ? 0.26 : 0.16)))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.claude.opacity(0.24), lineWidth: 1))
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(busy || controller.working)
-                .opacity(busy || controller.working ? 0.55 : 1)
-                .onHover { takeoverHover = $0 }
-                .help("需先确认")
-                .accessibilityHint("会先弹出确认")
+    /// Status and action in one: when the running subscription desktop can be taken over, the status
+    /// line itself is the takeover button ("未保护 · 纳入…"). It is a sibling of the settings button,
+    /// never inside it. Only for a running subscription desktop while the guard is online and the
+    /// network currently passes; the confirmation dialog is the only place that explains the effect.
+    private var takeoverStatusButton: some View {
+        let disabled = busy || controller.working
+        return Button { confirmProtectCurrentDesktop = true } label: {
+            HStack(spacing: 6) {
+                Image(systemName: statusIcon).font(.system(size: 12, weight: .semibold))
+                    .frame(width: 16, height: 16)
+                    .foregroundColor(statusColor)
+                Text("未保护").font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(statusColor).lineLimit(1)
+                Spacer(minLength: 4)
+                Text("纳入…").font(.system(size: 10.5, weight: .semibold))
+                    .foregroundColor(.claude).lineLimit(1).fixedSize()
+                    .opacity(disabled ? 0.55 : 1)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
+            .padding(.leading, 4).padding(.trailing, 7)
+            .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(Color.claude.opacity(disabled ? 0.06 : (takeoverHover ? 0.2 : 0.11))))
+            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.claude.opacity(0.22), lineWidth: 1))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .onHover { takeoverHover = $0 }
+        .help("当前桌面未保护；点击纳入保护（需确认）")
+        .accessibilityLabel("当前桌面未保护，纳入保护")
+        .accessibilityHint("会先弹出确认")
+    }
+
+    /// Opens or folds the settings section. When the takeover button is shown above it, the status line
+    /// moves into that button and this one covers only the scope and target rows.
+    private var settingsButton: some View {
+        let offer = offerDesktopProtection
+        return Button { showSettings.toggle() } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                if !offer {
+                    HStack(spacing: 6) {
+                        Image(systemName: statusIcon).font(.system(size: 12, weight: .semibold))
+                            .frame(width: 16, height: 16)
+                        Text(statusTitle).font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                    }
+                    .foregroundColor(statusColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text(desktopScopeShort)
+                    .font(.system(size: 9.5, weight: .medium)).foregroundColor(desktopScopeColor)
+                    .lineLimit(1).minimumScaleFactor(0.85)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(spacing: 4) {
+                    Text("目标 \(controller.activeCountry ?? "未设置")")
+                        .font(.system(size: 10)).foregroundColor(.sub).lineLimit(1)
+                    Spacer(minLength: 2)
+                    Text(showSettings ? "收起" : "设置")
+                        .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                    Image(systemName: showSettings ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 7, weight: .semibold)).foregroundColor(.sub)
+                        .frame(width: 8)
+                }
+            }
+            .padding(.horizontal, 10).padding(.top, offer ? 4 : 8).padding(.bottom, 8)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help((showSettings ? "收起保护设置" : "保护设置与网络检查") + "\n" + desktopScopeHelp)
+        .accessibilityLabel(offer
+            ? "保护设置：\(desktopScopeShort)，目标 \(controller.activeCountry ?? "未设置")"
+            : "保护：\(statusTitle)，\(desktopScopeShort)，目标 \(controller.activeCountry ?? "未设置")")
+        .accessibilityHint(showSettings ? "收起保护设置" : "展开保护设置与网络检查")
     }
 
     // MARK: State
@@ -441,45 +529,21 @@ struct TerminalProtectionCard: View {
                 TerminalStrip(store: store)
                 // Full-height divider between the terminal strip and the protection column.
                 Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1).padding(.vertical, 10)
-                Button { showSettings.toggle() } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            Image(systemName: statusIcon).font(.system(size: 12, weight: .semibold))
-                                .frame(width: 16, height: 16)
-                            Text(statusTitle).font(.system(size: 11, weight: .semibold))
-                                .lineLimit(1).minimumScaleFactor(0.85)
-                        }
-                        .foregroundColor(statusColor)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        Text(desktopScopeShort)
-                            .font(.system(size: 9.5, weight: .medium)).foregroundColor(desktopScopeColor)
-                            .lineLimit(1).minimumScaleFactor(0.85)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        HStack(spacing: 4) {
-                            Text("目标 \(controller.activeCountry ?? "未设置")")
-                                .font(.system(size: 10)).foregroundColor(.sub).lineLimit(1)
-                            Spacer(minLength: 2)
-                            Text(showSettings ? "收起" : "设置")
-                                .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                            Image(systemName: showSettings ? "chevron.up" : "chevron.down")
-                                .font(.system(size: 7, weight: .semibold)).foregroundColor(.sub)
-                                .frame(width: 8)
-                        }
+                // Two sibling hit areas, never nested: the takeover status line (only when offered)
+                // and the settings toggle below it.
+                VStack(alignment: .leading, spacing: 0) {
+                    if offerDesktopProtection {
+                        takeoverStatusButton
+                            .padding(.horizontal, 6).padding(.top, 7)
                     }
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .frame(width: 154)
-                    .frame(maxHeight: .infinity)
-                    .contentShape(Rectangle())
+                    settingsButton
                 }
-                .buttonStyle(.plain)
-                .help((showSettings ? "收起保护设置" : "保护设置与网络检查") + "\n" + desktopScopeHelp)
-                .accessibilityLabel("保护：\(statusTitle)，\(desktopScopeShort)，目标 \(controller.activeCountry ?? "未设置")")
-                .accessibilityHint(showSettings ? "收起保护设置" : "展开保护设置与网络检查")
+                .frame(width: 154)
+                .frame(maxHeight: .infinity)
             }
             .fixedSize(horizontal: false, vertical: true)
 
             operationErrorFeedback
-            desktopTakeoverOffer
 
             if let shortStatus, !showSettings {
                 Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1)
@@ -496,7 +560,10 @@ struct TerminalProtectionCard: View {
             }
         }
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
-        .onChange(of: controller.lastCheckReport?.checkedAt) { _ in checkedMode = controller.mode }
+        .onChange(of: controller.lastCheckReport?.checkedAt) { _ in
+            checkedMode = controller.mode
+            resultsExpanded = true
+        }
         .confirmationDialog("将当前桌面纳入保护？", isPresented: $confirmProtectCurrentDesktop,
                             titleVisibility: .visible) {
             Button("纳入保护") {

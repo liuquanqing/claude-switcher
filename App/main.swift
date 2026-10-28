@@ -223,6 +223,9 @@ final class Store: ObservableObject {
         cliProfile = "Personal"
         cliEmail = "ada@lovelace.dev"
         claudeRunning = true
+        if Bundle.main.object(forInfoDictionaryKey: "CSPreviewDesktopStopped") as? Bool == true {
+            claudeRunning = false
+        }
         lastRefresh = now
         profiles = [
             Profile(name: "Personal", snapshot: snap("ada@lovelace.dev", "Max 5x", 28, 3.3, 61, 50), signedIn: true),
