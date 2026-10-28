@@ -9,6 +9,13 @@ i=s.index('if CommandLine.arguments.contains("--stop-protection")')
 Path('_qa/controller-check/AppDeclarations.swift').write_text('// Test compilation: exact declaration prefix, excluding application entrypoint.\n'+s[:i])
 INNER
 mkdir -p _qa/controller-check/model-module
+# Enumerate sources with Bash built-ins; hosted runners need no ripgrep installation.
+app_sources=()
+for app_source in App/*.swift; do
+    if [[ "$app_source" != "App/main.swift" ]]; then
+        app_sources+=("$app_source")
+    fi
+done
 swiftc -target "$(uname -m)-apple-macos13.0" -emit-library -emit-module -module-name SwitcherCore Sources/SwitcherCore/*.swift -o _qa/controller-check/model-module/libSwitcherCore.dylib
-swiftc -target "$(uname -m)-apple-macos13.0" -parse-as-library -I _qa/controller-check/model-module -L _qa/controller-check/model-module -lSwitcherCore -Xlinker -rpath -Xlinker "$PWD/_qa/controller-check/model-module" $(rg --files App -g '*.swift' | rg -v '^App/main.swift$') _qa/controller-check/AppDeclarations.swift scripts/fixtures/controller-check.swift -framework SwiftUI -framework AppKit -framework Security -framework ServiceManagement -o _qa/controller-check/controller-check
+swiftc -target "$(uname -m)-apple-macos13.0" -parse-as-library -I _qa/controller-check/model-module -L _qa/controller-check/model-module -lSwitcherCore -Xlinker -rpath -Xlinker "$PWD/_qa/controller-check/model-module" "${app_sources[@]}" _qa/controller-check/AppDeclarations.swift scripts/fixtures/controller-check.swift -framework SwiftUI -framework AppKit -framework Security -framework ServiceManagement -o _qa/controller-check/controller-check
 _qa/controller-check/controller-check

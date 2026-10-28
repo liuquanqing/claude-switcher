@@ -15,7 +15,7 @@
 | Core（`SwitcherCoreTests`） | `swift test`（或 `./build.sh test`） | 176 项通过 |
 | 控制器检查（`scripts/fixtures/controller-check.swift`） | `bash scripts/test-controller.sh` | 106 项通过（其中 9 项是静默刷新新增的检查） |
 
-上表是公开发布源码副本上的结果。**公开源码副本会再跑一遍，在那之前请不要把上表当作公开副本的结果**；复跑结果会随 Release 一起公布。`scripts/test-controller.sh` 需要本机装有 `python3` 和 `rg`（ripgrep），中间产物写在 `_qa/` 下。
+上表来自公开发布源码的本机复跑，Core 176 项、控制器 106 项均通过，release 构建和签名验证通过。云端 CI 结果以 Release 中链接的运行记录为准。`scripts/test-controller.sh` 需要本机装有 `python3`（源码枚举使用系统 Bash，不依赖 ripgrep），中间产物写在 `_qa/` 下。
 
 ## 已覆盖的功能边界
 
@@ -58,7 +58,7 @@
 - 真实 Keychain 权限弹窗、拒绝授权、钥匙串被锁定等情况。
 - 菜单栏面板里的嵌套弹层（ⓘ 等）在不同 macOS 版本上的显示和焦点行为。
 - VoiceOver 和其他辅助功能。
-- Intel 和 universal 构建。
+- Intel 上的实际交互与 universal 构建；云端编译不等于原生界面验收。
 - Shadowrocket 和 `198.18.*` TUN 之外的代理或网络环境。
 - 和原版 Claude Switcher、Magpie、CC Switch 同时运行时的实际交互。
 - 上游 Claude Desktop 或 Claude Code 更新数据格式之后的兼容性。
