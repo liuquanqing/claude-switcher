@@ -2,7 +2,7 @@
 
 一个菜单栏应用管理 Claude 桌面账号、终端登录同步和网络地区守护。基于 [l2succes/claude-switcher](https://github.com/l2succes/claude-switcher) 的 MIT 代码开发；上游说明保存在 [UPSTREAM-README](docs/UPSTREAM-README.md)。
 
-当前 `v1.3.0-local.6`（内部构建 `20261028.6.3`）已更新到 `/Applications/Claude Switcher 候选版.app`，未自动启动；**原版保留，账号和真实会话未操作，也未交接守卫**。新增迁移能力只用独立临时虚构目录验收，真实会话未读写。守卫/急停仍按用户要求仅做隔离仿真，不安排真实账号故障注入。
+当前 `v1.3.0-local.6`（内部构建 `20261028.6.4`）已更新并按用户要求重启 `/Applications/Claude Switcher 候选版.app`。原版、真实登录和会话保留；守卫组件未替换。守卫已由用户启用，桌面是否纳入以实时状态和明确确认为准；演示截图不证明真实保护已生效。故障验收仅用假数据，不安排真实账号断网或急停。
 
 [打开离线功能对比说明](docs/功能对比说明.html)：与桌面原版、CCSwitcher、检查型切换器及 API 管理器的功能和边界对照。
 
@@ -86,3 +86,5 @@ MIT，保留上游 LICENSE。
 本轮补丁与安装、只读登录诊断、守卫尚未交接的状态见[当前试用记录](docs/当前试用问题与交接状态.md)。
 
 [CLI文件凭据与备份同步](docs/CLI文件凭据备份与同步.md) · [检查/同步交互](docs/CLI检查同步交互.md) · [本轮假数据验证](docs/prototypes/local6-cli-file-validation.json)。
+
+最新界面：[简洁主页](docs/prototypes/local6-checks-main.png) · [网络结果直接呈现](docs/prototypes/local6-checks-result.png) · [本轮UI验证与安装范围](docs/prototypes/local6-checks-validation.json)。

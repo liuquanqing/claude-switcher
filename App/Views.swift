@@ -262,6 +262,15 @@ struct TerminalStrip: View {
         return lines.joined(separator: "\n")
     }
 
+    /// The inline action row is for states that need a remedy. When matched (or not checkable) the
+    /// footer refresh re-verifies the CLI; a manual re-check stays available inside the info popover.
+    private var showsActions: Bool {
+        switch store.cliStatus {
+        case .matched, .unsupportedStorage: return false
+        case .unverified, .different, .needsLogin, .otherAuthentication: return true
+        }
+    }
+
     var body: some View {
         // Two tiers inside the strip: identity (icon + title/status + detail) on top, actions on
         // their own row below. The title and status never compete with buttons for width.
@@ -285,16 +294,39 @@ struct TerminalStrip: View {
                         .help("查看这项状态的说明")
                         .accessibilityLabel("终端登录状态说明")
                         .popover(isPresented: $showHelp, arrowEdge: .bottom) {
-                            Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
-                                .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                                .frame(width: 280, alignment: .leading).padding(12)
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
+                                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                                if !showsActions {
+                                    Divider().opacity(0.6)
+                                    HStack(spacing: 8) {
+                                        Text("底部刷新会一并核验。").font(.system(size: 10)).foregroundColor(.sub)
+                                        Spacer(minLength: 4)
+                                        Button {
+                                            showHelp = false
+                                            Task { await store.verifyDefaultCLI() }
+                                        } label: {
+                                            Text("立即核验").font(.system(size: 10.5, weight: .medium))
+                                                .padding(.horizontal, 10).frame(height: 24)
+                                                .foregroundColor(.txt)
+                                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)))
+                                                .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(controlsLocked)
+                                        .opacity(controlsLocked ? 0.45 : 1)
+                                        .help(checkHelp)
+                                    }
+                                }
+                            }
+                            .frame(width: 280, alignment: .leading).padding(12)
                         }
                     }
                     Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
                         .lineLimit(1).truncationMode(.middle).help(detailHelp)
                         .accessibilityHint(detailHelp)
                 }
-                actions
+                if showsActions { actions }
             }
         }
         .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
@@ -323,7 +355,8 @@ struct TerminalStrip: View {
         }
     }
 
-    /// Normal state: one quiet check button. Different + subscription desktop: check + sync, side by side.
+    /// Shown only when something needs attention: verify / re-check, plus sync when the login differs
+    /// from a subscription desktop.
     private var actions: some View {
         HStack(spacing: 6) {
             // Read-only, so it stays available in every state. Accent only while unverified.
@@ -429,8 +462,11 @@ struct ProfileCard: View {
             Text("未刷新 · \(age)的缓存").foregroundColor(.sub.opacity(0.8))
                 .help("保护检查未通过，本次没有请求用量；原因见顶部提示。")
         case .loaded where p.live:
+            // Fresh from the latest round: the footer's round time already says when; stay quiet.
+            EmptyView()
+        case .loaded:
             Text("\(age)更新").foregroundColor(.sub.opacity(0.8))
-        case .notRequested, .cached, .loaded:
+        case .notRequested, .cached:
             Text("缓存 · \(age)更新").foregroundColor(.sub.opacity(0.8))
         }
     }
@@ -600,6 +636,24 @@ struct Panel: View {
     @State private var quitHover = false
     let cols = [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)]
 
+    /// What the last refresh round actually achieved. `lastRefresh` only moves when a round finishes
+    /// (blocked rounds don't move it), so per-card failures and blocks are surfaced instead of "刚刚".
+    private var refreshSummary: (text: String, color: Color, help: String) {
+        if store.profiles.contains(where: { $0.usageState == .blocked }) {
+            return ("用量未刷新", .warn, "网络门禁未通过，本轮没有请求用量；原因见上方提示。卡片显示的是缓存。")
+        }
+        guard let last = store.lastRefresh else {
+            return ("尚未刷新", .sub, "还没有完成过一轮刷新")
+        }
+        let failed = store.profiles.filter { $0.usageState == .failed }.count
+        if failed > 0 {
+            return ("最近刷新：\(ago(last)) · \(failed) 个失败", .warn,
+                    "最近一次刷新动作完成于\(ago(last))；其中有账号用量读取失败，对应卡片显示缓存")
+        }
+        return ("最近刷新：\(ago(last))", .sub,
+                "最近一次刷新动作（账号用量与默认 CLI 登录核验）的完成时间。\n各账号是否读取成功以卡片上的提示为准；这不是后台守卫的检查时间。")
+    }
+
     private var importLanguageBinding: Binding<String> {
         Binding(get: { store.importLanguage }, set: { store.setImportLanguage($0) })
     }
@@ -686,18 +740,30 @@ struct Panel: View {
                 if let b = store.busy {
                     ProgressView().controlSize(.small)
                     Text(b).font(.system(size: 11, weight: .medium)).foregroundColor(.claude).lineLimit(1)
+                } else if store.refreshing {
+                    ProgressView().controlSize(.small)
+                    Text("刷新中…").font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
                 } else {
-                    Image(systemName: "clock").font(.system(size: 10)).foregroundColor(.sub)
                     TimelineView(.periodic(from: .now, by: 30)) { _ in
-                        Text(ago(store.lastRefresh)).font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
-                            .help("上次用量刷新时间")
+                        let summary = refreshSummary
+                        HStack(spacing: 5) {
+                            Image(systemName: summary.color == .sub ? "clock" : "exclamationmark.triangle")
+                                .font(.system(size: 10))
+                            Text(summary.text).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                        }
+                        .foregroundColor(summary.color)
+                        .help(summary.help)
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 Spacer(minLength: 4)
                 if store.sessionMigrationEnabled {
                     FooterButton(icon: "doc.on.doc", help: "导入 Claude Code 会话") { CopyWindow.show(store) }
                 }
-                FooterButton(icon: "arrow.clockwise", help: "刷新账号与用量") { Task { await store.refresh() } }
+                FooterButton(icon: "arrow.clockwise",
+                             help: "刷新：先过网络门禁，再读取账号用量并核验默认 CLI 登录\n不改保护设置、不启用保护、不纳入桌面") {
+                    Task { await store.refresh() }
+                }
                 FooterButton(icon: store.openAtLogin ? "sunrise.fill" : "sunrise",
                              help: store.openAtLogin ? "已设置登录时打开界面，点击关闭" : "设置登录时打开界面") {
                     store.toggleOpenAtLogin()

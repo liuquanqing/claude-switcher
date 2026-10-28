@@ -61,6 +61,11 @@ final class ProtectionController: ObservableObject {
                 lastDecision = SafetyDecision(.countryMismatch, expected: "SG", observed: "JP")
                 status = "演示：出口 JP 与目标 SG 不一致，已阻止打开。"
             }
+            if Bundle.main.object(forInfoDictionaryKey: "CSPreviewProxyDisconnected") as? Bool == true {
+                demoNetwork = NetworkObservation(proxyConnected: false, tunOnline: false, country: nil)
+                lastDecision = SafetyDecision(.proxyDisconnected)
+                status = "演示：代理未连接。"
+            }
             if CommandLine.arguments.contains("--demo-guard-unknown") {
                 guardOnline = false; lastDecision = SafetyDecision(.staleReceipt)
                 status = "演示：守卫回执过期，保护状态待确认。"
@@ -230,6 +235,11 @@ final class ProtectionController: ObservableObject {
             lastCheckReport = ManualNetworkCheck(checkedAt: checkedAt, targetCountry: nil, observation: nil,
                                                 decision: SafetyDecision(.invalidConfig), validationMessage: error.localizedDescription)
             return
+        }
+        // Fictional preview only: expose the loading state without interrupting
+        // the real proxy or using a real account as a failure fixture.
+        if demo && Bundle.main.object(forInfoDictionaryKey: "CSPreviewSlowNetworkCheck") as? Bool == true {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
         }
         let observation = demo ? demoNetwork : await NetworkProbe().observe(mode: config.proxyMode)
         let decision = SafetyPolicy.evaluate(config, observation)
