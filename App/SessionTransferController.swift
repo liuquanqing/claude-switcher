@@ -132,6 +132,8 @@ actor SessionTransferWorker {
     private var pendingPreserve: String?
     private var writing = false
     private var operationStatus: String?
+    private var preselectMissing = true
+    private var loadedSelectionScope: String?
     private let demoRoot: URL?
     private let commandURL: URL
 
@@ -187,6 +189,7 @@ actor SessionTransferWorker {
     }
     private func clearSelection() {
         picked = []; pendingPlan = nil; pendingRestore = nil; pendingPreserve = nil; confirmation = nil
+        preselectMissing = true
         errorMessage = nil; statusMessage = nil; operationStatus = nil
     }
     private func queueRefresh() {
@@ -194,10 +197,10 @@ actor SessionTransferWorker {
         isWorking = true
         Task { await refresh() }
     }
-    func setSource(_ id: String) { guard !isWorking else { return }; sourceID = id; sourceSpaceID = ""; clearSelection(); queueRefresh() }
-    func setTarget(_ id: String) { guard !isWorking else { return }; targetID = id; targetSpaceID = ""; clearSelection(); queueRefresh() }
-    func setSourceSpace(_ id: String) { guard !isWorking else { return }; sourceSpaceID = id; clearSelection(); queueRefresh() }
-    func setTargetSpace(_ id: String) { guard !isWorking else { return }; targetSpaceID = id; clearSelection(); queueRefresh() }
+    func setSource(_ id: String) { guard !isWorking, id != sourceID else { return }; sourceID = id; sourceSpaceID = ""; clearSelection(); queueRefresh() }
+    func setTarget(_ id: String) { guard !isWorking, id != targetID else { return }; targetID = id; targetSpaceID = ""; clearSelection(); queueRefresh() }
+    func setSourceSpace(_ id: String) { guard !isWorking, id != sourceSpaceID else { return }; sourceSpaceID = id; clearSelection(); queueRefresh() }
+    func setTargetSpace(_ id: String) { guard !isWorking, id != targetSpaceID else { return }; targetSpaceID = id; clearSelection(); queueRefresh() }
     func setUpdates(_ value: Bool) {
         guard !isWorking else { return }
         updateExisting = value
@@ -237,7 +240,17 @@ actor SessionTransferWorker {
             }
             let result = try await worker.rows(env, source: source, target: target, updates: updateExisting)
             guard refreshID == token, !writing else { return }
-            rows = result; picked.formIntersection(result.filter(\.selectable).map(\.id))
+            let scope = source.id + "\n" + target.id
+            if loadedSelectionScope != scope {
+                picked = []; preselectMissing = true; loadedSelectionScope = scope
+            }
+            rows = result
+            if preselectMissing {
+                picked = Set(visibleRows.filter { $0.kind == .add }.map(\.id))
+                preselectMissing = false
+            } else {
+                picked.formIntersection(result.filter(\.selectable).map(\.id))
+            }
             statusMessage = operationStatus; errorMessage = historyError
         } catch {
             guard refreshID == token else { return }

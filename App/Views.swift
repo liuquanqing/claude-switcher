@@ -563,7 +563,7 @@ struct Panel: View {
                 }
                 Spacer(minLength: 4)
                 if store.sessionMigrationEnabled {
-                    FooterButton(icon: "doc.on.doc", help: "复制 Claude Code 会话") { CopyWindow.show(store) }
+                    FooterButton(icon: "doc.on.doc", help: "导入 Claude Code 会话") { CopyWindow.show(store) }
                 }
                 FooterButton(icon: "arrow.clockwise", help: "刷新账号与用量") { Task { await store.refresh() } }
                 FooterButton(icon: store.openAtLogin ? "sunrise.fill" : "sunrise",

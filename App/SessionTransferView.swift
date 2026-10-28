@@ -17,6 +17,49 @@ private enum SessionTransferSheet: Identifiable {
 }
 
 @MainActor
+private struct MixedSelectionCheckbox: NSViewRepresentable {
+    let title: String
+    let state: NSControl.StateValue
+    let isEnabled: Bool
+    let help: String
+    let action: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(action: action)
+    }
+
+    func makeNSView(context: Context) -> NSButton {
+        let button = NSButton(checkboxWithTitle: title, target: context.coordinator, action: #selector(Coordinator.toggle(_:)))
+        button.allowsMixedState = true
+        button.contentTintColor = NSColor(Color.claude)
+        return button
+    }
+
+    func updateNSView(_ button: NSButton, context: Context) {
+        context.coordinator.action = action
+        button.attributedTitle = NSAttributedString(string: title, attributes: [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: NSColor(Color.sub)
+        ])
+        button.state = state
+        button.isEnabled = isEnabled
+        button.toolTip = help
+    }
+
+    @MainActor final class Coordinator: NSObject {
+        var action: () -> Void
+
+        init(action: @escaping () -> Void) {
+            self.action = action
+        }
+
+        @objc func toggle(_ sender: NSButton) {
+            action()
+        }
+    }
+}
+
+@MainActor
 struct CopyThreadsView: View {
     @ObservedObject private var controller: SessionTransferController
     @FocusState private var modalCancelFocused: Bool
@@ -37,19 +80,30 @@ struct CopyThreadsView: View {
         controller.visibleRows.filter(\.selectable)
     }
 
-    private var allVisiblePicked: Bool {
-        !selectableVisibleRows.isEmpty && selectableVisibleRows.allSatisfy { controller.picked.contains($0.id) }
+    private var visiblePickedCount: Int {
+        selectableVisibleRows.filter { controller.picked.contains($0.id) }.count
     }
 
-    private var targetName: String {
-        controller.locations.first { $0.id == controller.targetID }?.name ?? controller.targetID
+    private var visibleSelectionState: NSControl.StateValue {
+        guard !selectableVisibleRows.isEmpty, visiblePickedCount > 0 else { return .off }
+        return visiblePickedCount == selectableVisibleRows.count ? .on : .mixed
+    }
+
+    private var listSummary: String {
+        text(controller.query.isEmpty ? "listSummary" : "filteredListSummary", arguments: [
+            "shown": String(controller.visibleRows.count),
+            "selectable": String(selectableVisibleRows.count)
+        ])
     }
 
     private var selectedSummary: String {
-        let selected = controller.rows.filter { controller.picked.contains($0.id) }
-        guard let first = selected.first else { return text("noSelection") }
-        if selected.count == 1 { return text("selectedOne", arguments: ["title": first.title]) }
-        return text("selectedMany", arguments: ["title": first.title, "count": String(selected.count)])
+        let count = controller.picked.count
+        let visibleCount = controller.visibleRows.filter { controller.picked.contains($0.id) }.count
+        let outsideCount = max(0, count - visibleCount)
+        if !controller.query.isEmpty && outsideCount > 0 {
+            return text("selectedCountOutside", arguments: ["count": String(count), "outside": String(outsideCount)])
+        }
+        return text("selectedCount", arguments: ["count": String(count)])
     }
 
     private var visibleStatusMessage: String? {
@@ -141,22 +195,21 @@ struct CopyThreadsView: View {
             }
 
             HStack(spacing: 7) {
-                Button(text(allVisiblePicked ? "selectNone" : "selectAll")) {
-                    controller.selectAllVisible()
-                }
-                .buttonStyle(.link)
-                .font(.system(size: 11))
-                .disabled(selectableVisibleRows.isEmpty || controller.isWorking)
+                MixedSelectionCheckbox(
+                    title: text("selectCopyable"),
+                    state: visibleSelectionState,
+                    isEnabled: !selectableVisibleRows.isEmpty && !controller.isWorking,
+                    help: text("selectCopyableHelp"),
+                    action: controller.selectAllVisible
+                )
+                .frame(height: 22)
                 FooterButton(icon: "arrow.clockwise", help: text("refreshHelp")) {
                     Task { await controller.refresh() }
                 }
                 .disabled(controller.isWorking)
                 Spacer()
-                Text(text("counts", arguments: [
-                    "picked": String(controller.picked.count),
-                    "shown": String(controller.visibleRows.count)
-                ]))
-                .font(.system(size: 11)).foregroundColor(.sub)
+                Text(listSummary)
+                    .font(.system(size: 11)).foregroundColor(.sub)
             }
 
             List(controller.visibleRows) { row in
@@ -209,13 +262,7 @@ struct CopyThreadsView: View {
                 }
                 .padding(.horizontal, 9)
                 .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.claude.opacity(0.12) : Color.clear))
-                .overlay(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 2)
-                        .fill(isPicked ? Color.claude : Color.clear)
-                        .frame(width: 3)
-                        .padding(.vertical, 7)
-                }
+                .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.cardHi.opacity(0.55) : Color.clear))
                 .contentShape(Rectangle())
                 .help(row.reason)
                 .accessibilityHint(row.reason)
@@ -247,22 +294,21 @@ struct CopyThreadsView: View {
                 if controller.isWorking {
                     ProgressView().controlSize(.small)
                     Text(text("processing")).font(.system(size: 11)).foregroundColor(.claude)
-                } else {
-                    Text(selectedSummary)
-                        .font(.system(size: 11))
-                        .foregroundColor(controller.picked.isEmpty ? .sub : .claude)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(selectedSummary)
                 }
+                Text(selectedSummary)
+                    .font(.system(size: 11))
+                    .foregroundColor(.sub)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Spacer(minLength: 4)
                 Button(text("copyForClaude")) {
                     Task { await controller.exportInstructions() }
                 }
                 .buttonStyle(.link)
                 .font(.system(size: 11))
+                .foregroundColor(.sub)
                 .disabled(!controller.canExport || controller.isWorking)
-                Button(text("copy", arguments: ["count": String(controller.picked.count), "target": targetName])) {
+                Button(text("copy")) {
                     Task { await controller.copySelected() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -395,15 +441,15 @@ struct CopyThreadsView: View {
             }
             Spacer(minLength: 4)
             Button(text("viewBackup")) { controller.showBackup() }
-                .buttonStyle(.link).font(.system(size: 10.5))
+                .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
             if operation.canUndo {
                 Button(text("undo")) { controller.requestUndo() }
-                    .buttonStyle(.link).font(.system(size: 10.5))
+                    .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
                     .disabled(controller.isWorking)
             }
             if operation.needsRecovery {
                 Button(text("recover")) { controller.requestRecovery() }
-                    .buttonStyle(.link).font(.system(size: 10.5))
+                    .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
                     .disabled(controller.isWorking)
             }
         }

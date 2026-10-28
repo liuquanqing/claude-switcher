@@ -235,6 +235,40 @@ actor FixtureGuardWorker: GuardWorking {
   var returned = 0; navigationStore.onShowAccounts = { returned += 1 }
   navigationStore.returnToAccounts()
   require(returned == 1 && navigationStore.current == previousAccount, "return navigation calls panel callback without switching accounts")
+  let selectionFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: selectionFixture.1) }
+  let selection = SessionTransferController(store: Store(demo: true), testEnvironment: selectionFixture.0)
+  await selection.refresh()
+  require(selection.visibleRows.count == 4 && selection.visibleRows.filter(\.selectable).count == 1, "four visible sessions can legitimately contain only one selectable add")
+  require(selection.picked == ["local_ui.json"], "first valid load defaults to missing sessions only, without selecting updates")
+  selection.selectAllVisible()
+  require(selection.picked.isEmpty, "select-all on initially selected eligible rows clears them")
+  selection.selectAllVisible()
+  require(selection.picked == ["local_ui.json"], "select-all never unlocks existing or conflicting sessions")
+  selection.setPicked("local_ui.json", selected: false); await selection.refresh()
+  require(selection.picked.isEmpty, "normal refresh never silently reselects a user's deselection")
+  selection.setSource(selection.sourceID); selection.setTarget(selection.targetID)
+  selection.setSourceSpace(selection.sourceSpaceID); selection.setTargetSpace(selection.targetSpaceID)
+  require(selection.picked.isEmpty && !selection.isWorking, "reselecting unchanged scope cannot reset explicit user deselection")
+  selection.setUpdates(true); try await settled(selection)
+  selection.setPicked("local_ui.json", selected: true)
+  selection.selectAllVisible()
+  require(selection.picked == ["local_ui.json", "local_api.json"], "mixed selection becomes all eligible, without selecting ahead or conflicting rows")
+  selection.query = "接口"
+  selection.selectAllVisible()
+  require(selection.picked == ["local_ui.json"], "filtered select-all clears only its visible eligible rows and retains hidden selection")
+  selection.selectAllVisible()
+  require(selection.picked == ["local_ui.json", "local_api.json"], "filtered select-all adds its visible eligible rows to existing hidden selection")
+  selection.query = "no-such-session"
+  selection.selectAllVisible()
+  require(selection.picked == ["local_ui.json", "local_api.json"], "empty result select-all changes nothing")
+  selection.setUpdates(false); try await settled(selection)
+  require(selection.picked == ["local_ui.json"], "turning updates off removes only update selections")
+  selection.setTarget("api"); try await settled(selection)
+  require(selection.picked.isEmpty, "changing destination clears selection instead of copying an old scope")
+  selection.query = ""
+  selection.setTargetSpace(selection.targetSpaces[0].id); try await settled(selection)
+  require(selection.picked.count == 4 && selection.rows.allSatisfy { $0.kind == .add }, "new explicitly chosen API space defaults to missing sessions after resolving that scope")
   print("PASS: \(checks) controller/store checks; temporary files and fixture worker only. No live credential/service actions.")
  }
 }

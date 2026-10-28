@@ -483,7 +483,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.isVisible = false
                 DispatchQueue.main.async {
                     CopyWindow.show(self.store)
-                    CopyWindow.window?.title = "复制会话 · 演示（临时虚构数据）"
                 }
             }
             if demoMode && !demoPopover {
