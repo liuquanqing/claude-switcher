@@ -1,0 +1,11 @@
+Tool: built-in image_gen; edit; transparent_background=true.
+Reference: switcher-flow-v5.png.
+Status: selected by user; bundled into the local maintenance build as AppIcon.png / AppIcon.icns; installed application unchanged.
+
+Use case: precise-object-edit.
+Asset type: final candidate macOS Dock icon for Claude account switching.
+Input image: the existing v5 dark rounded-square icon with a cream right arrow and terracotta left arrow, edit target.
+Primary request: carefully refine this existing icon to harmonize with a warm gray and terracotta, minimal macOS app interface. Preserve its exact concept and recognizable silhouette: a single unified interlocking S-like switching mark made of the same two opposing flowing arrows, centered on the same dark warm charcoal rounded square. Keep the current orientation and overall proportions.
+Make only three restrained refinements: (1) substantially reduce pillow-like thickness, glossy edge highlights, heavy cast shadows and texture, for a clean mostly flat native icon with only very shallow relief; smooth near-uniform charcoal base with a soft subtle top light; (2) subtly slim the two arrow bands, make tips a little cleaner and crisper while keeping rounded corners, and slightly open the central negative-space channel, keeping the unified switching gesture readable at 32px; (3) shift bright orange to a more muted warm terracotta approximately #D57555, paired with soft ivory #F5EBDD.
+Composition: front-facing square icon, matching tile size and outer transparent margin of the reference. Exterior of rounded tile genuinely transparent, interior opaque charcoal.
+No redesign, no separate account cards, avatars, Claude stars, shields, locks, badges, letters or text. No metallic bevel, plastic gloss, pronounced extrusion, grunge, or decorative objects. Exactly one icon.

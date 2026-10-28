@@ -1,0 +1,19 @@
+name: macOS checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Core tests with synthetic data
+        run: swift test
+      - name: Isolated controller checks
+        run: scripts/test-controller.sh
+      - name: Build and verify signatures
+        run: ./build.sh
