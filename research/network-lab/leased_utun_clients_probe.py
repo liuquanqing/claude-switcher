@@ -2,7 +2,7 @@
 Disposable hosted macOS only. Static PF rejects other fixture paths. Neither
 this synthetic packet peer nor the runner-UID rules are a production backend.
 """
-import ipaddress, json, math, os, platform, queue, selectors, signal, socket, subprocess, sys, tempfile, threading, time, traceback, uuid
+import ctypes, ipaddress, json, math, os, platform, queue, selectors, signal, socket, subprocess, sys, tempfile, threading, time, traceback, uuid
 from pathlib import Path
 from leased_utun_peer import Peer
 
@@ -112,6 +112,31 @@ original = Path('/etc/pf.conf').read_text(); was_enabled = 'Status: Enabled' in 
 RESULTS = []; backend = controller = capture = None; interface = None; renewal = None; renewal_done = None
 clients = []; streams = []; events = None; error = None; cleanup = False; physical_result = None
 clean = {'PATH': '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'en_US.UTF-8'}
+cli_path=Path(artifacts['cli']).resolve(); desktop_path=Path(artifacts['desktop']).resolve()
+assert cli_path.is_relative_to(Path(os.environ['RUNNER_TEMP']).resolve())
+assert desktop_path.is_relative_to(Path(os.environ['RUNNER_TEMP']).resolve())
+desktop_bundle=next(p for p in desktop_path.parents if p.name=='Claude.app')
+libproc=ctypes.CDLL('/usr/lib/libproc.dylib'); cleaned_vendor_processes=[]
+
+def owned_vendor_pids():
+    owned=[]
+    for value in command('/bin/ps','-axo','pid=').stdout.split():
+        pid=int(value); path=ctypes.create_string_buffer(4096)
+        if libproc.proc_pidpath(pid,path,4096)<=0: continue
+        executable=Path(os.fsdecode(path.value)).resolve()
+        if executable==cli_path or executable.is_relative_to(desktop_bundle): owned.append(pid)
+    return owned
+
+def cleanup_vendor_processes():
+    # sudo/launchctl may give the launched command a different process group.
+    # Match verified temporary executable paths, never a generic process name.
+    owned=owned_vendor_pids()
+    for pid in owned:
+        try: os.kill(pid,signal.SIGKILL)
+        except ProcessLookupError: pass
+    time.sleep(.15)
+    remaining=owned_vendor_pids(); assert not remaining,remaining
+    cleaned_vendor_processes.append(len(owned))
 # The GUI login UID is also the hosted runner UID. Preserve only the runner's
 # already-observed HTTPS control destinations; never the synthetic test peers.
 # Otherwise a long test can strand its own CI log/cancellation channel.
@@ -181,6 +206,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
 
     def stop_clients():
         for item in clients: kill(item['process']); item['log'].close()
+        cleanup_vendor_processes()
         clients.clear()
         for _, sock in streams: sock.close()
         streams.clear()
@@ -344,5 +370,5 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         a=pf('-a','cs_leased_lab','-F','rules',check=False); b=pf('-f','/etc/pf.conf',check=False)
         c=pf('-d',check=False) if not was_enabled else None
         cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
-result=dict(layer='official-clients-real-utun-expiring-permit-composition',os=platform.mac_ver()[0],arch=platform.machine(),leaseSeconds=TTL,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,physicalCapture=physical_result,ciControlHTTPSDestinations=len(control_hosts),actualTUN=True,actualOfficialClients=True,syntheticAPI=True,realAccountUsed=False,NetworkExtension='NOT_RUN',productionReady=False)
+result=dict(layer='official-clients-real-utun-expiring-permit-composition',os=platform.mac_ver()[0],arch=platform.machine(),leaseSeconds=TTL,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,physicalCapture=physical_result,ciControlHTTPSDestinations=len(control_hosts),temporaryVendorProcessesKilled=cleaned_vendor_processes,actualTUN=True,actualOfficialClients=True,syntheticAPI=True,realAccountUsed=False,NetworkExtension='NOT_RUN',productionReady=False)
 print(json.dumps(result,indent=2),flush=True);os._exit(0 if result['allAssertionsPassed'] else 1)
