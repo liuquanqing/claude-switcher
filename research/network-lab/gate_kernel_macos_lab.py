@@ -17,6 +17,11 @@ ns={'__file__':str(p),'__name__':'isolated_composition'}
 prefix=source.rsplit('\nguard()\n',1)[0]
 start=prefix.index(' def client(');end=prefix.index(' def check(',start)
 prefix=prefix[:start]+' def client(family,host,proto):\n  return ProtectedClient(family,host,proto)\n'+prefix[end:]
+# Healthy setup obtains fresh synthetic evidence after sudo identity preparation.
+old=" def open_streams():return {(f,p):client(f,h,p) for f,h in TARGETS for p in ('tcp','udp')}"
+new=" def open_streams():\n  command(c);wait(q,'permitted')\n  return {(f,p):client(f,h,p) for f,h in TARGETS for p in ('tcp','udp')}"
+assert old in prefix
+prefix=prefix.replace(old,new)
 exec(compile(prefix,str(p),'exec'),ns)
 CLIENT=r'''
 import socket,sys
