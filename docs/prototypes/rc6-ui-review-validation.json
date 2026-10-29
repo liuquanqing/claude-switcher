@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-29",
+  "phase": "ui-candidate-not-installed-or-released",
+  "frontendAuthor": "official local Claude Code CLI",
+  "changedUIFiles": [
+    "App/Views.swift",
+    "App/SessionTransferView.swift",
+    "App/ProtectionView.swift"
+  ],
+  "sourceHashes": {
+    "App/Views.swift": "912a7cd2b2292c5f511b8d003ed27b1aef9f765ea2023394b1515a58030dfa45",
+    "App/SessionTransferView.swift": "957117e59dac9b7d40fc2d6a4fad5a7bb7c20992acebddd9f18f07a4c5a221d3",
+    "App/ProtectionView.swift": "06786dfea0b9eb1b454a1cbe3d572815eb0ee779b31e0910b3c5724335ab8a15"
+  },
+  "releaseBuildAndAdHocSignature": "passed",
+  "controllerChecks": 106,
+  "CoreChanged": false,
+  "nativeFixtureChecks": [
+    "globe footer warm-gray at rest",
+    "English picker changes import page only",
+    "select-all off/on/mixed honors eligible rows",
+    "blocked rows remain disabled",
+    "empty selection disables import",
+    "start import opens confirmation; Escape cancels",
+    "merged unmanaged status opens confirmation; cancel leaves unmanaged",
+    "settings chevron opens and closes settings without takeover",
+    "fixture confirmation transitions to desktop protected only"
+  ],
+  "buttonContrastWhiteOnBlue": 5.5,
+  "nativeScope": "current macOS fictional demo only",
+  "notRun": [
+    "macOS 13 physical-device UI",
+    "VoiceOver",
+    "real account, real session or live guard acceptance"
+  ],
+  "installedCandidateReplaced": false,
+  "realLoginSessionNetworkOrGuardOperations": false
+}

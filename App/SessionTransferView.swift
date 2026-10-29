@@ -16,6 +16,38 @@ private enum SessionTransferSheet: Identifiable {
     }
 }
 
+private extension Color {
+    /// Primary action fill: white label on it is ~5.5:1; against the window background it is ~3.1:1 (non-text).
+    static let importAccent = Color(hex: 0x0A64D6)
+    /// Lighter blue for tints and small accent text on dark surfaces (~7:1 on Color.bg). Native checkboxes
+    /// render tint darker in dark appearance, so this starts brighter than the button fill.
+    static let importAccentSoft = Color(hex: 0x5AA2FF)
+}
+
+/// Solid blue primary action with white label; the destructive variant keeps the system-red-like `.bad`
+/// with a dark label (white on it is only ~3.4:1). Disabled drops to a neutral raised surface so it stays
+/// visible but no longer looks clickable.
+private struct ImportProminentButtonStyle: ButtonStyle {
+    var tint: Color = .importAccent
+    var label: Color = .white
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(isEnabled ? label : Color.sub)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 5)
+            .background(RoundedRectangle(cornerRadius: 6)
+                .fill(isEnabled ? tint : Color.cardHi)
+                .overlay(RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.black.opacity(isEnabled && configuration.isPressed ? 0.18 : 0))))
+            .overlay(RoundedRectangle(cornerRadius: 6)
+                .stroke(isEnabled ? Color.white.opacity(0.10) : Color.stroke, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 6))
+    }
+}
+
 @MainActor
 private struct MixedSelectionCheckbox: NSViewRepresentable {
     let title: String
@@ -31,14 +63,14 @@ private struct MixedSelectionCheckbox: NSViewRepresentable {
     func makeNSView(context: Context) -> NSButton {
         let button = NSButton(checkboxWithTitle: title, target: context.coordinator, action: #selector(Coordinator.toggle(_:)))
         button.allowsMixedState = true
-        button.contentTintColor = NSColor(Color.claude)
+        button.contentTintColor = NSColor(Color.importAccentSoft)
         return button
     }
 
     func updateNSView(_ button: NSButton, context: Context) {
         context.coordinator.action = action
         button.attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: 11),
+            .font: NSFont.systemFont(ofSize: 12),
             .foregroundColor: NSColor(Color.sub)
         ])
         button.state = state
@@ -163,7 +195,7 @@ struct CopyThreadsView: View {
                         spacePicker(text("sourceSpace"), selection: sourceSpaceBinding, options: controller.sourceSpaces)
                     }
                 }
-                Image(systemName: "arrow.right").foregroundColor(.claude)
+                Image(systemName: "arrow.right").foregroundColor(.sub)
                 VStack(alignment: .leading, spacing: 8) {
                     picker(text("to"), selection: targetBinding, options: controller.locations)
                     if controller.targetSpaces.count > 1 {
@@ -184,8 +216,8 @@ struct CopyThreadsView: View {
                     .textFieldStyle(.roundedBorder)
                 Toggle(text("updateExisting"), isOn: updateBinding)
                     .toggleStyle(.checkbox)
-                    .font(.system(size: 11))
-                    .tint(.claude)
+                    .font(.system(size: 12))
+                    .tint(.importAccentSoft)
                     .disabled(controller.isWorking)
                     .help(text("updateHelp"))
             }
@@ -205,7 +237,7 @@ struct CopyThreadsView: View {
                 .disabled(controller.isWorking)
                 Spacer()
                 Text(listSummary)
-                    .font(.system(size: 11)).foregroundColor(.sub)
+                    .font(.system(size: 12)).foregroundColor(.sub)
             }
 
             List(controller.visibleRows) { row in
@@ -214,7 +246,7 @@ struct CopyThreadsView: View {
                     Toggle("", isOn: pickedBinding(row))
                         .toggleStyle(.checkbox)
                         .labelsHidden()
-                        .tint(.claude)
+                        .tint(.importAccentSoft)
                         .disabled(!row.selectable || controller.isWorking)
                         .accessibilityLabel(Text(row.title))
                     VStack(alignment: .leading, spacing: 4) {
@@ -227,38 +259,38 @@ struct CopyThreadsView: View {
                                 .help(row.title)
                                 .layoutPriority(1)
                             Text(row.project)
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.system(size: 11))
                                 .foregroundColor(.sub)
                                 .lineLimit(1)
                         }
                         Text(row.cwd)
-                            .font(.system(size: 10.5, design: .monospaced))
+                            .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.sub)
                             .fixedSize(horizontal: false, vertical: true)
                             .help(row.cwd)
                         if !row.selectable && row.kind == .blocked {
                             Text(row.reason)
-                                .font(.system(size: 10.5))
-                                .foregroundColor(.warn)
+                                .font(.system(size: 11))
+                                .foregroundColor(Color.txt.opacity(0.72))
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     Spacer(minLength: 4)
                     VStack(alignment: .trailing, spacing: 6) {
                         Text(activityTime(row.lastActivity))
-                            .font(.system(size: 11))
+                            .font(.system(size: 11).monospacedDigit())
                             .foregroundColor(.sub)
                             .frame(width: 66, alignment: .trailing)
                         if let status = rowStatus(row) {
                             Text(status)
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(row.kind == .update ? .claude : (row.kind == .blocked ? .warn : .sub))
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(row.kind == .update ? .importAccentSoft : (row.kind == .blocked ? .warn : .sub))
                         }
                     }
                 }
                 .padding(.horizontal, 9)
                 .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.cardHi.opacity(0.55) : Color.clear))
+                .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.importAccent.opacity(0.22) : Color.clear))
                 .contentShape(Rectangle())
                 .help(row.reason)
                 .accessibilityHint(row.reason)
@@ -289,10 +321,10 @@ struct CopyThreadsView: View {
             HStack(spacing: 10) {
                 if controller.isWorking {
                     ProgressView().controlSize(.small)
-                    Text(text("processing")).font(.system(size: 11)).foregroundColor(.claude)
+                    Text(text("processing")).font(.system(size: 12)).foregroundColor(.importAccentSoft)
                 }
                 Text(selectedSummary)
-                    .font(.system(size: 11))
+                    .font(.system(size: 12))
                     .foregroundColor(.sub)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -301,14 +333,13 @@ struct CopyThreadsView: View {
                     copyInstructions()
                 }
                 .buttonStyle(.link)
-                .font(.system(size: 11))
+                .font(.system(size: 12))
                 .foregroundColor(.sub)
                 .disabled(!controller.canExport || controller.isWorking)
                 Button(text("copy")) {
                     Task { await controller.copySelected() }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.claude)
+                .buttonStyle(ImportProminentButtonStyle())
                 .disabled(!controller.canCopy || controller.isWorking)
             }
         }
@@ -535,8 +566,9 @@ struct CopyThreadsView: View {
                 Button(content.button) {
                     Task { await controller.confirmAction() }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(confirmation.kind == "preserve" ? .bad : .claude)
+                .buttonStyle(confirmation.kind == "preserve"
+                    ? ImportProminentButtonStyle(tint: .bad, label: .bg)
+                    : ImportProminentButtonStyle())
             }
             if confirmation.kind == "recovery" {
                 Divider().overlay(Color.stroke)
@@ -575,8 +607,7 @@ struct CopyThreadsView: View {
             HStack {
                 Spacer()
                 Button(text("close")) { controller.dismissBackup() }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.claude)
+                    .buttonStyle(ImportProminentButtonStyle())
                     .keyboardShortcut(.cancelAction)
                     .focused($modalCancelFocused)
             }
@@ -611,8 +642,7 @@ struct CopyThreadsView: View {
                     pasteboard.setString(information, forType: .string)
                     handoffCopied = true
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.claude)
+                .buttonStyle(ImportProminentButtonStyle())
             }
         }
     }

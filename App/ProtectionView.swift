@@ -259,7 +259,7 @@ struct TerminalProtectionCard: View {
         VStack(alignment: .leading, spacing: 9) {
             helpRow("仅检查网络", "按当前输入只读诊断；不保存、不启用保护、不打开 Claude。")
             helpRow("顶部 打开 / 显示", "按已保存配置复查门禁；未运行则打开当前账号，已纳入保护的桌面切到前台。")
-            helpRow("纳入保护", "把已在运行的订阅桌面交给守卫，需确认一次。")
+            helpRow("桌面未纳入（可点击）", "守卫服务在线但未接管当前订阅桌面；点该标签确认一次后才纳入，右侧箭头仅展开设置。")
             Divider().opacity(0.6)
             Text("后台守卫约每 \(Int(SafetyConfig.interval)) 秒复查一次，非实时；失败或未知均不放行。")
             // The current desktop's scope detail lives on the column / switch hover help; not repeated here.
@@ -387,29 +387,68 @@ struct TerminalProtectionCard: View {
         }
     }
 
-    /// The one action the column can offer: put the running subscription desktop under the guard.
-    /// A separate sibling below the settings button, never inside it, and it only opens the
-    /// confirmation dialog. Only shown while `offerDesktopProtection` holds.
-    private var takeoverButton: some View {
+    /// While the desktop can be taken over, the state and the action are one control: the tinted
+    /// "桌面未纳入" pill states the fact and, when clicked, only opens the confirmation dialog (that
+    /// meaning lives in help/accessibilityHint; the second line shows only the saved target). The
+    /// settings fold is a separate chevron button beside it (siblings in an HStack, never nested or
+    /// overlaid), so the two hit areas cannot intercept each other. Only used while
+    /// `offerDesktopProtection` holds.
+    private var offerHeader: some View {
         let disabled = busy || controller.working
-        return Button { confirmProtectCurrentDesktop = true } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "plus").font(.system(size: 8.5, weight: .bold))
-                Text("纳入保护").font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                Button { confirmProtectCurrentDesktop = true } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
+                            .frame(width: 14, height: 14)
+                        Text(statusTitle).font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                        Spacer(minLength: 2)
+                        Image(systemName: "plus").font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundColor(statusColor)
+                    .padding(.horizontal, 7)
+                    .frame(maxWidth: .infinity, minHeight: 26)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(statusColor.opacity(disabled ? 0.06 : (takeoverHover ? 0.24 : 0.15))))
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(statusColor.opacity(0.35), lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(disabled)
+                .opacity(disabled ? 0.5 : 1)
+                .onHover { takeoverHover = $0 }
+                .help("守卫服务已在线，但这个桌面还没交给守卫；点击后先确认，不会开启或关闭服务")
+                .accessibilityLabel("桌面未纳入保护，目标 \(controller.activeCountry ?? "未设置")")
+                .accessibilityHint("纳入当前桌面；会先弹出确认，取消不做任何改动")
+                settingsToggleButton
             }
-            .foregroundColor(.claude)
-            .frame(maxWidth: .infinity).frame(height: 24)
-            .background(RoundedRectangle(cornerRadius: 6)
-                .fill(Color.claude.opacity(disabled ? 0.05 : (takeoverHover ? 0.2 : 0.12))))
-            .contentShape(Rectangle())
+            Text("目标 \(controller.activeCountry ?? "未设置")")
+                .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                .lineLimit(1).fixedSize()
+                .padding(.leading, 7)
+        }
+        .padding(.horizontal, 2).padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// Chevron-only settings disclosure used beside the merged pill.
+    private var settingsToggleButton: some View {
+        Button { showSettings.toggle() } label: {
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .rotationEffect(.degrees(showSettings ? 180 : 0))
+                .foregroundColor(settingsHover || showSettings ? .txt : .sub)
+                .frame(width: 26, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.white.opacity(settingsHover && !showSettings ? 0.06 : 0)))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .disabled(disabled)
-        .opacity(disabled ? 0.5 : 1)
-        .onHover { takeoverHover = $0 }
-        .help("把正在运行的订阅桌面交给后台守卫；点击后先确认")
-        .accessibilityLabel("纳入保护")
-        .accessibilityHint("会先弹出确认，取消不做任何改动")
+        .onHover { settingsHover = $0 }
+        .help((showSettings ? "收起保护设置" : "展开保护设置") + "\n" + desktopScopeHelp)
+        .accessibilityLabel(showSettings ? "收起保护设置" : "展开保护设置")
+        .accessibilityHint("开关、目标国家、代理模式与网络检查")
     }
 
     /// The column header: what the guard means for the desktop right now (line 1) and the one fact or
@@ -492,7 +531,7 @@ struct TerminalProtectionCard: View {
         if controller.lastDecision.reason == .terminationFailed { return "急停失败" }
         if controller.desktopScope == .api { return "API 桌面未纳入" }
         if controller.desktopScope == .unknown { return "桌面范围待确认" }
-        if desktopPendingTakeover { return "当前桌面未纳入" }
+        if desktopPendingTakeover { return "桌面未纳入" }
         if !controller.lastDecision.allowed { return "已拦截" }
         if !store.claudeRunning { return "守护已就绪" }
         if protectedDesktop { return "桌面保护中" }
@@ -510,7 +549,8 @@ struct TerminalProtectionCard: View {
         case .unknown: return "确认前不算受保护"
         case .subscription: break
         }
-        if desktopPendingTakeover { return "守卫在线 · " + target }
+        // Guard-online is implied by reaching here; when takeover is offered, `offerHeader` shows
+        // its own target line instead of this one.
         if !controller.lastDecision.allowed { return target }
         if !store.claudeRunning { return target + " · 桌面未运行" }
         return target
@@ -558,12 +598,13 @@ struct TerminalProtectionCard: View {
                     }
                 Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
                     .padding(.vertical, showSettings ? 0 : 10)
-                // Two sibling hit areas, never nested: the status block (settings disclosure) on top
-                // and, only when offered, the takeover action under it.
-                VStack(alignment: .leading, spacing: 5) {
-                    statusButton
+                // Offered: one merged state+action pill plus a separate fold chevron (siblings).
+                // Otherwise the whole status block is the settings disclosure.
+                VStack(alignment: .leading, spacing: 0) {
                     if offerDesktopProtection {
-                        takeoverButton.padding(.horizontal, 6)
+                        offerHeader
+                    } else {
+                        statusButton
                     }
                     Spacer(minLength: 0)
                 }

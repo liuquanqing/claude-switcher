@@ -731,6 +731,32 @@ struct FooterButton: View {
     }
 }
 
+/// Footer language menu, styled like FooterButton. `.borderlessButton` menus on macOS tend to ignore the
+/// label's foregroundColor (drawing it brighter than neighbours), so this uses `.menuStyle(.button)` +
+/// `.buttonStyle(.plain)`, which renders our own label view; the Menu itself stays the native one.
+struct ImportLanguageMenu: View {
+    @Binding var selection: String
+    @State private var hover = false
+    var body: some View {
+        Menu {
+            Picker("会话导入页语言（仅导入页）", selection: $selection) {
+                Text("中文").tag("zh")
+                Text("English").tag("en")
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Image(systemName: "globe").font(.system(size: 13, weight: .medium))
+                .foregroundColor(hover ? .txt : .sub).frame(width: 28, height: 28)
+                .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
+        .fixedSize().frame(width: 28, height: 28)
+        .onHover { hover = $0 }
+        .help("会话导入页语言（仅影响会话导入页，其余界面暂仅中文）")
+        .accessibilityLabel("会话导入页语言，仅影响会话导入页")
+    }
+}
+
 @MainActor
 struct Panel: View {
     @ObservedObject var store: Store
@@ -872,18 +898,7 @@ struct Panel: View {
                 }
                 // Rarely used preferences live here rather than on the import page. Only the session
                 // import page is bilingual so far; the label says so instead of implying app-wide English.
-                Menu {
-                    Picker("会话导入页语言（仅导入页）", selection: importLanguageBinding) {
-                        Text("中文").tag("zh")
-                        Text("English").tag("en")
-                    }
-                    .pickerStyle(.inline)
-                } label: {
-                    Image(systemName: "ellipsis.circle").font(.system(size: 13, weight: .medium)).foregroundColor(.sub)
-                }
-                .menuStyle(.borderlessButton).menuIndicator(.hidden)
-                .fixedSize().frame(width: 28, height: 28)
-                .help("偏好：会话导入页语言（其余界面暂仅中文）")
+                ImportLanguageMenu(selection: importLanguageBinding)
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {
                     HStack(spacing: 5) {
