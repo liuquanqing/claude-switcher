@@ -55,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
  if os.environ.get('CS_UTUN_COMPOSITION_LAB')=='ephemeral-only':
   assert desktop is not None,results['desktopArtifact']
   artifactFile=root/'artifacts.json';artifactFile.write_text(json.dumps({'cli':str(cli),'desktop':str(desktop)}))
-  child=subprocess.run([sys.executable,str(Path(__file__).with_name('leased_utun_clients_probe.py'))],env={**os.environ,'CS_REAL_UTUN_LAB':'ephemeral-only','CS_CLIENT_ARTIFACT_JSON':str(artifactFile)},text=True,capture_output=True)
+  child=subprocess.run([sys.executable,str(Path(__file__).with_name('leased_utun_clients_probe.py'))],env={**os.environ,'CS_REAL_UTUN_LAB':'ephemeral-only','CS_CLIENT_ARTIFACT_JSON':str(artifactFile)},text=True,stdout=subprocess.PIPE)
   try: composition=json.loads(child.stdout)
   except ValueError: composition={'error':'child did not emit JSON','stdout':child.stdout,'stderr':child.stderr,'allAssertionsPassed':False}
   result=dict(layer='official-client-utun-permit-composition-orchestration',artifacts=results,composition=composition,childExit=child.returncode,allAssertionsPassed=child.returncode==0 and composition['allAssertionsPassed'],productionReady=False)

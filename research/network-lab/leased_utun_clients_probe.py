@@ -91,6 +91,10 @@ def command(*args, check=True):
     return subprocess.run(args, capture_output=True, text=True, check=check)
 
 
+def progress(name):
+    print('COMPOSITION '+name, file=sys.stderr, flush=True)
+
+
 def pf(*args, check=True):
     return command('/sbin/pfctl', *args, check=check)
 
@@ -164,12 +168,14 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
 
     def stop_backend():
         global backend, controller
+        progress('stop-backend')
         renew_stop(); kill(controller); controller=None; kill(backend); backend=None
         command('/sbin/route','-n','delete','-host','198.18.250.2',check=False)
         command('/sbin/route','-n','delete','-inet6','fdff:cc55::2',check=False)
 
     def start_backend():
         global backend, controller, events, interface
+        progress('start-backend')
         apply(); clear_states()
         left,right=socket.socketpair(); events=queue.Queue()
         env={**os.environ,'CS_CONTROL_FD':str(right.fileno())}
@@ -198,6 +204,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         clients.append(dict(kind=kind,family=fam,process=proc,path=path,log=out))
 
     def matrix(name, allowed):
+        progress('matrix-start '+name)
         before=stats()['stats'] if backend.poll() is None else None
         start=len(clients)
         for fam in (4,6):
@@ -236,6 +243,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
             assert count>0 and alive and (marker if item['kind']=='cli' else now['tls'].get(key,0)>before['tls'].get(key,0)) if allowed else count==0,row
         if not allowed:
             for item in current: kill(item['process'])
+        progress('matrix-done '+name)
 
     def open_streams():
         for fam,host in PEERS:
@@ -253,6 +261,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
             assert not received
 
     def fault_observation(name, trigger):
+        progress('fault-start '+name)
         before=stats()['stats']; assert all(c['process'].poll() is None for c in clients)
         backend.send_signal(signal.SIGUSR2); end=time.monotonic()+3
         while time.monotonic()<end:
@@ -272,6 +281,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         assert after['stats']['pushes']==before['pushes'] and after['stats']['deniedPushes']>before['deniedPushes']
         RESULTS.append(dict(case=name+'-live-client-revocation',noRequestsAfterRevocation=True,pushDenied=True,clientProcessesAlive=sum(c['process'].poll() is None for c in clients),cutoff=cutoff))
         stopped_streams(name+'-existing-flow-denied'); matrix(name+'-new-clients-denied',False)
+        progress('fault-done '+name)
 
     try:
         pf('-nf',str(base)); pf('-f',str(base)); apply(); pf('-e',check=False)
