@@ -1,28 +1,24 @@
-name: Isolated official-client utun permit composition
+name: Independent stock proxy core and PF failure experiment
 on:
   push:
     branches: [codex/network-isolation-lab]
 permissions:
   contents: read
 jobs:
-  composition-clients:
+  stock-core-pf:
     runs-on: macos-15-intel
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Disposable runner only - official clients with leased actual utun executor
+      - name: Disposable hosted Mac only - independent stock TUN and PF executor
         run: |
-          clang -Wall -Wextra research/network-lab/utun_launch.c -o research/network-lab/utun-launch
-          sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_OFFICIAL_CLIENT_LAB=ephemeral-only CS_UTUN_COMPOSITION_LAB=ephemeral-only CS_TEST_UID="$(id -u)" RUNNER_TEMP="$RUNNER_TEMP" CS_COMPOSITION_RESULT="$RUNNER_TEMP/composition-results.json" CS_COMPOSITION_PROGRESS="$RUNNER_TEMP/composition-progress.txt" "$(command -v python3)" "$PWD/research/network-lab/official_clients_probe.py"
-      - name: Preserve synthetic evidence before runner orphan cleanup
+          sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_STOCK_CORE_LAB=ephemeral-only RUNNER_TEMP="$RUNNER_TEMP" CS_STOCK_RESULT="$RUNNER_TEMP/stock-core-results.json" "$(command -v python3)" "$PWD/research/network-lab/stock_core_pf_probe.py"
+      - name: Preserve synthetic experiment evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: composition-evidence
-          path: |
-            ${{ runner.temp }}/composition-results.json
-            ${{ runner.temp }}/composition-progress.txt
-            ${{ runner.temp }}/composition-stderr.txt
+          name: stock-core-evidence
+          path: ${{ runner.temp }}/stock-core-results.json
           retention-days: 7
