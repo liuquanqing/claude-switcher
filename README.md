@@ -1,68 +1,217 @@
-# Claude Switcher（社区维护版）
+<div align="center">
 
-macOS 菜单栏工具，用于在多个 Claude 订阅账号之间切换 Claude Desktop 与 Claude Code CLI 的登录状态。
+<img src="assets/icon-candidates/switcher-flow-v6.png" width="88" alt="Claude Switcher">
 
-> **非官方项目。** 本项目与 Anthropic 无关，未获 Anthropic 认可或支持。“Claude”是 Anthropic 的商标，此处仅用于说明兼容对象。
->
-> 本仓库是 [l2succes/claude-switcher](https://github.com/l2succes/claude-switcher)（作者 Luc Succes，MIT 许可）的公开 Fork，由社区维护。上游基线为 `main` 分支的提交 `011c00797c083530dc8cfa4557416cece86ab2b1`。原作者的版权与许可证保留在 [LICENSE](LICENSE) 中，致谢见 [CREDITS.md](CREDITS.md)。
+# Claude Switcher
 
-![主面板（演示数据，账号均为虚构）](docs/images/main.png)
+### 让每一次切换，都保留手上的工作。
 
-## 当前版本
+为 Claude Desktop 与 Claude Code 打造的 macOS 菜单栏伙伴。<br>
+账号、额度、会话与网络状态，在一个安静的入口里衔接起来。
 
-`v1.3.0-local.6`（内部构建 `20261029.6.7`），**预发布**。
+[![Release](https://img.shields.io/github/v/release/liuquanqing/claude-switcher?include_prereleases&label=release)](https://github.com/liuquanqing/claude-switcher/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%C2%B7%20Apple%20Silicon-lightgrey)](https://github.com/liuquanqing/claude-switcher/releases)
+[![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
+[![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-- 预编译包仅支持 **Apple Silicon（arm64）**、**macOS 13 及以上**。Intel 和 universal 构建都没有在真机上验收过。
-- App 只有 ad-hoc 本地签名，**没有 Developer ID 签名，也没有经过 Apple 公证**。
-- 发布说明见 [docs/RELEASE-v1.3.0-local.6.md](docs/RELEASE-v1.3.0-local.6.md)。
+[下载](#下载) · [核心能力](#核心能力) · [快速开始](#快速开始) · [边界与验证](#边界与验证) · [English](README.en.md)
 
-## 功能
+</div>
 
-### 继承自上游
+<p align="center">
+  <img src="docs/images/main.png" width="820" alt="Claude Switcher 主界面">
+</p>
 
-- 菜单栏面板：列出已保存的 Claude Desktop 账号并一键切换。
-- 在账号之间复制 Claude Code 会话的窗口。
-- 切换桌面账号时同步切换终端里 `claude` CLI 的登录。
+> Claude Switcher 是社区维护的非官方工具，与 Anthropic 没有隶属关系。<br>
+> 项目基于 [l2succes/claude-switcher](https://github.com/l2succes/claude-switcher) 继续维护，原作者与许可证信息见 [CREDITS.md](CREDITS.md)。
 
-### 本维护版新增或修改
+## 为什么是 Claude Switcher？
 
-- **切换前网络门禁**：轮换桌面账号目录之前，先检查代理/TUN 是否在线，再分别向 `claude.ai`、`api.anthropic.com`、`claude.com` 发请求，观察出口国家，要求结果与设定的目标国家一致。结果失败、未知或各域名不一致时，一律不放行。
-- **CLI 身份与备份核验**：切换前先核验 CLI 当前的身份，并确认备份可用。备份失败会在退出或移动桌面目录之前被发现。
-- **最小范围写入 CLI 凭据**：在默认 Keychain 项或 `.credentials.json` 中，只改写本工具自己管理的 OAuth 字段。遇到冲突、拒绝读取或格式未知时会停下，不会覆盖。写入失败时先回读，必要时还原。
-- **独立守卫**：一个用户级 LaunchAgent（`dev.claudeswitcher.guard`），大约每 10 秒复查一次网络。它只管理通过本工具打开的桌面，或者你明确确认过的订阅模式桌面。关闭面板或界面不会停止守卫，需要在设置里主动关闭保护。
-- **CLI 边界**：只核验和同步“默认保存的登录”，不会强行停止正在运行的 CLI 任务，也不保证已在运行的旧任务会立刻换成新账号。
-- **API/未知模式**：桌面处于 API 模式或模式无法确认时，不会被自动纳入订阅保护。
-- **配置互操作**：能识别 Magpie、CC Switch 写入的配置来源，并提供跳转到原工具的入口。本工具不管理这些工具的密钥，也不接管它们的退出流程。
-- **会话导入**（仅限已适配的桌面索引格式）：会话原文共享、不改写。默认只新增，同一段会话能验证时才做增量追加，支持备份、撤销和恢复。它**不是**完整的云端聊天迁移，也**不能**让一段会话自动接续到另一个 CLI 账号的会话里。
-- **静默刷新**：打开面板时只读取本地状态。启动时、每 5 分钟一次、以及手动刷新时会联网，结果全部完成后才一次性更新界面，检查过程中不会先降级显示。核验入口在 ⓘ 里，强门禁规则不变。
+多个 Claude 账号，通常意味着不断登录、退出、再找回终端里的工作身份。Claude Switcher 把这些重复动作收进菜单栏，同时让切换过程更可解释：先看见当前状态，再决定下一步。
 
-![设置（演示数据）](docs/images/settings.png)
-![保护状态（演示数据）](docs/images/protected.png)
+它关注三件事：
 
-## 使用前请了解
+- **少打断**：额度和重置时间直接呈现，打开面板只读取本地状态。
+- **保持一致**：桌面账号切换后，默认保存的 Claude Code CLI 登录也能继续同步。
+- **有依据**：启动与切号前检查代理、TUN、目标地区和 CLI 备份；无法确认时停在原地。
 
-- 网络探测只是本程序对几个主要域名的观察结果。它**不是防火墙**，也不能证明 Claude 客户端的每一条连接都走同一个出口。守卫约每 10 秒检查一次，不是实时的。
-- 本工具不保证账号安全，不能防止封号，也不保证所有情况都能恢复。请自行承担使用风险，并遵守 Anthropic 的服务条款。
-- 候选版与原版 Claude Switcher **共享同一个账号目录**。不要用两个管理器同时切号。
-- 只支持文中列出的代理检测方式：Shadowrocket 连接状态，或“自动”模式下的 TUN 网卡。其他网络环境可能无法通过门禁，这是预期行为。
+## 核心能力
 
-## 安装
+<table>
+<tr>
+<td width="50%" valign="top">
 
-从 GitHub Release 下载 DMG 或 ZIP，校验 SHA256，然后把 `Claude Switcher 候选版.app` 拖进“应用程序”文件夹。完整步骤、首次打开方式和卸载方法见 [docs/INSTALL.md](docs/INSTALL.md)。
+**在账号之间从容切换**
+
+为不同工作身份保留独立的 Claude Desktop 数据目录，用更短的路径完成切换。
+
+</td>
+<td width="50%" valign="top">
+
+**桌面与 CLI 一起对齐**
+
+切换时同步默认保存的 OAuth 登录，减少桌面一套账号、终端另一套账号带来的割裂。
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**切换前先确认**
+
+检查代理、TUN、Claude 相关域名与目标地区。失败、未知或路由不一致时不继续。
+
+</td>
+<td valign="top">
+
+**后台继续观察**
+
+独立守卫管理明确确认过的订阅桌面；关闭面板后，保护设置仍由你决定是否保留。
+
+</td>
+</tr>
+<tr>
+<td valign="top">
+
+**把会话带到下一站**
+
+为适配的桌面会话提供导入、增量、备份、撤销与恢复，默认只处理可核验的本地索引。
+
+</td>
+<td valign="top">
+
+**和现有工具共处**
+
+识别 Magpie、CC Switch 写入的配置来源，提供跳转入口，不改写它们的密钥或退出流程。
+
+</td>
+</tr>
+</table>
+
+## 一次切换，几步完成
+
+```mermaid
+flowchart LR
+    A[选择目标账号] --> B[检查网络与 CLI 条件]
+    B --> C[保存当前账号状态]
+    C --> D[切换 Desktop 账号]
+    D --> E[同步默认 CLI 登录]
+    E --> F[确认结果并继续工作]
+```
+
+只有当检查结果明确通过，流程才会继续。API 模式、未知桌面模式、无法确认的 CLI 存储或冲突中的会话，都会停在原状态，等待你处理。
+
+## 界面
+
+<table>
+<tr>
+<td align="center" width="50%">
+<img src="docs/images/main.png" alt="账号与额度面板" width="420"><br>
+账号与额度
+</td>
+<td align="center" width="50%">
+<img src="docs/images/settings.png" alt="保护设置" width="420"><br>
+网络与保护设置
+</td>
+</tr>
+</table>
+
+界面截图均使用虚构账号与演示数据。
+
+## 下载
+
+前往 [Releases](https://github.com/liuquanqing/claude-switcher/releases) 下载 DMG 或 ZIP，并核对同页的 `SHA256SUMS`。
+
+当前预编译包：
+
+- Apple Silicon（arm64）
+- macOS 13 及以上
+- 候选版应用名：`Claude Switcher 候选版.app`
+
+> 当前构建使用 ad-hoc 本地签名，未经过 Apple 公证。首次打开方式、升级与卸载步骤见 [安装说明](docs/INSTALL.md)。
+
+## 快速开始
+
+1. 下载并校验安装包。
+2. 将 `Claude Switcher 候选版.app` 拖入“应用程序”。
+3. 首次启动时，按住 Control 点按应用并选择“打开”。
+4. 添加账号，或切换到一个空账号后在 Claude 中完成登录。
+5. 如需后台保护，在设置中确认目标地区、代理方式和桌面范围。
+
+安装前建议只保留一个 Claude 账号管理器在运行。候选版与原版 Claude Switcher 共享同一账号目录，不要同时切号。
+
+## 常见问题
+
+<details>
+<summary><strong>切换账号会改写云端会话吗？</strong></summary>
+
+不会。工具通过切换 Claude Desktop 的本地数据目录来改变当前账号；适用于导入的本地会话索引也不会被包装成云端迁移。
+
+</details>
+
+<details>
+<summary><strong>为什么已经运行的 CLI 任务不一定立即换号？</strong></summary>
+
+Claude Switcher 同步的是默认保存的 CLI 登录。已经启动的任务可能继续使用启动时取得的身份；本工具不会为了切号强制结束这些任务。
+
+</details>
+
+<details>
+<summary><strong>当前支持哪些网络检测方式？</strong></summary>
+
+当前版本支持 Shadowrocket 连接状态，以及“自动”模式下的 TUN 网卡。无法确认代理、TUN 或目标地区时，切换和受保护启动会停止。
+
+</details>
+
+<details>
+<summary><strong>可以和原版 Claude Switcher 同时安装吗？</strong></summary>
+
+可以并存，但两者共享同一账号目录。请不要同时打开两个管理器切号，也不要同时启用两套守卫。
+
+</details>
+
+## 边界与验证
+
+Claude Switcher 的定位是**切换门禁与周期性状态观察**，与系统级网络策略互补。网络层隔离与即时阻断仍在独立验证中，尚未接入这个预发布版本。
+
+网络检查、CLI 同步和会话导入都以可确认的边界为前提：
+
+- 只同步默认保存的 CLI 登录，不保证已经运行的任务立即换号。
+- API 或未知模式的桌面不会自动纳入订阅保护。
+- 会话导入面向已适配的桌面索引，不等同于完整云端聊天迁移。
+- 后台守卫约每 10 秒检查一次，不能覆盖两次检查之间的全部变化。
+
+当前公开发布源码已通过：
+
+- Core 测试：176 项
+- 控制器隔离检查：106 项
+- release 构建与 ad-hoc 签名验证
+
+[查看完整验证范围](docs/VALIDATION.md) · [查看最新云端 CI](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
 ## 从源码构建
 
 需要 Xcode 命令行工具（Swift 5.9+）。
 
 ```bash
-./build.sh          # 只构建，产物在 build/，不会安装或注册任何服务
-./build.sh test     # 运行 swift test
+./build.sh          # 构建，不会自动安装或注册服务
+./build.sh test     # 运行核心测试
+scripts/package-release.sh
 ```
 
-`./build.sh` 产出候选版（Bundle ID `dev.claudeswitcher.candidate`），默认不覆盖原版。运行 `scripts/package-release.sh` 可构建并生成当前架构的 DMG、ZIP 和 SHA256SUMS。不要从 `build/` 目录直接长期运行：守卫记录的是 helper 的路径，临时目录不适合做长期路径。
+开发与贡献请先阅读 [AGENTS.md](AGENTS.md)。自动化测试只能使用虚构数据与临时目录，不要使用真实登录、Keychain、账号目录或会话。
 
-测试范围与尚未验证的场景见 [docs/VALIDATION.md](docs/VALIDATION.md)。贡献代码时请遵循 [AGENTS.md](AGENTS.md)：只用虚构数据和临时目录，切勿拿真实登录、Keychain 或会话当测试数据。
+## 致谢
 
-## 许可证
+感谢 [Luc Succes](https://github.com/l2succes) 创立的 [l2succes/claude-switcher](https://github.com/l2succes/claude-switcher)，它为桌面账号切换、会话复制和 CLI 登录同步提供了基础。
 
-MIT，见 [LICENSE](LICENSE)。原始版权 © 2026 Luc Succes。本维护版的修改同样以 MIT 许可发布。
+也感谢 [XueshiQiao/CCSwitcher](https://github.com/XueshiQiao/CCSwitcher)、[YOURSJEYO/claude-switcher](https://github.com/YOURSJEYO/claude-switcher)、[Magpie](https://github.com/yetone/magpie) 与 [CC Switch](https://github.com/farion1231/cc-switch) 在账号管理、启动检查和配置互操作方面带来的启发。
+
+完整贡献与许可证说明见 [CREDITS.md](CREDITS.md) 与 [LICENSE](LICENSE)。
+
+<div align="center">
+
+**Claude Switcher**<br>
+Switch lightly. Keep working.
+
+</div>
