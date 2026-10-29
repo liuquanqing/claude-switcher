@@ -11,7 +11,7 @@ Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账
 
 ## 1. 下载并校验
 
-从本仓库的 GitHub Release 页面下载：
+推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-local.6)下载：
 
 - `.dmg` 或 `.zip`（二选一）
 - `SHA256SUMS`

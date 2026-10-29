@@ -2,9 +2,11 @@
 
 ### 让每一次切换，都保留手上的工作。
 
-`local.6` 预发布 · Apple Silicon · macOS 13+
+**1.3.0 预览版 6** · Apple Silicon · macOS 13+
 
-[下载安装](#下载安装) · [本版变化](#本版变化) · [验证范围](#验证范围)
+**[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.dmg)** · [下载应用 ZIP](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.zip) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/SHA256SUMS)
+
+[下载安装](#下载安装) · [本版变化](#这一版把切换做得更完整) · [验证范围](#验证范围)
 
 </div>
 
