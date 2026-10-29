@@ -201,7 +201,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         start=len(clients)
         for fam in (4,6):
             for kind in ('cli','desktop'): launch(kind,fam)
-        current=clients[start:]; deadline=time.monotonic()+(20 if allowed else 7)
+        current=clients[start:]; began=time.monotonic(); deadline=began+30
         while time.monotonic()<deadline:
             now=stats()['stats'] if backend.poll() is None else None
             ready=True
@@ -213,7 +213,9 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
                 if item['kind']=='cli': ok=ok and 'fixture-start' in output
                 else: ok=ok and now['tls'].get(key,0)>before['tls'].get(key,0) if now else False
                 ready=ready and ok
+            attempted=now is not None and all(now['syn'].get(str(c['family'])+':'+str(29300 if c['kind']=='cli' else 29301),0)>before['syn'].get(str(c['family'])+':'+str(29300 if c['kind']=='cli' else 29301),0) for c in current)
             if allowed and ready: break
+            if not allowed and time.monotonic()-began>=7 and (attempted or now is None): break
             time.sleep(.15)
         now=stats()['stats'] if backend.poll() is None else None
         for item in current:
@@ -225,6 +227,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
             row=dict(case=name,kind=item['kind'],family=item['family'],requests=count,alive=alive,cliPartialReceived=marker if item['kind']=='cli' else None)
             if now is not None:
                 row['synAttempts']=now['syn'].get(key,0)-before['syn'].get(key,0)
+                if not allowed and row['synAttempts']==0: row['logTail']=output[-1800:]
                 if not allowed: assert row['synAttempts']>0,row
             if allowed and (not alive or not count or (item['kind']=='cli' and not marker)):
                 row['logTail']=output[-1800:]
