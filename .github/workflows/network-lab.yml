@@ -37,4 +37,5 @@ jobs:
           persist-credentials: false
       - name: Disposable runner only - official blank clients and local fixtures
         run: |
+          clang -Wall -Wextra research/network-lab/utun_launch.c -o research/network-lab/utun-launch
           sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_OFFICIAL_CLIENT_LAB=ephemeral-only CS_TEST_UID="$(id -u)" RUNNER_TEMP="$RUNNER_TEMP" "$(command -v python3)" "$PWD/research/network-lab/official_clients_probe.py"

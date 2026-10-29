@@ -102,8 +102,15 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
  finally:
   a=pf('-a','cs_official_lab','-F','rules',check=False);b=pf('-f','/etc/pf.conf',check=False);c=pf('-d',check=False) if not was_enabled else None
   cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
+ if desktop is not None and cleanup:
+  artifactFile=root/'artifacts.json';artifactFile.write_text(json.dumps({'cli':str(cli),'desktop':str(desktop)}))
+  try:
+   child=command('/usr/bin/env','GITHUB_ACTIONS=true','RUNNER_ENVIRONMENT=github-hosted','CS_REAL_UTUN_LAB=ephemeral-only','CS_TEST_UID='+str(UID),'CS_CLIENT_ARTIFACT_JSON='+str(artifactFile),str(Path(__file__).with_name('utun-launch')),sys.executable,str(Path(__file__).with_name('real_utun_clients_probe.py')))
+   results['actualUtunClients']=json.loads(child.stdout)
+  except subprocess.CalledProcessError as e:
+   results['actualUtunClients']={'state':'FAILED','exitCode':e.returncode,'stdout':e.stdout,'stderr':e.stderr}
  cliOK=results.get('cliPositive',{}).get('requestsToLocalFixture',0)>0 and results.get('cliBlocked',{}).get('requestsToLocalFixture')==0
  desktopOK=results.get('desktopPositive',{}).get('proxyRequests',0)>0 and results.get('desktopBlocked',{}).get('proxyRequests')==0
  result=dict(layer='official-blank-client-local-service-observation',results=results,error=error,cleanup=cleanup,cliNetworkObservationPassed=cliOK,desktopNetworkObservationPassed=desktopOK,realAccountUsed=False,subscriptionAuthFlow='NOT_RUN',actualNetworkExtension=False,actualTUNInThisJob=False,productionReady=False)
  print(json.dumps(result,indent=2),flush=True)
- os._exit(0 if error is None and cleanup and cliOK and desktopOK else 1)
+ os._exit(0 if error is None and cleanup and cliOK and desktopOK and results.get('actualUtunClients',{}).get('allAssertionsPassed') else 1)
