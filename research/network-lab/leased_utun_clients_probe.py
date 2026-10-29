@@ -2,7 +2,7 @@
 Disposable hosted macOS only. Static PF rejects other fixture paths. Neither
 this synthetic packet peer nor the runner-UID rules are a production backend.
 """
-import json, math, os, platform, queue, selectors, signal, socket, subprocess, sys, tempfile, threading, time, uuid
+import json, math, os, platform, queue, selectors, signal, socket, subprocess, sys, tempfile, threading, time, traceback, uuid
 from pathlib import Path
 from leased_utun_peer import Peer
 
@@ -178,7 +178,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
             for line in proc.stdout: target.put(json.loads(line))
         threading.Thread(target=reader,args=(backend,events),daemon=True).start()
         interface=wait('ready')['interface']; assert interface.startswith('utun')
-        controller=subprocess.Popen([sys.executable,__file__,'--controller',str(left.fileno())],pass_fds=(left.fileno(),),stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,start_new_session=True)
+        controller=subprocess.Popen([sys.executable,__file__,'--controller',str(left.fileno())],pass_fds=(left.fileno(),),stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,text=True,start_new_session=True)
         left.close()
         command('/sbin/ifconfig',interface,'inet','198.18.250.1','198.18.250.2','netmask','255.255.255.252','up')
         command('/sbin/ifconfig',interface,'inet6','fdff:cc55::1','prefixlen','64','up')
@@ -294,7 +294,7 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         packets=command('/usr/sbin/tcpdump','-n','-r',str(root/'physical.pcap')).stdout.splitlines()
         physical_result=dict(interface=physical,syntheticTargetPackets=len(packets),captureReady=True); assert not packets
     except BaseException as e:
-        error=repr(e)
+        error=repr(e)+' traceback='+traceback.format_exc()
         if isinstance(e,subprocess.CalledProcessError): error+=' stderr='+e.stderr
         if (root/'executor.stderr').exists(): error+=' executorStderr='+ (root/'executor.stderr').read_text(errors='replace')[-2000:]
     finally:
