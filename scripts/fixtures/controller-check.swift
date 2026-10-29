@@ -19,6 +19,27 @@ actor FixtureGuardWorker: GuardWorking {
  }
 }
 
+@MainActor final class FixtureCLIProbe {
+ private var pending: CheckedContinuation<CLIStatusPresentation, Never>?
+ private var started: CheckedContinuation<Void, Never>?
+
+ func run() async -> CLIStatusPresentation {
+  await withCheckedContinuation { continuation in
+   pending = continuation
+   started?.resume(); started = nil
+  }
+ }
+ func waitUntilStarted() async {
+  if pending != nil { return }
+  await withCheckedContinuation { started = $0 }
+ }
+ func complete(_ result: CLIStatusPresentation) {
+  guard let continuation = pending else { preconditionFailure("Fixture probe must start before completion") }
+  pending = nil
+  continuation.resume(returning: result)
+ }
+}
+
 @main struct ControllerChecks {
  @MainActor static func main() async throws {
   var checks = 0
@@ -342,35 +363,32 @@ actor FixtureGuardWorker: GuardWorking {
   require(absentDecision.reason == .disabled, "first-time missing configuration with no registered guard is not misreported as malformed")
   let quietStore = Store(demo: true)
   let priorEmail = quietStore.cliEmail, priorCheckedAt = quietStore.cliStatusCheckedAt
+  let quietProbe = FixtureCLIProbe()
   let quietRefresh = Task { @MainActor in
-   await quietStore.updateCLIStatus {
-    try? await Task.sleep(nanoseconds: 180_000_000)
-    return CLIStatusPresentation(status: .different, profile: "Business", email: "new@example.test", detail: "fixture completed")
-   }
+   await quietStore.updateCLIStatus { await quietProbe.run() }
   }
-  try await Task.sleep(nanoseconds: 50_000_000)
+  await quietProbe.waitUntilStarted()
   require(quietStore.cliStatusRefreshing && quietStore.cliStatus == .matched, "background refresh retains the last completed conclusion while evaluating")
   require(quietStore.cliEmail == priorEmail && quietStore.cliStatusCheckedAt == priorCheckedAt, "intermediate evaluation cannot replace identity or completion time")
+  quietProbe.complete(CLIStatusPresentation(status: .different, profile: "Business", email: "new@example.test", detail: "fixture completed"))
   await quietRefresh.value
   require(!quietStore.cliStatusRefreshing && quietStore.cliStatus == .different && quietStore.cliEmail == "new@example.test", "completed result publishes the new conclusion and identity together")
   await quietStore.updateCLIStatus { CLIStatusPresentation(status: .unverified, detail: "fixture failed") }
   require(quietStore.cliStatus == .unverified && quietStore.cliProfile == nil, "failed or unknown completion cannot retain a green match")
+  let profileProbe = FixtureCLIProbe()
   let changedContext = Task { @MainActor in
-   await quietStore.updateCLIStatus {
-    try? await Task.sleep(nanoseconds: 100_000_000)
-    return CLIStatusPresentation(status: .matched, profile: "Personal", email: "old@example.test")
-   }
+   await quietStore.updateCLIStatus { await profileProbe.run() }
   }
-  try await Task.sleep(nanoseconds: 30_000_000); quietStore.current = "Business"
+  await profileProbe.waitUntilStarted(); quietStore.current = "Business"
+  profileProbe.complete(CLIStatusPresentation(status: .matched, profile: "Personal", email: "old@example.test"))
   await changedContext.value
   require(quietStore.cliStatus == .unverified && quietStore.cliEmail == nil && quietStore.cliStatusCheckedAt == nil, "a changed desktop profile rejects an in-flight old match")
+  let scopeProbe = FixtureCLIProbe()
   let invalidatedContext = Task { @MainActor in
-   await quietStore.updateCLIStatus {
-    try? await Task.sleep(nanoseconds: 100_000_000)
-    return CLIStatusPresentation(status: .matched, profile: "Business")
-   }
+   await quietStore.updateCLIStatus { await scopeProbe.run() }
   }
-  try await Task.sleep(nanoseconds: 30_000_000); quietStore.invalidateCLIStatus()
+  await scopeProbe.waitUntilStarted(); quietStore.invalidateCLIStatus()
+  scopeProbe.complete(CLIStatusPresentation(status: .matched, profile: "Business"))
   await invalidatedContext.value
   require(quietStore.cliStatus == .unverified && quietStore.cliStatusCheckedAt == nil, "a scope/context invalidation rejects an in-flight old result even if the profile name stayed the same")
   await quietStore.updateCLIStatus { CLIStatusPresentation(status: .unverified, email: "api-cli@example.test", standaloneVerified: true) }
