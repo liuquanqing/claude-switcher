@@ -134,6 +134,7 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
   capture_log=(root/'capture.log').open('w')
   capture=subprocess.Popen(['/usr/sbin/tcpdump','-n','-U','-i',physical,'-w',str(root/'physical.pcap'),'(dst host 198.18.250.2 or dst host fdff:cc55::2) and (tcp or udp) and dst portrange 29300-29302'],stdout=subprocess.DEVNULL,stderr=capture_log)
   time.sleep(.5);assert capture.poll() is None,'physical capture failed to start'
+  assert 'listening on '+physical in (root/'capture.log').read_text(),'capture not ready'
   thread.start();probe('default-deny-before-approval',False)
   apply(True);clear_states();probe('actual-utun-approved',True)
   UP=False;probe('peer-outage',False);UP=True;probe('peer-recovery',True)
@@ -186,7 +187,9 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
   def run_client(kind,phase,fam,expected):
    host='198.18.250.2' if fam==4 else '[fdff:cc55::2]'
    profile=root/('desktop-'+uuid.uuid4().hex);profile.mkdir();os.chown(profile,uid,-1)
-   port=29300 if kind=='cli' else 29301;before=sum(x['port']==port for x in HTTP_SEEN)
+   port=29300 if kind=='cli' else 29301
+   def request_count():return sum(x['port']==port and x['family']==fam for x in HTTP_SEEN)
+   before=request_count()
    before_syn=sum(x==(fam,port) for x in SYN_SEEN)
    envArgs=['CLAUDE_CONFIG_DIR='+str(config),'ANTHROPIC_API_KEY=fixture-invalid-key','ANTHROPIC_BASE_URL=http://'+host+':29300','API_TIMEOUT_MS=1000','DISABLE_TELEMETRY=1','DISABLE_ERROR_REPORTING=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']
    if kind=='cli':
@@ -195,7 +198,7 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
    proc=subprocess.Popen(args,cwd=work,env=clean,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
    start=time.monotonic();deadline=start+(15 if expected else 7)
    while time.monotonic()<deadline:
-    count=sum(x['port']==port for x in HTTP_SEEN)-before
+    count=request_count()-before
     if expected and count>0:break
     if proc.poll() is not None:break
     time.sleep(.1)
@@ -203,7 +206,7 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
    except ProcessLookupError:pass
    try:proc.wait(timeout=2)
    except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
-   count=sum(x['port']==port for x in HTTP_SEEN)-before
+   count=request_count()-before
    syn=sum(x==(fam,port) for x in SYN_SEEN)-before_syn
    RESULTS.append(dict(case=kind+'-actual-utun-'+phase,family=fam,requestsInUtun=count,synInUtun=syn,observationSeconds=round(time.monotonic()-start,3)))
    assert (count>0 if expected else count==0),(kind,phase,fam,count)
