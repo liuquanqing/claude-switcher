@@ -22,13 +22,14 @@ class Peer:
         self.fd, self.permitted = fd, permitted
         self.flows = {}
         self.http, self.syn, self.tls, self.sse = {}, {}, {}, {}
+        self.http_events = []
         self.tcp_tokens, self.udp_tokens = [], []
         self.pushes, self.denied_pushes = 0, 0
 
     def snapshot(self):
         return dict(http=dict(self.http), syn=dict(self.syn), tls=dict(self.tls), sse=dict(self.sse),
                     tcpTokens=list(self.tcp_tokens), udpTokens=list(self.udp_tokens),
-                    pushes=self.pushes, deniedPushes=self.denied_pushes)
+                    pushes=self.pushes, deniedPushes=self.denied_pushes, httpEvents=list(self.http_events))
 
     def packet(self, version, src, dst, proto, body):
         if not self.permitted():
@@ -123,6 +124,7 @@ class Peer:
         if len(body) < length or not self.permitted():
             return
         self.http[counter] = self.http.get(counter, 0) + 1
+        self.http_events.append(dict(key=counter,at=time.monotonic()))
         if dport == 29301:
             state['mode'] = 'tls'
             self.tcp(key, state, 0x18, b'HTTP/1.1 200 Connection Established\r\n\r\n')

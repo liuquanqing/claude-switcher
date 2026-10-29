@@ -32,8 +32,9 @@ def executor(iface, fd):
 
     def revoke(reason):
         nonlocal deadline
+        previous=deadline
         deadline = 0; peer.flows.clear(); drain()
-        emit('revoked', reason=reason)
+        emit('revoked', reason=reason,deadlineWas=previous)
 
     def notification(sig, frame):
         nonlocal snapshot, push
@@ -253,12 +254,23 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
 
     def fault_observation(name, trigger):
         before=stats()['stats']; assert all(c['process'].poll() is None for c in clients)
-        trigger()
+        backend.send_signal(signal.SIGUSR2); end=time.monotonic()+3
+        while time.monotonic()<end:
+            current=stats()['stats']
+            received=all('fixture-push' in c['path'].read_text(errors='replace') for c in clients if c['kind']=='cli')
+            if current['pushes']>=before['pushes']+2 and received: break
+            time.sleep(.1)
+        assert current['pushes']>=before['pushes']+2 and received,'live CLI push positive control missing'
+        RESULTS.append(dict(case=name+'-live-CLI-push-positive-control',bothFamiliesReceived=True))
+        before=current; renew_stop()
+        fault=trigger()
         at=time.monotonic(); backend.send_signal(signal.SIGUSR2); time.sleep(.2)
         after=stats()
-        assert not after['permitted'] and after['stats']['http']==before['http']
+        cutoff=fault['deadlineWas'] if fault['reason']=='permit-expired' else fault['at']
+        late=[e for e in after['stats']['httpEvents'] if e['at']>cutoff]
+        assert not after['permitted'] and not late,(after['permitted'],late,fault)
         assert after['stats']['pushes']==before['pushes'] and after['stats']['deniedPushes']>before['deniedPushes']
-        RESULTS.append(dict(case=name+'-live-client-revocation',httpUnchanged=True,pushDenied=True,clientProcessesAlive=sum(c['process'].poll() is None for c in clients)))
+        RESULTS.append(dict(case=name+'-live-client-revocation',noRequestsAfterRevocation=True,pushDenied=True,clientProcessesAlive=sum(c['process'].poll() is None for c in clients),cutoff=cutoff))
         stopped_streams(name+'-existing-flow-denied'); matrix(name+'-new-clients-denied',False)
 
     try:
@@ -269,20 +281,20 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         capture=subprocess.Popen(['/usr/sbin/tcpdump','-n','-U','-i',physical,'-w',str(root/'physical.pcap'),'(dst host 198.18.250.2 or dst host fdff:cc55::2) and (tcp or udp) and dst portrange 29300-29302'],stdout=subprocess.DEVNULL,stderr=capture_log)
         time.sleep(.5); assert capture.poll() is None and 'listening on '+physical in (root/'capture.log').read_text()
         start_backend(); matrix('initial-default-deny',False); stop_clients()
-        renew_start(); matrix('healthy-before-expiry',True); open_streams(); renew_stop()
+        renew_start(); matrix('healthy-before-expiry',True); open_streams()
         fault_observation('permit-expiry',lambda:wait('revoked',reason='permit-expired'))
         stop_clients(); matrix('expired-without-new-evidence',False); stop_clients()
         at=time.monotonic(); evidence(sampled=at-TTL-2); wait('revoked',after=at,reason='stale-evidence')
         matrix('old-evidence-denied',False); stop_clients()
-        renew_start(); matrix('fresh-recovery-before-controller-kill',True); open_streams(); renew_stop()
+        renew_start(); matrix('fresh-recovery-before-controller-kill',True); open_streams()
         def controller_killed():
-            at=time.monotonic(); kill(controller); wait('revoked',after=at,reason='controller-eof')
+            at=time.monotonic(); kill(controller); return wait('revoked',after=at,reason='controller-eof')
         fault_observation('controller-kill',controller_killed)
         stop_clients(); stop_backend(); start_backend(); matrix('restart-default-deny',False); stop_clients()
-        renew_start(); matrix('fresh-recovery-before-executor-stop',True); open_streams(); renew_stop()
+        renew_start(); matrix('fresh-recovery-before-executor-stop',True); open_streams()
         def executor_stopped():
             backend.send_signal(signal.SIGSTOP); evidence(); time.sleep(TTL+.25); at=time.monotonic(); backend.send_signal(signal.SIGCONT)
-            wait('revoked',after=at,reason='stale-evidence')
+            return wait('revoked',after=at,reason='stale-evidence')
         fault_observation('executor-stop-expired-queued-evidence',executor_stopped)
         stop_clients(); renew_start(); matrix('fresh-recovery-before-executor-kill',True); open_streams(); renew_stop()
         kill(backend); assert command('/sbin/ifconfig',interface,check=False).returncode!=0,'utun survived sole-owner exit'
