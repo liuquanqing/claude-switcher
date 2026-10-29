@@ -104,8 +104,11 @@ def pf(*args, check=True):
 
 
 def kill(proc):
-    if proc is None: return
-    try: os.killpg(proc.pid, signal.SIGKILL)
+    if proc is None or proc.poll() is not None: return
+    # Audit-session launchers can have group members outside this launcher.
+    # Terminate only our live PID; exact temporary vendor paths are checked
+    # separately by stop_clients(), including detached helpers.
+    try: proc.kill()
     except ProcessLookupError: pass
     proc.wait(timeout=5)
 
