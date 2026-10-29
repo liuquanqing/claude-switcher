@@ -1,7 +1,5 @@
 <div align="center">
 
-# Claude Switcher 1.3.0
-
 ### 让每一次切换，都保留手上的工作。
 
 `local.6` 预发布 · Apple Silicon · macOS 13+
