@@ -2,7 +2,7 @@
 Default deny; monotonic permit; private inherited control FD; closes streams on revoke.
 Only fake loopback echoes. Never run this on a personal Mac.
 """
-import json,os,platform,queue,selectors,signal,socket,socketserver,subprocess,sys,threading,time,uuid
+import json,math,os,platform,queue,selectors,signal,socket,socketserver,subprocess,sys,threading,time,uuid
 from pathlib import Path
 TTL=1.2
 TARGETS=[(socket.AF_INET,'127.0.0.1'),(socket.AF_INET6,'::1')]
@@ -44,9 +44,12 @@ def broker(fd):
      except ValueError:revoke('invalid-control');continue
      # This fixture's SG is fake verified evidence, not real geolocation.
      if msg.get('country')!='SG' or not isinstance(msg.get('revision'),str):revoke('country-or-evidence-invalid');continue
+     sampled=msg.get('sampledAt');now=time.monotonic()
+     if not isinstance(sampled,(int,float)) or not math.isfinite(sampled) or not 0<=now-sampled<TTL:
+      revoke('stale-evidence');continue
      new_revision=msg['revision']
      if revision is not None and revision!=new_revision:revoke('context-changed')
-     revision=new_revision;permit=True;deadline=time.monotonic()+TTL;emit(event='permitted',revision=revision)
+     revision=new_revision;permit=True;deadline=sampled+TTL;emit(event='permitted',revision=revision)
    elif kind=='tcp':
     c,_=s.accept()
     if not permit or time.monotonic()>=deadline:c.close();continue
@@ -112,8 +115,8 @@ def main():
    x=q.get(timeout=max(.01,end-time.monotonic()))
    if x.get('event')==event and (reason is None or x.get('reason')==reason):return x
   raise AssertionError((event,reason))
- def command(c,country='SG',revision='one'):
-  c.stdin.write(json.dumps(dict(country=country,revision=revision))+'\n');c.stdin.flush()
+ def command(c,country='SG',revision='one',sampled=None):
+  c.stdin.write(json.dumps(dict(country=country,revision=revision,sampledAt=time.monotonic() if sampled is None else sampled))+'\n');c.stdin.flush()
  def client(family,host,proto):
   s=socket.socket(family,socket.SOCK_STREAM if proto=='tcp' else socket.SOCK_DGRAM);s.settimeout(.25)
   try:s.connect((host,29100+(proto=='udp')))
@@ -147,7 +150,14 @@ def main():
   t=time.monotonic();c.send_signal(signal.SIGSTOP);wait(q,'revoked',reason='permit-expired');expiry_ms=(time.monotonic()-t)*1000
   check('controller-hang-expired-existing-denied',False,streams);close_streams(streams);check('controller-hang-expired-new-denied',False)
   c.send_signal(signal.SIGCONT);check('controller-resume-alone-stays-denied',False)
+  command(c,sampled=time.monotonic()-TTL-1);wait(q,'revoked',reason='stale-evidence');check('cached-evidence-cannot-renew',False)
+  command(c,sampled=time.monotonic()+10);wait(q,'revoked',reason='stale-evidence');check('future-evidence-cannot-renew',False)
   command(c,revision='two');wait(q,'permitted');check('fresh-evidence-after-resume',True)
+  streams=open_streams();check('existing-before-data-plane-stop',True,streams)
+  b.send_signal(signal.SIGSTOP);command(c);time.sleep(TTL+.15);b.send_signal(signal.SIGCONT)
+  wait(q,'revoked',reason='stale-evidence')
+  check('data-plane-resume-existing-denied',False,streams);close_streams(streams);check('data-plane-resume-new-denied',False)
+  command(c,revision='three');wait(q,'permitted');check('fresh-evidence-after-data-plane-resume',True)
   streams=open_streams();check('existing-before-broker-kill',True,streams)
   b.kill();b.wait();check('broker-kill-existing-denied',False,streams);close_streams(streams);check('broker-kill-new-denied',False)
   return dict(layer='isolated-in-path-permit-prototype',platform=platform.system(),arch=platform.machine(),count=len(results),allAssertionsPassed=True,cases=results,
