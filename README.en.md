@@ -102,7 +102,7 @@ The build uses an ad-hoc local signature and is not notarized by Apple. See [the
 
 1. Download and verify the archive.
 2. Move `Claude Switcher 候选版.app` to Applications.
-3. On first launch, Control-click the app and choose Open.
+3. If macOS blocks the app, use Open Anyway in System Settings → Privacy & Security for this app. See [the first-launch guide](docs/INSTALL.md#3-首次打开).
 4. Add an account, or switch to an empty account and sign in through Claude.
 5. If you want background protection, confirm the region, proxy mode and desktop scope in Settings.
 

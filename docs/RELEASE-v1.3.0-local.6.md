@@ -48,9 +48,9 @@ Claude Switcher 仍然是一个轻量的菜单栏工具。`local.6` 在账号切
 1. 下载 arm64 的 `.dmg` 或 `.zip`，以及 `SHA256SUMS`。
 2. 校验文件哈希。
 3. 把 `Claude Switcher 候选版.app` 拖进“应用程序”。
-4. 首次打开时按住 Control 点按应用，选择“打开”。
+4. 若 macOS 阻止首次打开，在“系统设置 → 隐私与安全性”中为本应用选择“仍要打开”。
 
-完整步骤见 [INSTALL.md](https://github.com/liuquanqing/claude-switcher/blob/v1.3.0-local.6/docs/INSTALL.md)。
+完整步骤见 [INSTALL.md](https://github.com/liuquanqing/claude-switcher/blob/main/docs/INSTALL.md)。
 
 当前构建使用 ad-hoc 本地签名，没有 Developer ID 签名，也未经过 Apple 公证。请勿关闭 Gatekeeper 或批量移除隔离属性。
 
