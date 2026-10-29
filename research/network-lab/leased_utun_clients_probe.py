@@ -2,7 +2,7 @@
 Disposable hosted macOS only. Static PF rejects other fixture paths. Neither
 this synthetic packet peer nor the runner-UID rules are a production backend.
 """
-import json, math, os, platform, queue, selectors, signal, socket, subprocess, sys, tempfile, threading, time, traceback, uuid
+import ipaddress, json, math, os, platform, queue, selectors, signal, socket, subprocess, sys, tempfile, threading, time, traceback, uuid
 from pathlib import Path
 from leased_utun_peer import Peer
 
@@ -112,6 +112,21 @@ original = Path('/etc/pf.conf').read_text(); was_enabled = 'Status: Enabled' in 
 RESULTS = []; backend = controller = capture = None; interface = None; renewal = None; renewal_done = None
 clients = []; streams = []; events = None; error = None; cleanup = False; physical_result = None
 clean = {'PATH': '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin', 'LANG': 'en_US.UTF-8'}
+# The GUI login UID is also the hosted runner UID. Preserve only the runner's
+# already-observed HTTPS control destinations; never the synthetic test peers.
+# Otherwise a long test can strand its own CI log/cancellation channel.
+control_hosts=set(); runner_process=False
+for line in command('/usr/sbin/lsof','-nP','-iTCP','-sTCP:ESTABLISHED','-Fpcn',check=False).stdout.splitlines():
+    if line.startswith('p'): runner_process=False
+    elif line.startswith('c'): runner_process=line[1:].startswith('Runner.')
+    elif runner_process and line.startswith('n') and '->' in line:
+        dest=line.split('->',1)[1]
+        host,port=dest.rsplit(':',1)
+        if port=='443':
+            address=ipaddress.ip_address(host.strip('[]'))
+            assert str(address) not in ('198.18.250.2','fdff:cc55::2')
+            control_hosts.add(str(address))
+assert control_hosts,'No observable CI control HTTPS destinations; refuse to isolate the runner UID'
 
 with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER_TEMP']) as tmp:
     root = Path(tmp); root.chmod(0o755)
@@ -130,7 +145,11 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
                           f'pass in quick on {iface} {fam} proto {{ tcp udp }} from {host} port {{ 29300 29301 29302 }} to any keep state (if-bound)']
             lines += [f'block drop out quick {fam} proto {{ tcp udp }} from any to {host} port {{ 29300 29301 29302 }}',
                       f'block drop in quick {fam} proto {{ tcp udp }} from {host} port {{ 29300 29301 29302 }} to any']
-        lines += ['pass out quick on lo0 all', f'block drop out quick inet proto {{ tcp udp }} all user {UID}', f'block drop out quick inet6 proto {{ tcp udp }} all user {UID}']
+        lines += ['pass out quick on lo0 all']
+        for host in sorted(control_hosts):
+            fam='inet6' if ':' in host else 'inet'
+            lines.append(f'pass out quick {fam} proto tcp from any to {host} port 443 user {UID} keep state')
+        lines += [f'block drop out quick inet proto {{ tcp udp }} all user {UID}', f'block drop out quick inet6 proto {{ tcp udp }} all user {UID}']
         rules.write_text('\n'.join(lines)+'\n'); pf('-a','cs_leased_lab','-nf',str(rules)); pf('-a','cs_leased_lab','-f',str(rules))
 
     def wait(event, after=0, reason=None, timeout=5):
@@ -325,5 +344,5 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         a=pf('-a','cs_leased_lab','-F','rules',check=False); b=pf('-f','/etc/pf.conf',check=False)
         c=pf('-d',check=False) if not was_enabled else None
         cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
-result=dict(layer='official-clients-real-utun-expiring-permit-composition',os=platform.mac_ver()[0],arch=platform.machine(),leaseSeconds=TTL,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,physicalCapture=physical_result,actualTUN=True,actualOfficialClients=True,syntheticAPI=True,realAccountUsed=False,NetworkExtension='NOT_RUN',productionReady=False)
+result=dict(layer='official-clients-real-utun-expiring-permit-composition',os=platform.mac_ver()[0],arch=platform.machine(),leaseSeconds=TTL,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,physicalCapture=physical_result,ciControlHTTPSDestinations=len(control_hosts),actualTUN=True,actualOfficialClients=True,syntheticAPI=True,realAccountUsed=False,NetworkExtension='NOT_RUN',productionReady=False)
 print(json.dumps(result,indent=2),flush=True);os._exit(0 if result['allAssertionsPassed'] else 1)
