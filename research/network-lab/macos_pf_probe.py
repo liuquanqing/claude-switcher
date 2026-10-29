@@ -49,6 +49,7 @@ for cls,host,proto in [(T4,'127.0.0.2','tcp'),(T6,'::1','tcp'),(U4,'127.0.0.2','
  threading.Thread(target=server.serve_forever,daemon=True).start()
 check('before-filter-positive-control',True)
 original=Path('/etc/pf.conf').read_text()
+was_enabled='Status: Enabled' in pf('-s','info').stdout
 error=None;cleanup=False
 with tempfile.TemporaryDirectory(prefix='cs-macos-pf-') as tmp:
  root=Path(tmp);base=root/'base.conf';base.write_text(original+'\nanchor "cs_validation"\n')
@@ -87,8 +88,9 @@ with tempfile.TemporaryDirectory(prefix='cs-macos-pf-') as tmp:
   apply(True);clear_fixture_states();check('revalidation-recovery',True)
  except BaseException as e:error=repr(e)
  finally:
-  a=pf('-a','cs_validation','-F','all',check=False);b=pf('-f','/etc/pf.conf',check=False)
-  cleanup=a.returncode==0 and b.returncode==0
+  a=pf('-a','cs_validation','-F','rules',check=False);b=pf('-f','/etc/pf.conf',check=False)
+  c=pf('-d',check=False) if not was_enabled else None
+  cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
 result=dict(layer='macOS-PF-loopback-only',os=platform.mac_ver()[0],arch=platform.machine(),count=len(RESULTS),cases=RESULTS,
  allAssertionsPassed=error is None and cleanup,error=error,cleanup=cleanup,realClaudeOrCLI=False,physicalTUN='NOT_RUN',
  actualNetworkExtension='NOT_RUN',countryDetection='NOT_RUN',executorCrashWhilePermitted='NOT_RUN',productionReady=False)
