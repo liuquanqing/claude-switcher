@@ -47,7 +47,7 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
   command('/usr/sbin/pkgutil','--check-signature',str(pkg))
   expanded=root/'expanded';command('/usr/sbin/pkgutil','--expand-full',str(pkg),str(expanded))
   apps=list(expanded.rglob('Claude.app'));assert len(apps)==1
-  app=apps[0];command('/usr/bin/codesign','--verify','--deep','--strict',str(app))
+  app=root/'Claude.app';command('/usr/bin/ditto',str(apps[0]),str(app));command('/usr/bin/codesign','--verify','--deep','--strict',str(app))
   info=plistlib.loads((app/'Contents/Info.plist').read_bytes());desktop=app/'Contents/MacOS'/info['CFBundleExecutable']
   results['desktopArtifact']={'version':info.get('CFBundleShortVersionString'),'SHA256Package':pkgsha,'signatureVerified':True,'installedSystemPackage':False,'sourceURL':desktopURL,'latestVersionClaim':False}
  except Exception as e:
@@ -94,6 +94,7 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
   for host in ('127.0.0.1','::1'):pf('-k',host,'-k',host)
   start=len(API);second=run_cli();results['cliBlocked']={**second,'requestsToLocalFixture':len(API)-start}
   start=len(PROXY);d=run_desktop();results['desktopBlocked']={**d,'proxyRequests':len(PROXY)-start}
+  results['apiRequestPaths']=API
   results['pfCounters']=pf('-a','cs_official_lab','-vvsr').stdout
  except BaseException as e:
   error=repr(e)
