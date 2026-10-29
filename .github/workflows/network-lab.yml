@@ -16,3 +16,7 @@ jobs:
         env:
           CS_DISPOSABLE_NETWORK_LAB: github-hosted-loopback-only
         run: python3 research/network-lab/macos_pf_probe.py
+      - name: Disposable runner only - control loss and expiring permit
+        env:
+          CS_DISPOSABLE_NETWORK_LAB: github-hosted-loopback-only
+        run: python3 research/network-lab/gate_lease_lab.py
