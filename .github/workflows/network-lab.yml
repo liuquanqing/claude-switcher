@@ -28,3 +28,13 @@ jobs:
         run: |
           clang -Wall -Wextra research/network-lab/utun_launch.c -o "$RUNNER_TEMP/utun-launch"
           sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_REAL_UTUN_LAB=ephemeral-only "$RUNNER_TEMP/utun-launch" "$(command -v python3)" "$PWD/research/network-lab/real_utun_probe.py"
+  official-clients:
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Disposable runner only - official blank clients and local fixtures
+        run: |
+          sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_OFFICIAL_CLIENT_LAB=ephemeral-only CS_TEST_UID="$(id -u)" RUNNER_TEMP="$RUNNER_TEMP" "$(command -v python3)" "$PWD/research/network-lab/official_clients_probe.py"
