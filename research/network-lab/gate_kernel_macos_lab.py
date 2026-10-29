@@ -17,9 +17,22 @@ ns={'__file__':str(p),'__name__':'isolated_composition'}
 prefix=source.rsplit('\nguard()\n',1)[0]
 start=prefix.index(' def client(');end=prefix.index(' def check(',start)
 prefix=prefix[:start]+' def client(family,host,proto):\n  return ProtectedClient(family,host,proto)\n'+prefix[end:]
-# Healthy setup obtains fresh synthetic evidence after sudo identity preparation.
+# CI can take longer than TTL to spawn four sudo clients. Keep synthetic healthy
+# evidence fresh only while preparing those clients. Stop/join before returning,
+# so all later fault/expiry checks run without this helper or queued renewals.
 old=" def open_streams():return {(f,p):client(f,h,p) for f,h in TARGETS for p in ('tcp','udp')}"
-new=" def open_streams():\n  command(c);wait(q,'permitted')\n  return {(f,p):client(f,h,p) for f,h in TARGETS for p in ('tcp','udp')}"
+new=""" def open_streams():
+  done=threading.Event()
+  def healthy_setup():
+   while not done.wait(TTL/4):command(c)
+  command(c);wait(q,'permitted')
+  renew=threading.Thread(target=healthy_setup,daemon=True);renew.start()
+  try:
+   streams={(f,p):client(f,h,p) for f,h in TARGETS for p in ('tcp','udp')}
+  finally:
+   done.set();renew.join()
+  command(c);wait(q,'permitted')
+  return streams"""
 assert old in prefix
 prefix=prefix.replace(old,new)
 # Healthy synthetic verifier supplies fresh evidence before each costly sudo client.
