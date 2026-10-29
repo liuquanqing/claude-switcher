@@ -93,7 +93,7 @@ def probe(name,expected):
 original=Path('/etc/pf.conf').read_text();was_enabled='Status: Enabled' in pf('-s','info').stdout
 error=None;cleanup=False
 thread=threading.Thread(target=echo_peer,daemon=True)
-with tempfile.TemporaryDirectory(prefix='cs-real-utun-') as tmp:
+with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_TEMP']) as tmp:
  root=Path(tmp);base=root/'pf.conf';base.write_text(original+'\nanchor "cs_utun_lab"\n');rules=root/'rules.conf'
  def apply(allow):
   lines=[]
