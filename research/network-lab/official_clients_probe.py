@@ -52,6 +52,14 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
   results['desktopArtifact']={'version':info.get('CFBundleShortVersionString'),'SHA256Package':pkgsha,'signatureVerified':True,'installedSystemPackage':False,'sourceURL':desktopURL,'latestVersionClaim':False}
  except Exception as e:
   results['desktopArtifact']={'state':'NOT_RUN','reason':repr(e),'sourceURL':desktopURL}
+ if os.environ.get('CS_UTUN_COMPOSITION_LAB')=='ephemeral-only':
+  assert desktop is not None,results['desktopArtifact']
+  artifactFile=root/'artifacts.json';artifactFile.write_text(json.dumps({'cli':str(cli),'desktop':str(desktop)}))
+  child=subprocess.run([sys.executable,str(Path(__file__).with_name('leased_utun_clients_probe.py'))],env={**os.environ,'CS_REAL_UTUN_LAB':'ephemeral-only','CS_CLIENT_ARTIFACT_JSON':str(artifactFile)},text=True,capture_output=True)
+  try: composition=json.loads(child.stdout)
+  except ValueError: composition={'error':'child did not emit JSON','stdout':child.stdout,'stderr':child.stderr,'allAssertionsPassed':False}
+  result=dict(layer='official-client-utun-permit-composition-orchestration',artifacts=results,composition=composition,childExit=child.returncode,allAssertionsPassed=child.returncode==0 and composition['allAssertionsPassed'],productionReady=False)
+  print(json.dumps(result,indent=2),flush=True);os._exit(0 if result['allAssertionsPassed'] else 1)
  config=root/'cli-config';config.mkdir();os.chown(config,UID,-1)
  work=root/'empty-project';work.mkdir();os.chown(work,UID,-1)
  profile=root/'desktop-profile';profile.mkdir();os.chown(profile,UID,-1)
