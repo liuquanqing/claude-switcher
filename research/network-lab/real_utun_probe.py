@@ -84,11 +84,21 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-') as tmp:
   command('/sbin/ifconfig',IFACE,'up');probe('actual-utun-interface-recovery',True)
   apply(False);clear_states();probe('revoked-while-utun-still-exists',False)
   apply(True);clear_states();probe('revalidated-utun-recovery',True)
-  # Drop only the fixture host routes. No packet may bypass to a physical interface:
-  # the only pass is interface-bound to this utun, with explicit reject on all other paths.
-  command('/sbin/route','-n','delete','-host','198.18.250.2',check=False)
-  command('/sbin/route','-n','delete','-inet6','fdff:cc55::2',check=False)
-  clear_states();probe('fixture-route-removed-no-default-fallback',False)
+  # Keep established UDP sockets; destroying the utun must not reuse floating PF states.
+  streams=[]
+  for fam,host in PEERS:
+   sock=socket.socket(fam,socket.SOCK_DGRAM);sock.settimeout(.3);sock.connect((host,29300))
+   token=uuid.uuid4().hex;sock.send(token.encode());assert sock.recv(4096)==token.encode();streams.append((fam,sock))
+  STOP=True;os.close(FD);FD=None;thread.join(timeout=1)
+  for fam,sock in streams:
+   token=uuid.uuid4().hex;ack=False
+   try:sock.send(token.encode());ack=sock.recv(4096)==token.encode()
+   except OSError:pass
+   finally:sock.close()
+   RESULTS.append(dict(case='utun-owner-exited-existing-socket',family=4 if fam==socket.AF_INET else 6,echo=ack,seenInUtun=token in SEEN))
+   assert not ack and token not in SEEN
+  probe('utun-owner-exited-new-socket',False)
+  pf_counters=pf('-a','cs_utun_lab','-vvsr').stdout
  except BaseException as e:
   error=repr(e)
   if isinstance(e,subprocess.CalledProcessError):error+=' stderr='+e.stderr
@@ -96,9 +106,9 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-') as tmp:
   STOP=True
   command('/sbin/route','-n','delete','-host','198.18.250.2',check=False)
   command('/sbin/route','-n','delete','-inet6','fdff:cc55::2',check=False)
-  os.close(FD)
+  if FD is not None:os.close(FD)
   a=pf('-a','cs_utun_lab','-F','rules',check=False);b=pf('-f','/etc/pf.conf',check=False)
   c=pf('-d',check=False) if not was_enabled else None
   cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
-result=dict(layer='real-macos-utun-UDP-fixture',os=platform.mac_ver()[0],interface=IFACE,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,realClaudeCLI=False,actualNetworkExtension=False,defaultRouteChanged=False,productionReady=False)
+result=dict(layer='real-macos-utun-UDP-fixture',os=platform.mac_ver()[0],interface=IFACE,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,realClaudeCLI=False,actualNetworkExtension=False,defaultRouteChanged=False,physicalEgressCapture='NOT_RUN',pfCounters=locals().get('pf_counters'),productionReady=False)
 print(json.dumps(result,indent=2),flush=True);os._exit(0 if result['allAssertionsPassed'] else 1)
