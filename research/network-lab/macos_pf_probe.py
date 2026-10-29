@@ -22,7 +22,7 @@ class T4(socketserver.ThreadingTCPServer):allow_reuse_address=True;daemon_thread
 class T6(T4):address_family=socket.AF_INET6
 class U4(socketserver.ThreadingUDPServer):daemon_threads=True
 class U6(U4):address_family=socket.AF_INET6
-TARGETS=[(4,'127.0.0.2'),(6,'::1')]
+TARGETS=[(4,'127.0.0.1'),(6,'::1')]
 def pf(*args,check=True):
  return subprocess.run(['sudo','-n','/sbin/pfctl',*args],text=True,capture_output=True,check=check)
 def send(fam,host,proto,sock=None):
@@ -44,7 +44,7 @@ def check(name,allowed):
    RESULTS.append(dict(case=name,family=fam,protocol=proto,ack=ack,reachedSink=reached))
    assert ack==allowed and reached==allowed,(name,fam,proto,ack,reached)
 
-for cls,host,proto in [(T4,'127.0.0.2','tcp'),(T6,'::1','tcp'),(U4,'127.0.0.2','udp'),(U6,'::1','udp')]:
+for cls,host,proto in [(T4,'127.0.0.1','tcp'),(T6,'::1','tcp'),(U4,'127.0.0.1','udp'),(U6,'::1','udp')]:
  server=cls((host,28100+(proto=='udp')),TCP if proto=='tcp' else UDP)
  threading.Thread(target=server.serve_forever,daemon=True).start()
 check('before-filter-positive-control',True)
