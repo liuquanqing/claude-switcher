@@ -22,6 +22,12 @@ old=" def open_streams():return {(f,p):client(f,h,p) for f,h in TARGETS for p in
 new=" def open_streams():\n  command(c);wait(q,'permitted')\n  return {(f,p):client(f,h,p) for f,h in TARGETS for p in ('tcp','udp')}"
 assert old in prefix
 prefix=prefix.replace(old,new)
+# Healthy synthetic verifier supplies fresh evidence before each costly sudo client.
+# Failure, expiry, stale-evidence and recovery-denied cases do not renew.
+check_old=" def check(name,allowed,streams=None):\n  for family,host in TARGETS:\n   for proto in ('tcp','udp'):\n"
+check_new=" def check(name,allowed,streams=None):\n  for family,host in TARGETS:\n   for proto in ('tcp','udp'):\n    if allowed:command(c);wait(q,'permitted')\n"
+assert check_old in prefix
+prefix=prefix.replace(check_old,check_new)
 exec(compile(prefix,str(p),'exec'),ns)
 CLIENT=r'''
 import socket,sys
