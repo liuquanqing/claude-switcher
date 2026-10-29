@@ -20,3 +20,7 @@ jobs:
         env:
           CS_DISPOSABLE_NETWORK_LAB: github-hosted-loopback-only
         run: python3 research/network-lab/gate_lease_lab.py
+      - name: Disposable runner only - PF plus expiring data-path permit
+        env:
+          CS_DISPOSABLE_NETWORK_LAB: github-hosted-loopback-only
+        run: python3 research/network-lab/gate_kernel_macos_lab.py
