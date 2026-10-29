@@ -40,26 +40,35 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
  cli=root/'claude';digest=download(baseURL+'/'+version+'/darwin-x64/claude',cli);assert digest==manifest['platforms']['darwin-x64']['checksum'];cli.chmod(0o755)
  command('/usr/bin/codesign','--verify','--strict',str(cli))
  results['cliArtifact']={'version':version,'SHA256':digest,'officialManifestMatched':True}
- pkg=root/'Claude.pkg';pkgsha=download('https://claude.ai/api/desktop/darwin/universal/pkg/latest/redirect',pkg)
- command('/usr/sbin/pkgutil','--check-signature',str(pkg))
- expanded=root/'expanded';command('/usr/sbin/pkgutil','--expand-full',str(pkg),str(expanded))
- apps=list(expanded.rglob('Claude.app'));assert len(apps)==1
- app=apps[0];command('/usr/bin/codesign','--verify','--deep','--strict',str(app))
- info=plistlib.loads((app/'Contents/Info.plist').read_bytes());desktop=app/'Contents/MacOS'/info['CFBundleExecutable']
- results['desktopArtifact']={'version':info.get('CFBundleShortVersionString'),'SHA256Package':pkgsha,'signatureVerified':True,'installedSystemPackage':False}
+ desktop=None
+ desktopURL='https://downloads.claude.ai/releases/darwin/universal/1.0.2768/Claude-21341c944a9d74880b52a77c4f1522f47f52d0da.pkg'
+ try:
+  pkg=root/'Claude.pkg';pkgsha=download(desktopURL,pkg)
+  command('/usr/sbin/pkgutil','--check-signature',str(pkg))
+  expanded=root/'expanded';command('/usr/sbin/pkgutil','--expand-full',str(pkg),str(expanded))
+  apps=list(expanded.rglob('Claude.app'));assert len(apps)==1
+  app=apps[0];command('/usr/bin/codesign','--verify','--deep','--strict',str(app))
+  info=plistlib.loads((app/'Contents/Info.plist').read_bytes());desktop=app/'Contents/MacOS'/info['CFBundleExecutable']
+  results['desktopArtifact']={'version':info.get('CFBundleShortVersionString'),'SHA256Package':pkgsha,'signatureVerified':True,'installedSystemPackage':False,'sourceURL':desktopURL,'latestVersionClaim':False}
+ except Exception as e:
+  results['desktopArtifact']={'state':'NOT_RUN','reason':repr(e),'sourceURL':desktopURL}
  config=root/'cli-config';config.mkdir();os.chown(config,UID,-1)
  work=root/'empty-project';work.mkdir();os.chown(work,UID,-1)
  profile=root/'desktop-profile';profile.mkdir();os.chown(profile,UID,-1)
  # Do not forward CI secrets into official clients. sudo supplies the disposable user's login home.
  clean={'PATH':'/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin','LANG':'en_US.UTF-8'}
- envArgs=['CLAUDE_CONFIG_DIR='+str(config),'ANTHROPIC_API_KEY=fixture-invalid-key-not-a-real-secret','ANTHROPIC_BASE_URL=http://127.0.0.1:29400','API_TIMEOUT_MS=1500','DISABLE_TELEMETRY=1','DISABLE_ERROR_REPORTING=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']
+ envArgs=['CLAUDE_CONFIG_DIR='+str(config),'ANTHROPIC_API_KEY=fixture-not-a-real-key','ANTHROPIC_BASE_URL=http://127.0.0.1:29400','API_TIMEOUT_MS=1500','DISABLE_TELEMETRY=1','DISABLE_ERROR_REPORTING=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']
  cliCmd=['sudo','-n','-u','#'+str(UID),'-H','/usr/bin/env',*envArgs,str(cli),'--bare','-p','Return fixture only.','--max-turns','1','--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--disable-slash-commands']
  def run_cli():
+  p=subprocess.Popen(cliCmd,cwd=work,env=clean,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
   try:
-   p=subprocess.run(cliCmd,cwd=work,env=clean,capture_output=True,text=True,timeout=10)
-   return {'exitCode':p.returncode,'timedOut':False,'fixtureAuthenticationError':'fixture invalid key' in p.stdout+p.stderr}
-  except subprocess.TimeoutExpired:return {'exitCode':None,'timedOut':True}
+   stdout,stderr=p.communicate(timeout=10)
+   return {'exitCode':p.returncode,'timedOut':False,'fixtureAuthenticationError':'fixture invalid key' in stdout+stderr}
+  except subprocess.TimeoutExpired:
+   os.killpg(p.pid,signal.SIGKILL);p.communicate()
+   return {'exitCode':p.returncode,'timedOut':True}
  def run_desktop(seconds=8):
+  if desktop is None:return {'state':'NOT_RUN','reason':'official artifact unavailable'}
   # Only this freshly extracted app and process group are launched/stopped.
   args=['/bin/launchctl','asuser',str(UID),'sudo','-n','-u','#'+str(UID),'-H',str(desktop),'--user-data-dir='+str(profile),'--proxy-server=http://127.0.0.1:29401','--no-first-run']
   log=root/('desktop-'+str(time.monotonic())+'.log')
@@ -75,7 +84,7 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
   lines=[]
   if blockFixtures:
    for fam,host in [('inet','127.0.0.1'),('inet6','::1')]:lines.append(f'block drop out quick on lo0 {fam} proto tcp from any to {host} port {{ 29400 29401 }} user {UID}')
-  lines += [f'pass out quick on lo0 all',f'block drop out quick inet all user {UID}',f'block drop out quick inet6 all user {UID}']
+  lines += [f'pass out quick on lo0 all',f'block drop out quick inet proto {{ tcp udp }} all user {UID}',f'block drop out quick inet6 proto {{ tcp udp }} all user {UID}']
   rules.write_text('\n'.join(lines)+'\n');pf('-a','cs_official_lab','-nf',str(rules));pf('-a','cs_official_lab','-f',str(rules))
  try:
   pf('-nf',str(base));pf('-f',str(base));apply(False);pf('-e',check=False)
