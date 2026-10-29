@@ -24,3 +24,7 @@ jobs:
         env:
           CS_DISPOSABLE_NETWORK_LAB: github-hosted-loopback-only
         run: python3 research/network-lab/gate_kernel_macos_lab.py
+      - name: Disposable runner only - real utun UDP and PF fallback experiment
+        run: |
+          clang -Wall -Wextra research/network-lab/utun_launch.c -o "$RUNNER_TEMP/utun-launch"
+          sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_REAL_UTUN_LAB=ephemeral-only "$RUNNER_TEMP/utun-launch" "$(command -v python3)" "$PWD/research/network-lab/real_utun_probe.py"
