@@ -15,4 +15,13 @@ jobs:
       - name: Disposable runner only - official clients with leased actual utun executor
         run: |
           clang -Wall -Wextra research/network-lab/utun_launch.c -o research/network-lab/utun-launch
-          sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_OFFICIAL_CLIENT_LAB=ephemeral-only CS_UTUN_COMPOSITION_LAB=ephemeral-only CS_TEST_UID="$(id -u)" RUNNER_TEMP="$RUNNER_TEMP" "$(command -v python3)" "$PWD/research/network-lab/official_clients_probe.py"
+          sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted CS_OFFICIAL_CLIENT_LAB=ephemeral-only CS_UTUN_COMPOSITION_LAB=ephemeral-only CS_TEST_UID="$(id -u)" RUNNER_TEMP="$RUNNER_TEMP" CS_COMPOSITION_RESULT="$RUNNER_TEMP/composition-results.json" CS_COMPOSITION_PROGRESS="$RUNNER_TEMP/composition-progress.txt" "$(command -v python3)" "$PWD/research/network-lab/official_clients_probe.py"
+      - name: Preserve synthetic evidence before runner orphan cleanup
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: composition-evidence
+          path: |
+            ${{ runner.temp }}/composition-results.json
+            ${{ runner.temp }}/composition-progress.txt
+          retention-days: 7

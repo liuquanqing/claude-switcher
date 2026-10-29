@@ -93,6 +93,10 @@ def command(*args, check=True):
 
 def progress(name):
     print('COMPOSITION '+name, file=sys.stderr, flush=True)
+    path=Path(os.environ['CS_COMPOSITION_PROGRESS'])
+    assert path.is_relative_to(Path(os.environ['RUNNER_TEMP']))
+    with path.open('a') as f:f.write(str(time.monotonic())+' '+name+'\n')
+    path.chmod(0o644)
 
 
 def pf(*args, check=True):
@@ -365,10 +369,16 @@ with tempfile.TemporaryDirectory(prefix='cs-leased-tun-', dir=os.environ['RUNNER
         if isinstance(e,subprocess.CalledProcessError): error+=' stderr='+e.stderr
         if (root/'executor.stderr').exists(): error+=' executorStderr='+ (root/'executor.stderr').read_text(errors='replace')[-2000:]
     finally:
-        stop_clients(); stop_backend()
-        if capture is not None and capture.poll() is None: capture.send_signal(signal.SIGINT); capture.wait(timeout=5)
-        a=pf('-a','cs_leased_lab','-F','rules',check=False); b=pf('-f','/etc/pf.conf',check=False)
-        c=pf('-d',check=False) if not was_enabled else None
-        cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
+        try:
+            stop_clients(); stop_backend()
+            if capture is not None and capture.poll() is None: capture.send_signal(signal.SIGINT); capture.wait(timeout=5)
+        except BaseException:
+            error=(error or '')+' teardown='+traceback.format_exc()
+        finally:
+            # A failed process-cleanup assertion must not skip restoring the
+            # disposable runner's network configuration or hide its evidence.
+            a=pf('-a','cs_leased_lab','-F','rules',check=False); b=pf('-f','/etc/pf.conf',check=False)
+            c=pf('-d',check=False) if not was_enabled else None
+            cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
 result=dict(layer='official-clients-real-utun-expiring-permit-composition',os=platform.mac_ver()[0],arch=platform.machine(),leaseSeconds=TTL,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,physicalCapture=physical_result,ciControlHTTPSDestinations=len(control_hosts),temporaryVendorProcessesKilled=cleaned_vendor_processes,actualTUN=True,actualOfficialClients=True,syntheticAPI=True,realAccountUsed=False,NetworkExtension='NOT_RUN',productionReady=False)
 print(json.dumps(result,indent=2),flush=True);os._exit(0 if result['allAssertionsPassed'] else 1)

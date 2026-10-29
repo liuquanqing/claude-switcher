@@ -59,6 +59,9 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
   try: composition=json.loads(child.stdout)
   except ValueError: composition={'error':'child did not emit JSON','stdout':child.stdout,'stderr':child.stderr,'allAssertionsPassed':False}
   result=dict(layer='official-client-utun-permit-composition-orchestration',artifacts=results,composition=composition,childExit=child.returncode,allAssertionsPassed=child.returncode==0 and composition['allAssertionsPassed'],productionReady=False)
+  evidencePath=Path(os.environ['CS_COMPOSITION_RESULT'])
+  assert evidencePath.is_relative_to(Path(os.environ['RUNNER_TEMP']))
+  evidencePath.write_text(json.dumps(result,indent=2)+'\n');evidencePath.chmod(0o644)
   print(json.dumps(result,indent=2),flush=True);os._exit(0 if result['allAssertionsPassed'] else 1)
  config=root/'cli-config';config.mkdir();os.chown(config,UID,-1)
  work=root/'empty-project';work.mkdir();os.chown(work,UID,-1)
