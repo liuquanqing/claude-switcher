@@ -24,4 +24,5 @@ jobs:
           path: |
             ${{ runner.temp }}/composition-results.json
             ${{ runner.temp }}/composition-progress.txt
+            ${{ runner.temp }}/composition-stderr.txt
           retention-days: 7
