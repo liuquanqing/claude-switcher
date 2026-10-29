@@ -2,7 +2,7 @@
 
 Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账号设置，或主动开启保护后，才会参与相应的切换与检查流程。
 
-适用版本：`v1.3.0-local.6`（预发布）。
+适用版本：`v1.3.0-rc.6`（预发布）。
 
 ## 系统要求
 
@@ -11,7 +11,7 @@ Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账
 
 ## 1. 下载并校验
 
-推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-local.6)下载：
+推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-rc.6)下载：
 
 - `.dmg` 或 `.zip`（二选一）
 - `SHA256SUMS`
@@ -48,7 +48,7 @@ cat SHA256SUMS
 
 [Apple 的首次打开说明](https://support.apple.com/102445)。请保留 Gatekeeper，不对整个下载目录或“应用程序”批量移除隔离属性。如果提示文件损坏或恶意软件，请先停止打开并重新核对来源与校验值。
 
-签名、公证的准备要求与下一版 `1.3.0-rc.6` 的命名见 [macOS 分发说明](MACOS-DISTRIBUTION.md)。现有下载包的签名状态未因此改变。
+签名、公证的准备要求与本版 `1.3.0-rc.6` 的命名见 [macOS 分发说明](MACOS-DISTRIBUTION.md)。现有下载包的签名状态未因此改变。
 
 ## 4. 开启保护（可选）
 

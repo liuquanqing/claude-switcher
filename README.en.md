@@ -14,9 +14,9 @@ Accounts, usage, sessions and network checks meet in one place.
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.dmg)
+[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)
 
-**1.3.0 Preview 6** · Apple Silicon · macOS 13+
+**1.3.0 RC6** · Apple Silicon · macOS 13+
 
 [Download](#download) · [Features](#features) · [Quick start](#quick-start) · [Scope](#scope) · [中文](README.md)
 
@@ -79,22 +79,11 @@ All account details in these screenshots are fictional.
 
 ## Download
 
-**Current version: 1.3.0 Preview 6** (release tag: `v1.3.0-local.6`).
+**[Download Claude Switcher 1.3.0 RC6 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)**
 
-| Download | Hardware | Installation |
-| --- | --- | --- |
-| **[Download DMG (recommended)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.dmg)** | Apple Silicon (M1 or newer) | Open the image and drag the app to Applications |
-| [Download ZIP](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.zip) | Apple Silicon (M1 or newer) | Extract and move the app to Applications |
+For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher 候选版.app` to Applications.
 
-[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-local.6) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
-
-The ZIP and tar.gz source archives on the Tags page contain source code. To install the app, use the DMG or application ZIP linked above.
-
-The current prebuilt release supports:
-
-- Apple Silicon (arm64)
-- macOS 13 or later
-- Candidate app name: `Claude Switcher 候选版.app`
+[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-rc.6) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
 
 The build uses an ad-hoc local signature and is not notarized by Apple. See [the installation guide](docs/INSTALL.md).
 

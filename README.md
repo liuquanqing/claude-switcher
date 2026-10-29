@@ -14,9 +14,9 @@
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.dmg)
+[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)
 
-**1.3.0 预览版 6** · Apple Silicon · macOS 13+
+**1.3.0 RC6** · Apple Silicon · macOS 13+
 
 [下载](#下载) · [核心能力](#核心能力) · [快速开始](#快速开始) · [边界与验证](#边界与验证) · [English](README.en.md)
 
@@ -124,22 +124,11 @@ flowchart LR
 
 ## 下载
 
-**当前版本：1.3.0 预览版 6**（发布标签：`v1.3.0-local.6`）。
+**[下载 Claude Switcher 1.3.0 RC6 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)**
 
-| 下载 | 适用设备 | 安装方式 |
-| --- | --- | --- |
-| **[下载 DMG（推荐）](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.dmg)** | Apple Silicon（M1 及更新芯片） | 打开磁盘映像，将应用拖入“应用程序” |
-| [下载 ZIP](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/ClaudeSwitcher-1.3.0-local.6-arm64.zip) | Apple Silicon（M1 及更新芯片） | 解压后将应用移入“应用程序” |
+适用于 **Apple Silicon（M1 及更新芯片）· macOS 13+**。打开 DMG，将 `Claude Switcher 候选版.app` 拖入“应用程序”。
 
-[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-local.6) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-local.6/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
-
-Tags 页面中的 `Source code (zip / tar.gz)` 用于下载源码。安装应用请选择上面的 DMG 或应用 ZIP。
-
-当前预编译包：
-
-- Apple Silicon（arm64）
-- macOS 13 及以上
-- 候选版应用名：`Claude Switcher 候选版.app`
+[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-rc.6) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
 
 > 当前构建使用 ad-hoc 本地签名，未经过 Apple 公证。首次打开方式、升级与卸载步骤见 [安装说明](docs/INSTALL.md)。
 
