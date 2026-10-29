@@ -1,5 +1,6 @@
-"""Actual utun + fake UDP peer on ephemeral hosted macOS. No real Claude credentials.
-No default-route replacement. PF restricts only 198.18.250.2/fdff:cc55::2 UDP29300.
+"""Official blank clients and synthetic TCP/UDP peer over actual disposable utun.
+No default-route replacement or real credentials. UID isolation is a lab fixture,
+not production app classification. Never run on a personal Mac.
 """
 import os,sys,socket,struct,select,threading,subprocess,tempfile,json,time,platform,uuid,signal
 from pathlib import Path
@@ -8,7 +9,7 @@ assert os.environ.get('GITHUB_ACTIONS')=='true' and os.environ.get('RUNNER_ENVIR
 assert os.environ.get('CS_REAL_UTUN_LAB')=='ephemeral-only'
 IFACE,FD=sys.argv[1],int(sys.argv[2]);assert IFACE.startswith('utun') and IFACE[4:].isdigit()
 PEERS=[(socket.AF_INET,'198.18.250.2'),(socket.AF_INET6,'fdff:cc55::2')]
-SEEN=set();UP=True;STOP=False;RESULTS=[];TCP_FLOWS={};HTTP_SEEN=[]
+SEEN=set();UP=True;STOP=False;RESULTS=[];TCP_FLOWS={};HTTP_SEEN=[];TCP_SEEN=set();SYN_SEEN=[]
 def command(*args,check=True):return subprocess.run(args,text=True,capture_output=True,check=check)
 def pf(*args,check=True):return command('/sbin/pfctl',*args,check=check)
 def checksum(data):
@@ -41,22 +42,31 @@ def echo_peer():
   elif version==6:offset=40;protocol=packet[6];src,dst=packet[8:24],packet[24:40]
   else:continue
   data=packet[offset:]
-  if not UP:continue
   if protocol==6 and len(data)>=20:
    sport,dport,seq,ack,off,flags,window,chk,urg=struct.unpack('!HHIIBBHHH',data[:20])
-   if dport not in (29300,29301):continue
+   if dport not in (29300,29301,29302):continue
+   if flags&2:SYN_SEEN.append((version,dport))
+   if not UP:continue
    key=(version,src,sport,dport)
    if flags&2:
-    TCP_FLOWS[key]={'next':(seq+1)&0xffffffff,'buffer':b'','sent':False}
+    TCP_FLOWS[key]={'next':(seq+1)&0xffffffff,'serverNext':1001,'buffer':b'','sent':False}
     tcp_reply(version,dst,src,dport,sport,1000,seq+1,0x12);continue
    state=TCP_FLOWS.get(key)
    if not state:continue
    payload=data[(off>>4)*4:]
    if flags&4:TCP_FLOWS.pop(key,None);continue
    if payload:
+    accepted=seq==state['next']
     if seq==state['next']:
      state['buffer']+=payload;state['next']=(seq+len(payload))&0xffffffff
-    tcp_reply(version,dst,src,dport,sport,1001,state['next'],0x10)
+    if dport==29302:
+     if accepted:
+      TCP_SEEN.add(payload.decode(errors='replace'))
+      tcp_reply(version,dst,src,dport,sport,state['serverNext'],state['next'],0x18,payload)
+      state['serverNext']=(state['serverNext']+len(payload))&0xffffffff
+     else:tcp_reply(version,dst,src,dport,sport,state['serverNext'],state['next'],0x10)
+     continue
+    tcp_reply(version,dst,src,dport,sport,state['serverNext'],state['next'],0x10)
     if not state['sent'] and b'\r\n\r\n' in state['buffer']:
      headers,body=state['buffer'].split(b'\r\n\r\n',1);length=0
      for line in headers.split(b'\r\n')[1:]:
@@ -71,6 +81,7 @@ def echo_peer():
      tcp_reply(version,dst,src,dport,sport,1001,state['next'],0x19,reply);state['sent']=True
    continue
   if protocol!=17 or len(data)<8:continue
+  if not UP:continue
   sport,dport,length,_=struct.unpack('!HHHH',data[:8]);payload=data[8:length]
   if dport!=29300:continue
   SEEN.add(payload.decode(errors='replace'))
@@ -91,15 +102,15 @@ def probe(name,expected):
   RESULTS.append(dict(case=name,family=4 if fam==socket.AF_INET else 6,echo=ack,seenInUtun=token in SEEN))
   assert ack==expected,(name,fam,ack)
 original=Path('/etc/pf.conf').read_text();was_enabled='Status: Enabled' in pf('-s','info').stdout
-error=None;cleanup=False
+error=None;cleanup=False;capture=None;physical_capture=None;held=[]
 thread=threading.Thread(target=echo_peer,daemon=True)
 with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_TEMP']) as tmp:
  root=Path(tmp);base=root/'pf.conf';base.write_text(original+'\nanchor "cs_utun_lab"\n');rules=root/'rules.conf'
  def apply(allow):
   lines=[]
   for proto,host in [('inet','198.18.250.2'),('inet6','fdff:cc55::2')]:
-   if allow:lines.append(f'pass out quick on {IFACE} {proto} proto {{ tcp udp }} from any to {host} port {{ 29300 29301 }} keep state (if-bound)')
-   lines.append(f'block drop out quick {proto} proto {{ tcp udp }} from any to {host} port {{ 29300 29301 }}')
+   if allow:lines.append(f'pass out quick on {IFACE} {proto} proto {{ tcp udp }} from any to {host} port {{ 29300 29301 29302 }} keep state (if-bound)')
+   lines.append(f'block drop out quick {proto} proto {{ tcp udp }} from any to {host} port {{ 29300 29301 29302 }}')
   uid=os.environ.get('CS_TEST_UID')
   if uid:
    assert uid.isdigit()
@@ -113,6 +124,13 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
   command('/sbin/ifconfig',IFACE,'inet','198.18.250.1','198.18.250.2','netmask','255.255.255.252','up')
   command('/sbin/ifconfig',IFACE,'inet6','fdff:cc55::1','prefixlen','64','up')
   command('/sbin/route','-n','add','-inet6','fdff:cc55::2','-interface',IFACE)
+  # Observe only synthetic fixture destinations on the runner's physical interface.
+  route=command('/sbin/route','-n','get','default').stdout
+  physical=next(line.split(':',1)[1].strip() for line in route.splitlines() if line.strip().startswith('interface:'))
+  assert physical.startswith('en'),physical
+  capture_log=(root/'capture.log').open('w')
+  capture=subprocess.Popen(['/usr/sbin/tcpdump','-n','-U','-i',physical,'-w',str(root/'physical.pcap'),'(dst host 198.18.250.2 or dst host fdff:cc55::2) and (tcp or udp) and dst portrange 29300-29302'],stdout=subprocess.DEVNULL,stderr=capture_log)
+  time.sleep(.5);assert capture.poll() is None,'physical capture failed to start'
   thread.start();probe('default-deny-before-approval',False)
   apply(True);clear_states();probe('actual-utun-approved',True)
   UP=False;probe('peer-outage',False);UP=True;probe('peer-recovery',True)
@@ -120,6 +138,23 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
   command('/sbin/ifconfig',IFACE,'up');probe('actual-utun-interface-recovery',True)
   apply(False);clear_states();probe('revoked-while-utun-still-exists',False)
   apply(True);clear_states();probe('revalidated-utun-recovery',True)
+  def tcp_exchange(name,expected):
+   for fam,sock in held:
+    token=uuid.uuid4().hex;ack=False
+    try:sock.sendall(token.encode());ack=sock.recv(4096)==token.encode()
+    except OSError:pass
+    seen=token in TCP_SEEN
+    RESULTS.append(dict(case=name,family=4 if fam==socket.AF_INET else 6,echo=ack,seenInUtun=seen))
+    assert ack==expected and seen==expected,(name,fam,ack,seen)
+  for fam,host in PEERS:
+   sock=socket.socket(fam,socket.SOCK_STREAM);sock.settimeout(.5);sock.connect((host,29302));held.append((fam,sock))
+  tcp_exchange('established-TCP-positive-control',True)
+  apply(False)
+  # Explicit vulnerability control: replacing PF rules alone leaves old states alive.
+  tcp_exchange('negative-control-old-PF-state-survives-rule-replacement',True)
+  clear_states();tcp_exchange('established-TCP-revoked-with-state-removal',False)
+  for _,sock in held:sock.close()
+  held=[];apply(True);clear_states()
   # Real kernel TCP handshake and HTTP over both actual utun routes.
   for fam,host in PEERS:
    with socket.socket(fam,socket.SOCK_STREAM) as sock:
@@ -130,25 +165,40 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
   clean={'PATH':'/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin','LANG':'en_US.UTF-8'}
   config=root/'cli';config.mkdir();os.chown(config,uid,-1)
   work=root/'work';work.mkdir();os.chown(work,uid,-1);root.chmod(0o755)
-  profile=root/'desktop';profile.mkdir();os.chown(profile,uid,-1)
-  def run_client(kind):
+  def run_client(kind,phase,fam,expected):
+   host='198.18.250.2' if fam==4 else '[fdff:cc55::2]'
+   profile=root/('desktop-'+uuid.uuid4().hex);profile.mkdir();os.chown(profile,uid,-1)
    port=29300 if kind=='cli' else 29301;before=sum(x['port']==port for x in HTTP_SEEN)
-   envArgs=['CLAUDE_CONFIG_DIR='+str(config),'ANTHROPIC_API_KEY=fixture-invalid-key','ANTHROPIC_BASE_URL=http://198.18.250.2:29300','API_TIMEOUT_MS=1000','DISABLE_TELEMETRY=1','DISABLE_ERROR_REPORTING=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']
+   before_syn=sum(x==(fam,port) for x in SYN_SEEN)
+   envArgs=['CLAUDE_CONFIG_DIR='+str(config),'ANTHROPIC_API_KEY=fixture-invalid-key','ANTHROPIC_BASE_URL=http://'+host+':29300','API_TIMEOUT_MS=1000','DISABLE_TELEMETRY=1','DISABLE_ERROR_REPORTING=1','CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1']
    if kind=='cli':
     args=['sudo','-n','-u','#'+str(uid),'-H','/usr/bin/env',*envArgs,artifacts['cli'],'--bare','-p','Return fixture only.','--max-turns','1','--tools','','--strict-mcp-config','--mcp-config','{"mcpServers":{}}','--disable-slash-commands']
-   else:args=['/bin/launchctl','asuser',str(uid),'sudo','-n','-u','#'+str(uid),'-H',artifacts['desktop'],'--user-data-dir='+str(profile),'--proxy-server=http://198.18.250.2:29301','--no-first-run']
+   else:args=['/bin/launchctl','asuser',str(uid),'sudo','-n','-u','#'+str(uid),'-H',artifacts['desktop'],'--user-data-dir='+str(profile),'--proxy-server=http://'+host+':29301','--no-first-run']
    proc=subprocess.Popen(args,cwd=work,env=clean,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True)
-   time.sleep(7)
+   start=time.monotonic();deadline=start+(15 if expected else 7)
+   while time.monotonic()<deadline:
+    count=sum(x['port']==port for x in HTTP_SEEN)-before
+    if expected and count>0:break
+    if proc.poll() is not None:break
+    time.sleep(.1)
    try:os.killpg(proc.pid,signal.SIGTERM)
    except ProcessLookupError:pass
    try:proc.wait(timeout=2)
    except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
-   return sum(x['port']==port for x in HTTP_SEEN)-before
-  for kind in ('cli','desktop'):
-   count=run_client(kind);RESULTS.append(dict(case=kind+'-actual-utun-approved',requestsInUtun=count));assert count>0,(kind,count)
-  apply(False);clear_states()
-  for kind in ('cli','desktop'):
-   count=run_client(kind);RESULTS.append(dict(case=kind+'-actual-utun-revoked',requestsInUtun=count));assert count==0,(kind,count)
+   count=sum(x['port']==port for x in HTTP_SEEN)-before
+   syn=sum(x==(fam,port) for x in SYN_SEEN)-before_syn
+   RESULTS.append(dict(case=kind+'-actual-utun-'+phase,family=fam,requestsInUtun=count,synInUtun=syn,observationSeconds=round(time.monotonic()-start,3)))
+   assert (count>0 if expected else count==0),(kind,phase,fam,count)
+  def client_matrix(phase,expected):
+   for fam in (4,6):
+    for kind in ('cli','desktop'):run_client(kind,phase,fam,expected)
+  client_matrix('approved',True)
+  apply(False);clear_states();client_matrix('revoked',False)
+  apply(True);clear_states();client_matrix('revalidated-recovery',True)
+  command('/sbin/ifconfig',IFACE,'down');client_matrix('interface-down',False)
+  command('/sbin/ifconfig',IFACE,'up');clear_states();client_matrix('interface-recovery',True)
+  UP=False;client_matrix('peer-outage',False)
+  UP=True;clear_states();client_matrix('peer-recovery',True)
   apply(True);clear_states();probe('post-client-revalidated-recovery',True)
   # Keep established UDP sockets; destroying the utun must not reuse floating PF states.
   streams=[]
@@ -164,17 +214,25 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
    RESULTS.append(dict(case='utun-owner-exited-existing-socket',family=4 if fam==socket.AF_INET else 6,echo=ack,seenInUtun=token in SEEN))
    assert not ack and token not in SEEN
   probe('utun-owner-exited-new-socket',False)
+  capture.send_signal(signal.SIGINT);capture.wait(timeout=5);capture_log.close()
+  assert capture.returncode==0,(capture.returncode,(root/'capture.log').read_text())
+  decoded=command('/usr/sbin/tcpdump','-n','-r',str(root/'physical.pcap')).stdout.splitlines()
+  physical_capture=dict(interface=physical,syntheticDestinationPackets=len(decoded),captureStarted=True,captureExit=0)
+  assert not decoded,physical_capture
   pf_counters=pf('-a','cs_utun_lab','-vvsr').stdout
  except BaseException as e:
   error=repr(e)
   if isinstance(e,subprocess.CalledProcessError):error+=' stderr='+e.stderr
  finally:
   STOP=True
+  for _,sock in held:sock.close()
+  if capture is not None and capture.poll() is None:
+   capture.send_signal(signal.SIGINT);capture.wait(timeout=5)
   command('/sbin/route','-n','delete','-host','198.18.250.2',check=False)
   command('/sbin/route','-n','delete','-inet6','fdff:cc55::2',check=False)
   if FD is not None:os.close(FD)
   a=pf('-a','cs_utun_lab','-F','rules',check=False);b=pf('-f','/etc/pf.conf',check=False)
   c=pf('-d',check=False) if not was_enabled else None
   cleanup=a.returncode==0 and b.returncode==0 and (c is None or c.returncode==0)
-result=dict(layer='real-macos-utun-TCP-and-official-client-fixture',os=platform.mac_ver()[0],interface=IFACE,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,realClaudeCLI=True,actualNetworkExtension=False,defaultRouteChanged=False,physicalEgressCapture='NOT_RUN',pfCounters=locals().get('pf_counters'),productionReady=False)
+result=dict(layer='real-macos-utun-TCP-and-official-client-fixture',os=platform.mac_ver()[0],interface=IFACE,count=len(RESULTS),cases=RESULTS,error=error,cleanup=cleanup,allAssertionsPassed=error is None and cleanup,realClaudeCLI=True,actualNetworkExtension=False,defaultRouteChanged=False,physicalEgressCapture=physical_capture,pfCounters=locals().get('pf_counters'),productionReady=False)
 print(json.dumps(result,indent=2),flush=True);os._exit(0 if result['allAssertionsPassed'] else 1)

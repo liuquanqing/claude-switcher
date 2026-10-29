@@ -67,14 +67,19 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
   except subprocess.TimeoutExpired:
    os.killpg(p.pid,signal.SIGKILL);p.communicate()
    return {'exitCode':p.returncode,'timedOut':True}
- def run_desktop(seconds=8):
+ def run_desktop(expected,seconds=20):
   if desktop is None:return {'state':'NOT_RUN','reason':'official artifact unavailable'}
   # Only this freshly extracted app and process group are launched/stopped.
-  args=['/bin/launchctl','asuser',str(UID),'sudo','-n','-u','#'+str(UID),'-H',str(desktop),'--user-data-dir='+str(profile),'--proxy-server=http://127.0.0.1:29401','--no-first-run']
+  freshProfile=root/('desktop-'+str(time.monotonic_ns()));freshProfile.mkdir();os.chown(freshProfile,UID,-1)
+  args=['/bin/launchctl','asuser',str(UID),'sudo','-n','-u','#'+str(UID),'-H',str(desktop),'--user-data-dir='+str(freshProfile),'--proxy-server=http://127.0.0.1:29401','--no-first-run']
   log=root/('desktop-'+str(time.monotonic())+'.log')
   with log.open('w') as out:
    p=subprocess.Popen(args,cwd=work,env=clean,stdout=out,stderr=out,start_new_session=True)
-   time.sleep(seconds);alive=p.poll() is None
+   before=len(PROXY);deadline=time.monotonic()+seconds
+   while p.poll() is None and time.monotonic()<deadline:
+    if expected and len(PROXY)>before:break
+    time.sleep(.1)
+   alive=p.poll() is None
    if alive:
     try:os.killpg(p.pid,signal.SIGTERM);p.wait(timeout=3)
     except subprocess.TimeoutExpired:os.killpg(p.pid,signal.SIGKILL);p.wait()
@@ -89,11 +94,11 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
  try:
   pf('-nf',str(base));pf('-f',str(base));apply(False);pf('-e',check=False)
   first=run_cli();results['cliPositive']={**first,'requestsToLocalFixture':len(API)}
-  start=len(PROXY);d=run_desktop();results['desktopPositive']={**d,'proxyRequests':len(PROXY)-start}
+  start=len(PROXY);d=run_desktop(True);results['desktopPositive']={**d,'proxyRequests':len(PROXY)-start}
   apply(True)
   for host in ('127.0.0.1','::1'):pf('-k',host,'-k',host)
   start=len(API);second=run_cli();results['cliBlocked']={**second,'requestsToLocalFixture':len(API)-start}
-  start=len(PROXY);d=run_desktop();results['desktopBlocked']={**d,'proxyRequests':len(PROXY)-start}
+  start=len(PROXY);d=run_desktop(False,8);results['desktopBlocked']={**d,'proxyRequests':len(PROXY)-start}
   results['apiRequestPaths']=API
   results['pfCounters']=pf('-a','cs_official_lab','-vvsr').stdout
  except BaseException as e:
@@ -111,6 +116,6 @@ with tempfile.TemporaryDirectory(prefix='cs-official-client-',dir=os.environ['RU
    results['actualUtunClients']={'state':'FAILED','exitCode':e.returncode,'stdout':e.stdout,'stderr':e.stderr}
  cliOK=results.get('cliPositive',{}).get('requestsToLocalFixture',0)>0 and results.get('cliBlocked',{}).get('requestsToLocalFixture')==0
  desktopOK=results.get('desktopPositive',{}).get('proxyRequests',0)>0 and results.get('desktopBlocked',{}).get('proxyRequests')==0
- result=dict(layer='official-blank-client-local-service-observation',results=results,error=error,cleanup=cleanup,cliNetworkObservationPassed=cliOK,desktopNetworkObservationPassed=desktopOK,realAccountUsed=False,subscriptionAuthFlow='NOT_RUN',actualNetworkExtension=False,actualTUNInThisJob=False,productionReady=False)
+ result=dict(layer='official-blank-client-local-service-observation',results=results,error=error,cleanup=cleanup,cliNetworkObservationPassed=cliOK,desktopNetworkObservationPassed=desktopOK,realAccountUsed=False,subscriptionAuthFlow='NOT_RUN',actualNetworkExtension=False,actualTUNInThisJob=results.get('actualUtunClients',{}).get('allAssertionsPassed',False),productionReady=False)
  print(json.dumps(result,indent=2),flush=True)
  os._exit(0 if error is None and cleanup and cliOK and desktopOK and results.get('actualUtunClients',{}).get('allAssertionsPassed') else 1)

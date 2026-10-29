@@ -70,7 +70,7 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-') as tmp:
    lines.append(f'block drop out quick {proto} proto udp from any to {host} port 29300')
   rules.write_text('\n'.join(lines)+'\n');pf('-a','cs_utun_lab','-nf',str(rules));pf('-a','cs_utun_lab','-f',str(rules))
  def clear_states():
-  for _,host in PEERS:pf('-k',host,'-k',host)
+  for fam,host in PEERS:pf('-k','0.0.0.0/0' if fam==socket.AF_INET else '::/0','-k',host)
  try:
   # First establish persistent reject rules, before creating routes or sending any data.
   pf('-nf',str(base));pf('-f',str(base));apply(False);pf('-e',check=False)
