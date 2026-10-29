@@ -106,11 +106,14 @@ error=None;cleanup=False;capture=None;physical_capture=None;held=[]
 thread=threading.Thread(target=echo_peer,daemon=True)
 with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_TEMP']) as tmp:
  root=Path(tmp);base=root/'pf.conf';base.write_text(original+'\nanchor "cs_utun_lab"\n');rules=root/'rules.conf'
- def apply(allow):
+ def apply(allow,guard_in=True):
   lines=[]
   for proto,host in [('inet','198.18.250.2'),('inet6','fdff:cc55::2')]:
    if allow:lines.append(f'pass out quick on {IFACE} {proto} proto {{ tcp udp }} from any to {host} port {{ 29300 29301 29302 }} keep state (if-bound)')
    lines.append(f'block drop out quick {proto} proto {{ tcp udp }} from any to {host} port {{ 29300 29301 29302 }}')
+   if guard_in:
+    if allow:lines.append(f'pass in quick on {IFACE} {proto} proto {{ tcp udp }} from {host} port {{ 29300 29301 29302 }} to any keep state (if-bound)')
+    lines.append(f'block drop in quick {proto} proto {{ tcp udp }} from {host} port {{ 29300 29301 29302 }} to any')
   uid=os.environ.get('CS_TEST_UID')
   if uid:
    assert uid.isdigit()
@@ -146,13 +149,28 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
     seen=token in TCP_SEEN
     RESULTS.append(dict(case=name,family=4 if fam==socket.AF_INET else 6,echo=ack,seenInUtun=seen))
     assert ack==expected and seen==expected,(name,fam,ack,seen)
+  def tcp_push(name,expected):
+   for fam,sock in held:
+    local=sock.getsockname();peer=sock.getpeername()
+    version=4 if fam==socket.AF_INET else 6
+    src=socket.inet_pton(fam,local[0]);dst=socket.inet_pton(fam,peer[0])
+    state=TCP_FLOWS[(version,src,local[1],29302)]
+    token=uuid.uuid4().hex.encode();received=False
+    tcp_reply(version,dst,src,29302,local[1],state['serverNext'],state['next'],0x18,token)
+    state['serverNext']=(state['serverNext']+len(token))&0xffffffff
+    try:received=sock.recv(4096)==token
+    except OSError:pass
+    RESULTS.append(dict(case=name,family=version,serverPushReceived=received))
+    assert received==expected,(name,version,received)
   for fam,host in PEERS:
    sock=socket.socket(fam,socket.SOCK_STREAM);sock.settimeout(.5);sock.connect((host,29302));held.append((fam,sock))
   tcp_exchange('established-TCP-positive-control',True)
-  apply(False)
+  apply(False,guard_in=False)
   # Explicit vulnerability control: replacing PF rules alone leaves old states alive.
   tcp_exchange('negative-control-old-PF-state-survives-rule-replacement',True)
   clear_states();tcp_exchange('established-TCP-revoked-with-state-removal',False)
+  tcp_push('negative-control-egress-only-still-receives-server-push',True)
+  apply(False);clear_states();tcp_push('bidirectional-revoke-stops-established-server-push',False)
   for _,sock in held:sock.close()
   held=[];apply(True);clear_states()
   # Real kernel TCP handshake and HTTP over both actual utun routes.
@@ -200,12 +218,17 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-',dir=os.environ['RUNNER_T
   UP=False;client_matrix('peer-outage',False)
   UP=True;clear_states();client_matrix('peer-recovery',True)
   apply(True);clear_states();probe('post-client-revalidated-recovery',True)
+  for fam,host in PEERS:
+   sock=socket.socket(fam,socket.SOCK_STREAM);sock.settimeout(.5);sock.connect((host,29302));held.append((fam,sock))
+  tcp_exchange('post-client-established-TCP-positive-control',True)
+  tcp_push('post-client-server-push-positive-control',True)
   # Keep established UDP sockets; destroying the utun must not reuse floating PF states.
   streams=[]
   for fam,host in PEERS:
    sock=socket.socket(fam,socket.SOCK_DGRAM);sock.settimeout(.3);sock.connect((host,29300))
    token=uuid.uuid4().hex;sock.send(token.encode());assert sock.recv(4096)==token.encode();streams.append((fam,sock))
   STOP=True;os.close(FD);FD=None;thread.join(timeout=1)
+  tcp_exchange('utun-owner-exited-existing-TCP',False)
   for fam,sock in streams:
    token=uuid.uuid4().hex;ack=False
    try:sock.send(token.encode());ack=sock.recv(4096)==token.encode()

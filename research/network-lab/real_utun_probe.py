@@ -68,6 +68,8 @@ with tempfile.TemporaryDirectory(prefix='cs-real-utun-') as tmp:
   for proto,host in [('inet','198.18.250.2'),('inet6','fdff:cc55::2')]:
    if allow:lines.append(f'pass out quick on {IFACE} {proto} proto udp from any to {host} port 29300 keep state (if-bound)')
    lines.append(f'block drop out quick {proto} proto udp from any to {host} port 29300')
+   if allow:lines.append(f'pass in quick on {IFACE} {proto} proto udp from {host} port 29300 to any keep state (if-bound)')
+   lines.append(f'block drop in quick {proto} proto udp from {host} port 29300 to any')
   rules.write_text('\n'.join(lines)+'\n');pf('-a','cs_utun_lab','-nf',str(rules));pf('-a','cs_utun_lab','-f',str(rules))
  def clear_states():
   for fam,host in PEERS:pf('-k','0.0.0.0/0' if fam==socket.AF_INET else '::/0','-k',host)
