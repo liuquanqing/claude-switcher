@@ -23,6 +23,7 @@ struct SessionTransferConfirmation: Identifiable {
 }
 struct SessionTransferOperation: Identifiable {
     let id: String
+    let targetName: String
     let title: String
     let summary: String
     let canUndo: Bool
@@ -339,7 +340,7 @@ actor SessionTransferWorker {
         case .preserved: summary = receipt.message ?? "已保留当前数据并结束记录，未执行恢复"
         case .copying, .restoring, .recoveryRequired: summary = "操作未完成，请先检查恢复记录"
         }
-        lastOperation = SessionTransferOperation(id: receipt.id, title: receipt.state.needsRecovery ? "上次操作需要恢复" : "上次复制",
+        lastOperation = SessionTransferOperation(id: receipt.id, targetName: receipt.targetName, title: receipt.state.needsRecovery ? "上次操作需要恢复" : "上次复制",
             summary: receipt.targetName + "：" + summary,
             canUndo: receipt.state == .completed, needsRecovery: receipt.state.needsRecovery,
             backupURL: env.backups.appendingPathComponent(receipt.id),

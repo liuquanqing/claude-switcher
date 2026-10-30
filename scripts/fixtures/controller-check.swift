@@ -454,11 +454,30 @@ actor FixtureGuardWorker: GuardWorking {
   require(englishDecision.contains("SG") && englishDecision.contains("JP") && !languageDecision.allowed
           && englishDecision.range(of: "[\\u4e00-\\u9fff]", options: .regularExpression) == nil,
           "translated safety details retain observed and target countries without changing the verdict")
+  let localizedReasons: [SafetyReason] = [.allowed, .disabled, .invalidConfig, .proxyDisconnected, .tunMissing,
+   .countryUnknown, .countryMismatch, .guardUnavailable, .staleReceipt, .terminationFailed, .routesDisagree, .unsupportedMode]
+  for reason in localizedReasons {
+   let originalDecision = SafetyDecision(reason, expected: "SG", observed: "JP")
+   let translatedDecision = AppLocalization.decision(originalDecision, language: "en")
+   require(!translatedDecision.hasPrefix("decision.") && !translatedDecision.contains("{")
+           && translatedDecision.range(of: "[\\u4e00-\\u9fff]", options: .regularExpression) == nil
+           && originalDecision.allowed == (reason == .allowed),
+           "every safety outcome has a complete English presentation with the original allow/block verdict")
+  }
   let rawDiagnostic = "/fixture/客户甲 --receipt fixture-receipt-123"
   require(AppLocalization.message(rawDiagnostic, language: "en") == rawDiagnostic, "unknown diagnostics and user paths are never auto-translated")
   let localizedFailure = AppLocalization.message("打开 Claude 失败：" + rawDiagnostic, language: "en")
   require(!localizedFailure.hasPrefix("打开 Claude 失败：") && localizedFailure.hasSuffix(rawDiagnostic),
           "known application error prefixes translate without modifying the raw diagnostic suffix")
+  let copyCommand = "'/fixture/工具 with spaces' apply --request '/fixture/会话-request.json' --expect 'fixture-hash'"
+  let undoCommand = "'/fixture/工具 with spaces' undo --request '/fixture/会话-request.json' --receipt 'fixture-receipt-123'"
+  let sourceSummary = "来源：工作甲 → 目标：个人乙，共 2 项，仅新增。"
+  let localizedInstructions = SessionTransferLocalization.instructions(sourceSummary + "\n" + copyCommand + "\n" + undoCommand, language: "en")
+  require(localizedInstructions.components(separatedBy: "\n").contains(copyCommand)
+          && localizedInstructions.components(separatedBy: "\n").contains(undoCommand),
+          "instruction localization preserves executable commands, quoted paths, fingerprints and real receipt arguments verbatim")
+  require(localizedInstructions.contains("工作甲") && localizedInstructions.contains("个人乙"),
+          "instruction localization retains source and target user names")
   let englishMenu = NSMenu()
   ApplicationMenus.addEditMenu(to: englishMenu, language: "en")
   require(englishMenu.items.first?.title == "Edit"
