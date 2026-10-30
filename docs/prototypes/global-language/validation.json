@@ -1,7 +1,6 @@
 {
   "baseCommit": "c70d903d4fae20a799b5cbf2830a17140c1dfc30",
   "author": "Kimi CLI 2.3.0; configured default model",
-  "sessionID": "session_f1c85e80-b422-4a9b-b4f5-49c6648d0f4e",
   "coreTests": 176,
   "controllerChecks": 147,
   "releaseBuildAndAdHocSignature": "passed",
@@ -76,5 +75,7 @@
     "zh",
     "en"
   ],
-  "futureLanguageExpansion": "Requires translated tables, diagnostic/instruction templates and UI validation before registration"
+  "futureLanguageExpansion": "Requires translated tables, diagnostic/instruction templates and UI validation before registration",
+  "releaseVersion": "1.3.1",
+  "releaseBuild": "20261030.14.0"
 }

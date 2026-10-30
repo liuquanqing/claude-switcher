@@ -14,9 +14,9 @@
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)
+[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/ClaudeSwitcher-1.3.1-arm64.dmg)
 
-**1.3.0** · Apple Silicon · macOS 13+
+**1.3.1** · Apple Silicon · macOS 13+
 
 [下载](#下载) · [核心能力](#核心能力) · [快速开始](#快速开始) · [边界与验证](#边界与验证) · [English](README.en.md)
 
@@ -79,7 +79,7 @@
 
 **把会话带到下一站**
 
-为适配的桌面会话提供导入、增量、备份、撤销与恢复，默认只处理可核验的本地索引。
+为适配的桌面会话提供复制、增量更新、备份、撤销与恢复，默认只处理可核验的本地索引。
 
 </td>
 <td valign="top">
@@ -107,30 +107,32 @@ flowchart LR
 
 ## 界面
 
+通过底部地球图标切换全局中文与 English。账号名称、会话内容和路径保留原样。
+
 <table>
 <tr>
 <td align="center" width="50%">
-<img src="docs/images/main.png" alt="账号与额度面板" width="420"><br>
-账号与额度
+<img src="docs/images/main.png" alt="中文主面板" width="420"><br>
+中文
 </td>
 <td align="center" width="50%">
-<img src="docs/images/settings.png" alt="保护设置" width="420"><br>
-网络与保护设置
+<img src="docs/images/main-en.png" alt="英文主面板" width="420"><br>
+English
 </td>
 </tr>
 </table>
 
-界面截图均使用虚构账号与演示数据。
+界面截图均使用虚构账号与演示数据。[保护设置与复制流程](docs/GLOBAL-LANGUAGE.md#验证记录)也经过双语复核。
 
 ## 下载
 
-1.3.0 正式版包含最新的 API 配置识别与 CLI 状态改进；安装包统一使用 **Claude Switcher** 名称。详见[本版更新](docs/releases/1.3.0.md)。
+1.3.1 带来全局中文 / English、统一的复制会话流程，以及更清晰的完成摘要。详见[本版更新](docs/releases/1.3.1.md)。
 
-**[下载 Claude Switcher 1.3.0 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)**
+**[下载 Claude Switcher 1.3.1 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/ClaudeSwitcher-1.3.1-arm64.dmg)**
 
 适用于 **Apple Silicon（M1 及更新芯片）· macOS 13+**。打开 DMG，将 `Claude Switcher.app` 拖入“应用程序”。
 
-[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
+[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.1) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
 
 > 当前构建使用 ad-hoc 本地签名，未经过 Apple 公证。首次打开方式、升级与卸载步骤见 [安装说明](docs/INSTALL.md)。
 
@@ -149,7 +151,7 @@ flowchart LR
 <details>
 <summary><strong>切换账号会改写云端会话吗？</strong></summary>
 
-不会。工具通过切换 Claude Desktop 的本地数据目录来改变当前账号；适用于导入的本地会话索引也不会被包装成云端迁移。
+不会。工具通过切换 Claude Desktop 的本地数据目录来改变当前账号；适用于复制的本地会话索引也不会被包装成云端迁移。
 
 </details>
 
@@ -176,19 +178,19 @@ Claude Switcher 同步的是默认保存的 CLI 登录。已经启动的任务�
 
 ## 边界与验证
 
-Claude Switcher 的定位是**切换门禁与周期性状态观察**，与系统级网络策略互补。网络层隔离与即时阻断仍在独立验证中，尚未接入1.3.0。
+Claude Switcher 的定位是**切换门禁与周期性状态观察**，与系统级网络策略互补。网络层隔离与即时阻断仍在独立验证中，尚未接入本版。
 
-网络检查、CLI 同步和会话导入都以可确认的边界为前提：
+网络检查、CLI 同步和会话复制都以可确认的边界为前提：
 
 - 只同步默认保存的 CLI 登录，不保证已经运行的任务立即换号。
 - API 或未知模式的桌面不会自动纳入订阅保护。
-- 会话导入面向已适配的桌面索引，不等同于完整云端聊天迁移。
+- 会话复制面向已适配的桌面索引，不等同于完整云端聊天迁移。
 - 后台守卫约每 10 秒检查一次，不能覆盖两次检查之间的全部变化。
 
 当前公开发布源码已通过：
 
 - Core 测试：176 项
-- 控制器隔离检查：121 项
+- 控制器隔离检查：147 项
 - release 构建与 ad-hoc 签名验证
 
 [查看完整验证范围](docs/VALIDATION.md) · [查看最新云端 CI](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)

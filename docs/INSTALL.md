@@ -2,7 +2,7 @@
 
 Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账号设置，或主动开启保护后，才会参与相应的切换与检查流程。
 
-适用版本：`v1.3.0`（正式版）。
+适用版本：`v1.3.1`（正式版）。
 
 ## 系统要求
 
@@ -11,7 +11,7 @@ Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账
 
 ## 1. 下载并校验
 
-推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0)下载：
+推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/ClaudeSwitcher-1.3.1-arm64.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.1)下载：
 
 - `.dmg` 或 `.zip`（二选一）
 - `SHA256SUMS`
@@ -48,7 +48,7 @@ cat SHA256SUMS
 
 [Apple 的首次打开说明](https://support.apple.com/102445)。请保留 Gatekeeper，不对整个下载目录或“应用程序”批量移除隔离属性。如果提示文件损坏或恶意软件，请先停止打开并重新核对来源与校验值。
 
-签名、公证的准备要求与本版 `1.3.0` 的命名见 [macOS 分发说明](MACOS-DISTRIBUTION.md)。正式版仍采用 ad-hoc 签名，未经过 Apple 公证。
+签名、公证的准备要求与本版 `1.3.1` 的命名见 [macOS 分发说明](MACOS-DISTRIBUTION.md)。正式版仍采用 ad-hoc 签名，未经过 Apple 公证。
 
 ## 4. 开启保护（可选）
 
@@ -76,7 +76,7 @@ cat SHA256SUMS
 
 ## 与原版共存或迁移
 
-应用名称改变不会迁移账号数据。若从 RC6 升级且已启用守卫，请先在旧版关闭保护，退出切换器与 Claude Desktop，安装后再按新路径启用保护；不要在守卫仍引用旧 helper 时移走旧应用。
+应用名称改变不会迁移账号数据。若已启用守卫，整包覆盖或更换应用路径前，请先在旧版关闭保护，退出切换器与 Claude Desktop，安装后再启用保护；不要在守卫仍引用旧 helper 时移走旧应用。
 
 - 安装或升级之前，建议先退出原版 Claude Switcher 和 Claude Desktop。
 - 如果原版也开着保护或守卫，先在原版里关掉，避免两套守卫同时管理同一个桌面。

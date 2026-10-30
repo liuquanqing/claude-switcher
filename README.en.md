@@ -14,16 +14,16 @@ Accounts, usage, sessions and network checks meet in one place.
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)
+[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/ClaudeSwitcher-1.3.1-arm64.dmg)
 
-**1.3.0** · Apple Silicon · macOS 13+
+**1.3.1** · Apple Silicon · macOS 13+
 
 [Download](#download) · [Features](#features) · [Quick start](#quick-start) · [Scope](#scope) · [中文](README.md)
 
 </div>
 
 <p align="center">
-  <img src="docs/images/main.png" width="820" alt="Claude Switcher main panel">
+  <img src="docs/images/main-en.png" width="820" alt="Claude Switcher main panel">
 </p>
 
 > Claude Switcher is an unofficial community project and is not affiliated with Anthropic.<br>
@@ -43,7 +43,7 @@ Claude Switcher keeps that work in the menu bar: see the current account, check 
 | **Desktop + CLI** | Synchronize the saved default OAuth login used by Claude Code. |
 | **Preflight** | Inspect the proxy, TUN interface, Claude domains and expected region before changing accounts. |
 | **Background guard** | Observe explicitly confirmed subscription desktops while the panel is closed. |
-| **Session import** | Import, append, back up, undo and restore supported local desktop session indexes. |
+| **Session copying** | Copy, update, back up, undo and restore supported local desktop session indexes. |
 | **Config awareness** | Detect Magpie and CC Switch configuration sources without taking over their secrets or exit flow. |
 | **Usage at a glance** | Show account usage windows and reset times without adding another dashboard. |
 
@@ -62,30 +62,32 @@ Known failures, unknown states and unresolved conflicts stop the operation befor
 
 ## Screens
 
+Use the globe in the footer to switch the entire app between Chinese and English. Account names, session content, and paths stay as they are.
+
 <table>
 <tr>
 <td align="center" width="50%">
-<img src="docs/images/main.png" alt="Accounts and usage" width="420"><br>
-Accounts and usage
+<img src="docs/images/main-en.png" alt="English main panel" width="420"><br>
+English
 </td>
 <td align="center" width="50%">
-<img src="docs/images/settings.png" alt="Protection settings" width="420"><br>
-Network and protection
+<img src="docs/images/main.png" alt="Chinese main panel" width="420"><br>
+中文
 </td>
 </tr>
 </table>
 
-All account details in these screenshots are fictional.
+All account details in these screenshots are fictional. See [bilingual protection and copy-flow validation](docs/GLOBAL-LANGUAGE.md#验证记录).
 
 ## Download
 
-Version 1.3.0 includes the latest API manager detection and CLI status refinements. The app is now named **Claude Switcher**, without the candidate suffix. See [release notes](docs/releases/1.3.0.md).
+Version 1.3.1 brings app-wide Chinese / English, a consistent Copy sessions flow, and clearer copy results. See [release notes](docs/releases/1.3.1.md).
 
-**[Download Claude Switcher 1.3.0 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)**
+**[Download Claude Switcher 1.3.1 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/ClaudeSwitcher-1.3.1-arm64.dmg)**
 
 For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher.app` to Applications.
 
-[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
+[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.1) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
 
 The build uses an ad-hoc local signature and is not notarized by Apple. See [the installation guide](docs/INSTALL.md).
 
@@ -104,7 +106,7 @@ Keep only one Claude account manager active. This release and the original Claud
 <details>
 <summary><strong>Does switching an account rewrite cloud conversations?</strong></summary>
 
-No. Claude Switcher changes the active account by rotating local Claude Desktop data directories. Supported local session imports remain local indexes, not a cloud migration.
+No. Claude Switcher changes the active account by rotating local Claude Desktop data directories. Supported local session copies remain local indexes, not a cloud migration.
 
 </details>
 
@@ -135,12 +137,12 @@ This release operates as a **switch gate and periodic observer**, alongside host
 
 - Only the saved default CLI login is synchronized; running tasks are not guaranteed to change identity immediately.
 - API-mode and unknown-mode desktops are not enrolled automatically.
-- Session import supports adapted local desktop indexes, not complete cloud chat migration.
+- Session copying supports adapted local desktop indexes, not complete cloud chat migration.
 - The background guard checks approximately every 10 seconds, so it cannot observe every event between checks.
 
 ## Validation
 
-The public source currently passes 176 Core tests, 121 isolated controller checks, and a release build plus signature verification.
+The public source currently passes 176 Core tests, 147 isolated controller checks, and a release build plus signature verification.
 
 See [VALIDATION.md](docs/VALIDATION.md) and the [GitHub Actions workflow](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml).
 
