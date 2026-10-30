@@ -129,7 +129,8 @@ final class ProtectionController: ObservableObject {
         } catch { operationError = error.localizedDescription }
     }
 
-    private func refreshScope() {
+    func refreshScope() {
+        guard !demo else { return }
         desktopScope = DesktopModeInspector.read(support: files.directory.deletingLastPathComponent())
         apiConfiguration = APIConfigurationInspector.read(support: files.directory.deletingLastPathComponent(), scope: desktopScope)
         desktopManaged = managedDesktopApplication(files) != nil

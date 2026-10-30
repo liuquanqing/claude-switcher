@@ -11,12 +11,12 @@ import SwitcherCore
         guard config.allowsSubscriptionMutation else { throw SafetyError(config.explanation ?? "CLI 认证配置未确认。") }
     }
 
-    private func profileDescriptor(_ name: String) async throws -> CLIProfileIdentity {
+    private func profileDescriptor(_ name: String, allowInteraction: Bool = true) async throws -> CLIProfileIdentity {
         guard ProfileTransaction.validName(name), let index = profiles.firstIndex(where: { $0.name == name }) else { throw err("桌面档案不存在或名称无效，未修改登录。") }
         let directory = profileDir(name)
         let kind = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard kind.isDirectory == true, kind.isSymbolicLink != true else { throw err("桌面档案路径不是普通目录，未读取登录。") }
-        guard let access = try await token(for: directory, allowExpired: true) else { return CLIProfileIdentity(name: name, identity: nil) }
+        guard let access = try await token(for: directory, allowExpired: true, allowInteraction: allowInteraction) else { return CLIProfileIdentity(name: name, identity: nil) }
         let config = try CLIJSON.object(Data(contentsOf: directory.appendingPathComponent("config.json")))
         let localAccount = config["lastKnownAccountUuid"] as? String
         if let snapshot = profiles[index].snapshot, snapshot.identity.isComplete,
@@ -134,12 +134,16 @@ import SwitcherCore
     }
 
     /// Network verification is still gated. Only its final result is published to the UI.
-    func refreshCLI(verify: Bool = false) async {
+    func refreshCLI(verify: Bool = false, allowInteraction: Bool = false) async {
         guard !isDemo else { return }
-        await updateCLIStatus { await evaluateCLIStatus(verify: verify) }
+        // Keep an explicitly requested local report with its original timestamp.
+        // Profile/mode changes invalidate it; periodic refresh must not replace it
+        // with weaker saved metadata or silently start another auth command.
+        if !verify && cliStatus == .reported { return }
+        await updateCLIStatus { await evaluateCLIStatus(verify: verify, allowInteraction: allowInteraction) }
     }
 
-    private func evaluateCLIStatus(verify: Bool) async -> CLIStatusPresentation {
+    private func evaluateCLIStatus(verify: Bool, allowInteraction: Bool) async -> CLIStatusPresentation {
         var result = CLIStatusPresentation()
         result.detail = "默认保存身份尚未核验；未检测终端 shell 环境和各项目设置，不代表已运行的 CLI 任务。"
         let configuration = cliConfiguration()
@@ -149,12 +153,12 @@ import SwitcherCore
             result.detail = configuration.explanation
             return result
         }
-        if configuration.fileCredentialsPresent {
+        if configuration.fileCredentialsPresent && allowInteraction {
             let reported = await reportedCLIStatus(configuration: configuration)
             result = reported.presentation
             guard verify, reported.defaultSubscription else { return result }
         }
-        let io = NativeCLIStorage()
+        let io = NativeCLIStorage(allowInteraction: allowInteraction)
         do {
             let document = try io.readIdentityDocument()
             let metadata = try CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
@@ -172,7 +176,8 @@ import SwitcherCore
                 result.status = .needsLogin; result.profile = nil; result.detail = "当前默认存储没有可用订阅登录，请在 CLI 中登录。"; return result
             }
             guard let access = live.usableAccessToken(now: Date()) else {
-                result.detail = "保存的访问凭据需要由 CLI 刷新，再核验默认登录。"; return result
+                result.status = .refreshNeeded
+                result.detail = "保存凭据待 CLI 刷新；不代表终端已退出登录。"; return result
             }
             let actual = CLIIdentity.profile(try await getJSON("profile", access))
             guard try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument()) == live else {
@@ -183,7 +188,7 @@ import SwitcherCore
             }
             let marker = try confirmedCurrentProfile()
             if DesktopModeInspector.read(support: support) == .subscription {
-                let desktop = try await profileDescriptor(marker)
+                let desktop = try await profileDescriptor(marker, allowInteraction: allowInteraction)
                 guard marker == current, try confirmedCurrentProfile() == marker, let identity = desktop.identity, identity.isComplete else {
                     throw SafetyError("桌面身份在检查期间变化或未确认；未同步登录。")
                 }
@@ -209,52 +214,18 @@ import SwitcherCore
     }
 
     private func reportedCLIStatus(configuration: AuthenticationConfiguration) async -> (presentation: CLIStatusPresentation, defaultSubscription: Bool) {
-        var result = CLIStatusPresentation()
         do {
             let home = FileManager.default.homeDirectoryForCurrentUser
-            let marker = try confirmedCurrentProfile()
             let report = try await CLIStatusReader.read(home: home)
-            guard report.usesConfigurationDirectory(home.appendingPathComponent(".claude")), !configuration.customDirectory else {
-                result.status = .unsupportedStorage; result.detail = "CLI 使用了不同配置目录；未按默认账号猜测配对，未修改登录。"; return (result, false)
+            var result = CLIStatusPresentation.localReport(report, expectedDirectory: home.appendingPathComponent(".claude"), configuration: configuration)
+            if result.defaultSubscription {
+                let matches = profiles.filter { $0.snapshot?.identity.samePrincipal(as: report.identity) == true }
+                result.presentation.profile = matches.count == 1 ? matches.first?.name : nil
             }
-            guard report.loggedIn else {
-                result.status = .needsLogin; result.detail = "CLI 本次只读报告默认配置未登录；未执行登录或注销。"; return (result, false)
-            }
-            guard report.authMethod == "claude.ai", !configuration.otherAuthentication else {
-                result.status = .otherAuthentication; result.detail = "CLI 报告已登录，但不是可自动同步的默认订阅来源；保留现状。"; return (result, false)
-            }
-            let document = try NativeCLIStorage().readIdentityDocument()
-            let metadata = try CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
-            let record = report.savedRecord(matching: metadata)
-            result.email = report.identity.email
-            let matches = profiles.filter { profile in
-                guard let desktop = profile.snapshot?.identity, let record else { return false }
-                return desktop.samePrincipal(as: record)
-            }
-            result.profile = matches.count == 1 ? matches.first?.name : nil
-            var comparison = "身份记录尚未能完整配对到桌面档案。"
-            if marker == current, try confirmedCurrentProfile() == marker, DesktopModeInspector.read(support: support) == .subscription {
-                let cached = profiles.first { $0.name == marker }?.snapshot?.identity
-                let config = try? CLIJSON.object(Data(contentsOf: liveDir.appendingPathComponent("config.json")))
-                let desktop = CLIIdentity(accountID: config?["lastKnownAccountUuid"] as? String ?? cached?.accountID,
-                    organizationID: config?["lastKnownOrganizationUuid"] as? String ?? cached?.organizationID, email: cached?.email)
-                if let record, desktop.samePrincipal(as: record) {
-                    comparison = "账号与组织的保存记录与桌面一致。"
-                } else if CLIReportedStatus.sameAccountRecord(record, desktop) == true {
-                    comparison = desktop.isComplete && record?.isComplete == true
-                        ? "账号 ID 相同，但组织保存记录不同。"
-                        : "账号 ID 保存记录与桌面一致；组织仍未确认。"
-                } else if CLIReportedStatus.sameAccountRecord(record, desktop) == false {
-                    comparison = "CLI 与桌面的账号 ID 保存记录不同。"
-                }
-            }
-            // Keep this weaker than .matched: a local status report cannot prove
-            // token validity, the selected storage backend or already running tasks.
-            result.status = .unverified
-            result.detail = "CLI 已报告订阅登录。" + comparison + "本地报告尚未验证凭据，未改写登录；不代表所有已运行终端任务。"
-            return (result, true)
+            return result
         } catch {
-            result.status = .unverified; result.detail = "CLI 本地状态读取未完成，未修改登录。" + (configuration.explanation ?? "")
+            var result = CLIStatusPresentation()
+            result.detail = (error as? SafetyError)?.localizedDescription ?? "CLI 状态读取失败，请重试。"
             return (result, false)
         }
     }
@@ -268,7 +239,7 @@ import SwitcherCore
             cliStatus = cliProfile == nil ? .needsLogin : (cliProfile == current ? .matched : .different)
             return
         }
-        await refreshCLI(verify: true)
+        await updateCLIStatus { (await reportedCLIStatus(configuration: cliConfiguration())).presentation }
     }
 
     func moveTerminal(to target: String) async {

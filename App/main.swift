@@ -99,8 +99,8 @@ let desktopTokenReader = DesktopTokenReader()
 
 func err(_ s: String) -> NSError { NSError(domain: "switcher", code: 1, userInfo: [NSLocalizedDescriptionKey: s]) }
 
-func token(for directory: URL, allowExpired: Bool = false) async throws -> String? {
-    try await desktopTokenReader.read(directory: directory, allowExpired: allowExpired)
+func token(for directory: URL, allowExpired: Bool = false, allowInteraction: Bool = false) async throws -> String? {
+    try await desktopTokenReader.read(directory: directory, allowExpired: allowExpired, allowInteraction: allowInteraction)
 }
 
 func parseDate(_ s: Any?) -> Date? {
@@ -257,6 +257,16 @@ final class Store: ObservableObject {
             cliStatus = .unverified; cliStandaloneVerified = true; cliProfile = nil
             cliStatusDetail = nil
         }
+        if Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIReported") as? Bool == true {
+            cliStatus = .reported; cliStandaloneVerified = false
+            cliStatusDetail = "官方 CLI 报告已登录；尚未验证在线有效性。"
+            cliStatusCheckedAt = Date()
+        }
+        if Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIRefreshNeeded") as? Bool == true {
+            cliStatus = .refreshNeeded; cliStandaloneVerified = false
+            cliStatusDetail = "保存凭据待 CLI 刷新；不代表终端已退出登录。"
+            cliStatusCheckedAt = Date()
+        }
         // Model an externally changed terminal login only when explicitly requested for QA.
         if CommandLine.arguments.contains("--demo-cli-mismatch") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIMismatch") as? Bool == true {
             cliProfile = "Business"
@@ -316,6 +326,7 @@ final class Store: ObservableObject {
     /// Opening a panel updates local facts only; startup, the timer and explicit refresh do the I/O round.
     func panelWillOpen() {
         reloadList()
+        protection.refreshScope()
         protection.refreshStatus()
     }
 
@@ -338,6 +349,16 @@ final class Store: ObservableObject {
         refreshing = true
         defer { refreshing = false }
         reloadList()
+        protection.refreshScope()
+        if protection.desktopScope == .api {
+            banner = nil
+            for index in profiles.indices {
+                profiles[index].usageState = profiles[index].snapshot == nil ? .notRequested : .cached
+                profiles[index].error = nil
+            }
+            await refreshCLI(verify: false)
+            lastRefresh = Date(); onChange?(); return
+        }
         // Usage calls carry account tokens too; they must not bypass the region gate.
         let decision = await protection.preflight()
         guard decision.allowed else {
@@ -475,16 +496,9 @@ let switcherService = "Claude Switcher"
 let cliCurrentFile = parkDir.appendingPathComponent(".cli-current")
 let claudeJSON = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".claude.json")
 
-func readKeychain(service: String, account: String) throws -> [String: Any]? {
-    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: service, kSecAttrAccount as String: account,
-        kSecReturnData as String: true, kSecMatchLimit as String: kSecMatchLimitOne]
-    var result: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
-    if status == errSecItemNotFound { return nil }
-    guard status == errSecSuccess, let data = result as? Data else {
-        throw err("无法读取钥匙串（状态 \(status)）；未将读取失败当作空登录。")
-    }
+func readKeychain(service: String, account: String, allowInteraction: Bool = false) throws -> [String: Any]? {
+    guard let data = try KeychainReadAccess.read(service: service, account: account,
+                                                  allowInteraction: allowInteraction) else { return nil }
     guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
         throw err("钥匙串凭据格式异常，未修改登录。")
     }

@@ -186,7 +186,7 @@ Claude Switcher 的定位是**切换门禁与周期性状态观察**，与系统
 当前公开发布源码已通过：
 
 - Core 测试：176 项
-- 控制器隔离检查：106 项
+- 控制器隔离检查：118 项
 - release 构建与 ad-hoc 签名验证
 
 [查看完整验证范围](docs/VALIDATION.md) · [查看最新云端 CI](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
@@ -217,3 +217,7 @@ scripts/package-release.sh
 Switch lightly. Keep working.
 
 </div>
+
+## 源码更新
+
+当前源码构建 `20261030.6.10`：首页直接显示 API 配置来源，终端行提供检查入口，后台凭据读取不弹授权。详见 [API 与 CLI 检查说明](docs/API-CLI-STATUS.md)。已有 Release 附件尚未随此次源码更新替换。

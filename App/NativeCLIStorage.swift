@@ -8,12 +8,12 @@ import SwitcherCore
     private let readSecret: (String, String) throws -> Data?
     private let writeSecret: (String, String, Data?) throws -> Void
     private let credentials: CLIStoredCredentialRouter
-    init(identity: URL = claudeJSON, marker: URL = cliCurrentFile,
+    init(identity: URL = claudeJSON, marker: URL = cliCurrentFile, allowInteraction: Bool = true,
          credentialFile: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/.credentials.json"),
          secretReader: ((String, String) throws -> Data?)? = nil,
          secretWriter: ((String, String, Data?) throws -> Void)? = nil) {
         identityURL = identity; markerURL = marker
-        let reader = secretReader ?? { service, account in try readKeychain(service: service, account: account).map(CLIJSON.encode) }
+        let reader = secretReader ?? { service, account in try readKeychain(service: service, account: account, allowInteraction: allowInteraction).map(CLIJSON.encode) }
         let writer = secretWriter ?? Self.writeNativeSecret
         readSecret = reader; writeSecret = writer
         let account = NSUserName()
