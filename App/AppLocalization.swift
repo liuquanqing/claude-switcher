@@ -1,15 +1,31 @@
 import SwiftUI
 import SwitcherCore
 
+struct SupportedLanguage: Identifiable {
+    let code: String
+    let selfName: String
+    let locale: Locale
+    var id: String { code }
+}
+
 enum AppLocalization {
-    static let defaultLanguage = "zh"
+    static let supportedLanguages = [
+        SupportedLanguage(code: "zh", selfName: "中文", locale: Locale(identifier: "zh_Hans_CN")),
+        SupportedLanguage(code: "en", selfName: "English", locale: Locale(identifier: "en_US"))
+    ]
+    static let defaultLanguage = supportedLanguages[0].code
+
+    static func isSupported(_ language: String) -> Bool {
+        supportedLanguages.contains { $0.code == language }
+    }
 
     static func normalized(_ language: String) -> String {
-        language == "en" ? "en" : defaultLanguage
+        isSupported(language) ? language : defaultLanguage
     }
 
     static func locale(for language: String) -> Locale {
-        Locale(identifier: normalized(language) == "en" ? "en_US" : "zh_Hans_CN")
+        let language = normalized(language)
+        return supportedLanguages.first { $0.code == language }?.locale ?? supportedLanguages[0].locale
     }
 
     static func text(_ key: String, language: String, arguments: [String: String] = [:]) -> String {

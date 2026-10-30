@@ -201,7 +201,7 @@ final class Store: ObservableObject {
     @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?
     @Published private(set) var appLanguage = AppLocalization.defaultLanguage
     func setAppLanguage(_ value: String) {
-        guard ["zh", "en"].contains(value), value != appLanguage else { return }
+        guard AppLocalization.isSupported(value), value != appLanguage else { return }
         appLanguage = value
         if !isDemo { UserDefaults.standard.set(value, forKey: "applicationLanguage") }
         onLanguageChange?()

@@ -828,15 +828,16 @@ struct LanguageMenu: View {
     var body: some View {
         Menu {
             Picker(selection: $selection) {
-                Text("中文").tag("zh")
-                Text("English").tag("en")
+                ForEach(AppLocalization.supportedLanguages) { language in
+                    Text(language.selfName).tag(language.code)
+                }
             } label: {
                 EmptyView()
             }
             .pickerStyle(.inline)
             .labelsHidden()
         } label: {
-            Text("文A").font(.system(size: 11.5, weight: .medium))
+            Image(systemName: "globe").font(.system(size: 13, weight: .medium))
                 .foregroundColor(hover ? .txt : .sub).frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
         }
