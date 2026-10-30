@@ -118,7 +118,7 @@ import SwitcherCore
         let result = await operation()
         guard current == profileAtStart, cliStatusGeneration == generationAtStart else { invalidateCLIStatus(); return }
         cliProfile = result.profile; cliEmail = result.email; cliStatusDetail = result.detail
-        cliStatus = result.status; cliStandaloneVerified = result.standaloneVerified; cliStatusCheckedAt = Date()
+        cliStatus = result.status; cliStandaloneVerified = result.standaloneVerified; cliStatusCheckedAt = result.metadataOnly ? nil : Date()
     }
 
     func invalidateCLIStatus() {
@@ -168,7 +168,7 @@ import SwitcherCore
                 return identity.samePrincipal(as: metadata)
             }
             result.profile = matches.count == 1 ? matches.first?.name : nil
-            guard verify else { return result }
+            guard verify else { result.detail = nil; result.metadataOnly = true; return result }
             let gate = await protection.preflight(target: .cli)
             guard gate.allowed else { result.detail = gate.message; return result }
             let live = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())

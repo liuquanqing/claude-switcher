@@ -428,7 +428,7 @@ struct TerminalProtectionCard: View {
     /// from this column, so entry and fold belong to the same place.
     private var statusButton: some View {
         Button { showSettings.toggle() } label: {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
                         .frame(width: 14, height: 14)
@@ -441,6 +441,7 @@ struct TerminalProtectionCard: View {
                         .foregroundColor(settingsHover || showSettings ? .txt : .sub)
                         .frame(width: 12)
                 }
+                .frame(height: 22)
                 .foregroundColor(statusColor)
                 // Sized to fit the 164pt column; nothing here is allowed to end in "…".
                 Text(statusDetail)

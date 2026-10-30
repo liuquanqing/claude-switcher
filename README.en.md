@@ -138,7 +138,7 @@ This preview release operates as a **switch gate and periodic observer**, alongs
 
 ## Validation
 
-The public source currently passes 176 Core tests, 118 isolated controller checks, and a release build plus signature verification.
+The public source currently passes 176 Core tests, 120 isolated controller checks, and a release build plus signature verification.
 
 See [VALIDATION.md](docs/VALIDATION.md) and the [GitHub Actions workflow](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml).
 
@@ -169,4 +169,4 @@ Switch lightly. Keep working.
 
 ## Source update
 
-Source build `20261030.6.10` shows the API configuration manager on the home panel, exposes the CLI status check beside the terminal row, and disables credential prompts during background reads. See [API and CLI status behavior](docs/API-CLI-STATUS.md). Existing Release assets have not been replaced by this source update.
+Source build `20261030.6.11` shows the API configuration manager on the home panel, exposes the CLI status check beside the terminal row, and disables credential prompts during background reads. See [API and CLI status behavior](docs/API-CLI-STATUS.md). Existing Release assets have not been replaced by this source update.
