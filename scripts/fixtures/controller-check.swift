@@ -8,8 +8,26 @@ actor FixtureGuardWorker: GuardWorking {
  let files: SafetyFiles
  var registeredValue = true
  var failure: String?
- init(files: SafetyFiles) { self.files = files }
- func registered() async -> Bool { try? await Task.sleep(nanoseconds: 40_000_000); return registeredValue }
+ private var holdLookup: Bool
+ private var pendingLookup: CheckedContinuation<Bool, Never>?
+ private var lookupStarted: CheckedContinuation<Void, Never>?
+ init(files: SafetyFiles, holdLookup: Bool = false) { self.files = files; self.holdLookup = holdLookup }
+ func registered() async -> Bool {
+  guard holdLookup else { return registeredValue }
+  return await withCheckedContinuation {
+   pendingLookup = $0
+   lookupStarted?.resume(); lookupStarted = nil
+  }
+ }
+ func waitUntilLookupStarted() async {
+  if pendingLookup != nil { return }
+  await withCheckedContinuation { lookupStarted = $0 }
+ }
+ func completeLookup() {
+  guard let pending = pendingLookup else { preconditionFailure("Fixture service lookup must start before completion") }
+  holdLookup = false; pendingLookup = nil
+  pending.resume(returning: registeredValue)
+ }
  func setFailure(_ value: String?) { failure = value }
  func enable(_ config: SafetyConfig) throws {
   if let failure { throw SafetyError(failure) }
@@ -46,6 +64,13 @@ actor FixtureGuardWorker: GuardWorking {
  @MainActor static func main() async throws {
   var checks = 0
   func require(_ value: Bool, _ description: String) { precondition(value, description); checks += 1 }
+  func waitUntil(_ description: String, _ condition: () -> Bool) async throws {
+   let deadline = Date().addingTimeInterval(5)
+   while !condition() {
+    precondition(Date() < deadline, "Timed out: " + description)
+    try await Task.sleep(nanoseconds: 1_000_000)
+   }
+  }
   var deniedRead = false
   do {
    _ = try KeychainReadAccess.read(service: "fixture", perform: { query, _ in
@@ -88,12 +113,15 @@ actor FixtureGuardWorker: GuardWorking {
   let config = SafetyConfig(enabled: true)
   try files.save(config, to: files.configURL)
   try files.save(GuardReceipt(config: config, decision: SafetyDecision(.allowed)), to: files.receiptURL)
-  let worker = FixtureGuardWorker(files: files)
+  let worker = FixtureGuardWorker(files: files, holdLookup: true)
   let liveBranch = ProtectionController(testFiles: files, worker: worker)
+  await worker.waitUntilLookupStarted()
   var uiResponsive = false
-  Task { @MainActor in uiResponsive = true }
-  try await Task.sleep(nanoseconds: 100_000_000)
-  require(uiResponsive && liveBranch.guardOnline, "service lookup must not block main actor")
+  await Task { @MainActor in uiResponsive = true }.value
+  require(uiResponsive && !liveBranch.guardOnline, "main actor stays responsive while service lookup is pending")
+  await worker.completeLookup()
+  try await waitUntil("service lookup publishes its completed result") { liveBranch.guardOnline }
+  require(liveBranch.guardOnline, "completed service lookup publishes online state")
   await worker.setFailure("fixture: configuration is read only")
   liveBranch.country = "JP"
   await liveBranch.enable()
@@ -102,7 +130,7 @@ actor FixtureGuardWorker: GuardWorking {
   liveBranch.clearOperationError()
   require(liveBranch.operationError == nil && liveBranch.enabled, "dismiss is presentation only")
   liveBranch.disable()
-  try await Task.sleep(nanoseconds: 100_000_000)
+  try await waitUntil("failed disable completes") { !liveBranch.working }
   require(liveBranch.operationError != nil && liveBranch.enabled, "failed stop does not fake off")
   await worker.setFailure(nil)
   liveBranch.country = "SG"; await liveBranch.enable()

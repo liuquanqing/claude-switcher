@@ -1,19 +1,19 @@
 # macOS 发布、签名与公证
 
-核对日期：2026-10-29。当前候选包为 `v1.3.0-rc.6`，使用 ad-hoc 签名，尚未公证。本文是 Developer ID 分发准备说明，不表示现有附件已重新签名或通过 Apple 公证。
+核对日期：2026-10-30。当前正式包为 `v1.3.0`，使用 ad-hoc 签名，尚未公证。本文是 Developer ID 分发准备说明，不表示现有附件已重新签名或通过 Apple 公证。
 
 ## 版本命名
 
-本次候选发布统一使用 `1.3.0-rc.6`（Release Candidate 6）：
+本次正式发布统一使用 `1.3.0`：
 
 | 位置 | 名称 |
 | --- | --- |
-| Release 标题 | Claude Switcher 1.3.0 RC6 |
-| Git 标签 | `v1.3.0-rc.6` |
-| DMG | `ClaudeSwitcher-1.3.0-rc.6-arm64.dmg` |
-| ZIP | `ClaudeSwitcher-1.3.0-rc.6-arm64.zip` |
+| Release 标题 | Claude Switcher 1.3.0 |
+| Git 标签 | `v1.3.0` |
+| DMG | `ClaudeSwitcher-1.3.0-arm64.dmg` |
+| ZIP | `ClaudeSwitcher-1.3.0-arm64.zip` |
 
-新标签必须绑定新包的实际构建源码，校验文件与构建清单同时生成。保留已发布的 `v1.3.0-local.6`；不靠改名旧附件或移动旧标签来产生 RC6。RC 表示候选发布，不表示已公证或稳定版；独立实验分支不会自动进入安装包。Apple bundle 的版本字段与对外发布标识在构建阶段分别校验。
+新标签必须绑定新包的实际构建源码，校验文件与构建清单同时生成。保留已发布的 `v1.3.0-local.6` 与 `v1.3.0-rc.6`；不改名旧附件或移动旧标签。正式版本号不代表已通过 Apple 公证；独立实验分支不会自动进入安装包。Apple bundle 的版本字段与对外发布标识在构建阶段分别校验。
 
 ## 两种安装体验
 
@@ -49,7 +49,7 @@ CI 可以使用临时钥匙串，凭据由 GitHub Secrets 提供，任务结束�
 
 ## 当前采用的路径
 
-现有包继续采用用户逐应用授权，操作见 [INSTALL.md](INSTALL.md)。不关闭 Gatekeeper、不降低系统保护，不提供批量移除隔离属性的一键脚本。若具备可用 Developer ID，再执行以上流程发布 RC6；若继续使用用户逐应用授权，RC6 也必须如实标明未公证，不能仅凭版本后缀改变签名状态。
+现有包继续采用用户逐应用授权，操作见 [INSTALL.md](INSTALL.md)。不关闭 Gatekeeper、不降低系统保护，不提供批量移除隔离属性的一键脚本。若具备可用 Developer ID，再执行以上流程发布新版本；若继续使用用户逐应用授权，正式版也必须如实标明未公证，不能仅凭版本后缀改变签名状态。
 
 CC Switch 的公开发布流程也执行 Developer ID 签名、应用和 DMG 公证、staple 及 Gatekeeper 验证；我们可以借鉴顺序，原生 Swift 项目不需要引入它的 Tauri 构建链或运行时权限。
 

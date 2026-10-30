@@ -9,14 +9,14 @@
 为 Claude Desktop 与 Claude Code 打造的 macOS 菜单栏伙伴。<br>
 账号、额度、会话与网络状态，在一个安静的入口里衔接起来。
 
-[![Release](https://img.shields.io/github/v/release/liuquanqing/claude-switcher?include_prereleases&label=release)](https://github.com/liuquanqing/claude-switcher/releases)
+[![Release](https://img.shields.io/github/v/release/liuquanqing/claude-switcher?label=release)](https://github.com/liuquanqing/claude-switcher/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%C2%B7%20Apple%20Silicon-lightgrey)](https://github.com/liuquanqing/claude-switcher/releases)
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)
+[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)
 
-**1.3.0 RC6** · Apple Silicon · macOS 13+
+**1.3.0** · Apple Silicon · macOS 13+
 
 [下载](#下载) · [核心能力](#核心能力) · [快速开始](#快速开始) · [边界与验证](#边界与验证) · [English](README.en.md)
 
@@ -124,23 +124,25 @@ flowchart LR
 
 ## 下载
 
-**[下载 Claude Switcher 1.3.0 RC6 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)**
+1.3.0 正式版包含最新的 API 配置识别与 CLI 状态改进；安装包统一使用 **Claude Switcher** 名称。详见[本版更新](docs/releases/1.3.0.md)。
 
-适用于 **Apple Silicon（M1 及更新芯片）· macOS 13+**。打开 DMG，将 `Claude Switcher 候选版.app` 拖入“应用程序”。
+**[下载 Claude Switcher 1.3.0 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)**
 
-[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-rc.6) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
+适用于 **Apple Silicon（M1 及更新芯片）· macOS 13+**。打开 DMG，将 `Claude Switcher.app` 拖入“应用程序”。
+
+[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
 
 > 当前构建使用 ad-hoc 本地签名，未经过 Apple 公证。首次打开方式、升级与卸载步骤见 [安装说明](docs/INSTALL.md)。
 
 ## 快速开始
 
 1. 下载并校验安装包。
-2. 将 `Claude Switcher 候选版.app` 拖入“应用程序”。
+2. 将 `Claude Switcher.app` 拖入“应用程序”。
 3. 首次被系统阻止时，在“系统设置 → 隐私与安全性”中为本应用选择“仍要打开”，详见[首次打开说明](docs/INSTALL.md#3-首次打开)。
 4. 添加账号，或切换到一个空账号后在 Claude 中完成登录。
 5. 如需后台保护，在设置中确认目标地区、代理方式和桌面范围。
 
-安装前建议只保留一个 Claude 账号管理器在运行。候选版与原版 Claude Switcher 共享同一账号目录，不要同时切号。
+安装前建议只保留一个 Claude 账号管理器在运行。本版与原版 Claude Switcher 共享同一账号目录，不要同时切号。
 
 ## 常见问题
 
@@ -168,13 +170,13 @@ Claude Switcher 同步的是默认保存的 CLI 登录。已经启动的任务�
 <details>
 <summary><strong>可以和原版 Claude Switcher 同时安装吗？</strong></summary>
 
-可以并存，但两者共享同一账号目录。请不要同时打开两个管理器切号，也不要同时启用两套守卫。
+保留原版前请先将它改名或备份，避免拖入时被同名替换。两者共享同一账号目录。请不要同时打开两个管理器切号，也不要同时启用两套守卫。
 
 </details>
 
 ## 边界与验证
 
-Claude Switcher 的定位是**切换门禁与周期性状态观察**，与系统级网络策略互补。网络层隔离与即时阻断仍在独立验证中，尚未接入这个预发布版本。
+Claude Switcher 的定位是**切换门禁与周期性状态观察**，与系统级网络策略互补。网络层隔离与即时阻断仍在独立验证中，尚未接入1.3.0。
 
 网络检查、CLI 同步和会话导入都以可确认的边界为前提：
 
@@ -186,7 +188,7 @@ Claude Switcher 的定位是**切换门禁与周期性状态观察**，与系统
 当前公开发布源码已通过：
 
 - Core 测试：176 项
-- 控制器隔离检查：120 项
+- 控制器隔离检查：121 项
 - release 构建与 ad-hoc 签名验证
 
 [查看完整验证范围](docs/VALIDATION.md) · [查看最新云端 CI](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
@@ -217,7 +219,3 @@ scripts/package-release.sh
 Switch lightly. Keep working.
 
 </div>
-
-## 源码更新
-
-当前源码构建 `20261030.6.11`：首页直接显示 API 配置来源，终端行提供检查入口，后台凭据读取不弹授权。详见 [API 与 CLI 检查说明](docs/API-CLI-STATUS.md)。已有 Release 附件尚未随此次源码更新替换。

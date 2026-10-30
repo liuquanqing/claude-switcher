@@ -21,13 +21,14 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleName</key><string>Claude Switcher 候选版</string>
+<key>CFBundleName</key><string>Claude Switcher</string>
+<key>CFBundleDisplayName</key><string>Claude Switcher</string>
 <key>CFBundleIdentifier</key><string>dev.claudeswitcher.candidate</string>
 <key>CFBundleExecutable</key><string>ClaudeSwitcher</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleShortVersionString</key><string>1.3.0-rc.6</string>
-<key>CFBundleVersion</key><string>20261030.6.11</string>
+<key>CFBundleShortVersionString</key><string>1.3.0</string>
+<key>CFBundleVersion</key><string>20261030.1</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
@@ -38,8 +39,8 @@ codesign --force -s - "$APP"
 codesign --verify --deep --strict "$APP"
 echo "Built $APP"
 if [ "$MODE" = install ]; then
-  TARGET='/Applications/Claude Switcher 候选版.app'
-  if pgrep -f '^/Applications/Claude Switcher 候选版.app/Contents/MacOS/ClaudeSwitcher' >/dev/null; then
+  TARGET='/Applications/Claude Switcher.app'
+  if pgrep -f '^/Applications/Claude Switcher( 候选版| RC6)?\.app/Contents/MacOS/ClaudeSwitcher' >/dev/null; then
     echo 'Quit the existing switcher before installing. No application was stopped.' >&2
     exit 1
   fi
@@ -62,7 +63,7 @@ if [ "$MODE" = install ]; then
   fi
   GUIDE='docs/INSTALL.md'
   [ -f "$GUIDE" ] || GUIDE='docs/安装与迁移.md'
-  echo "Installed candidate. No login item or guard was registered. Read $GUIDE before enabling protection."
+  echo "Installed Claude Switcher. No login item or guard was registered. Read $GUIDE before enabling protection."
 fi
 if [ "$MODE" = dmg ]; then
   exec scripts/package-release.sh --skip-build

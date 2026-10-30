@@ -9,14 +9,14 @@
 A quiet macOS menu bar companion for Claude Desktop and Claude Code.<br>
 Accounts, usage, sessions and network checks meet in one place.
 
-[![Release](https://img.shields.io/github/v/release/liuquanqing/claude-switcher?include_prereleases&label=release)](https://github.com/liuquanqing/claude-switcher/releases)
+[![Release](https://img.shields.io/github/v/release/liuquanqing/claude-switcher?label=release)](https://github.com/liuquanqing/claude-switcher/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20%C2%B7%20Apple%20Silicon-lightgrey)](https://github.com/liuquanqing/claude-switcher/releases)
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)
+[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)
 
-**1.3.0 RC6** · Apple Silicon · macOS 13+
+**1.3.0** · Apple Silicon · macOS 13+
 
 [Download](#download) · [Features](#features) · [Quick start](#quick-start) · [Scope](#scope) · [中文](README.md)
 
@@ -79,23 +79,25 @@ All account details in these screenshots are fictional.
 
 ## Download
 
-**[Download Claude Switcher 1.3.0 RC6 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/ClaudeSwitcher-1.3.0-rc.6-arm64.dmg)**
+Version 1.3.0 includes the latest API manager detection and CLI status refinements. The app is now named **Claude Switcher**, without the candidate suffix. See [release notes](docs/releases/1.3.0.md).
 
-For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher 候选版.app` to Applications.
+**[Download Claude Switcher 1.3.0 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/ClaudeSwitcher-1.3.0-arm64.dmg)**
 
-[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0-rc.6) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0-rc.6/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
+For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher.app` to Applications.
+
+[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.0) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.0/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
 
 The build uses an ad-hoc local signature and is not notarized by Apple. See [the installation guide](docs/INSTALL.md).
 
 ## Quick start
 
 1. Download and verify the archive.
-2. Move `Claude Switcher 候选版.app` to Applications.
+2. Move `Claude Switcher.app` to Applications.
 3. If macOS blocks the app, use Open Anyway in System Settings → Privacy & Security for this app. See [the first-launch guide](docs/INSTALL.md#3-首次打开).
 4. Add an account, or switch to an empty account and sign in through Claude.
 5. If you want background protection, confirm the region, proxy mode and desktop scope in Settings.
 
-Keep only one Claude account manager active. The candidate build and the original Claude Switcher share the same account directories.
+Keep only one Claude account manager active. This release and the original Claude Switcher share the same account directories.
 
 ## FAQ
 
@@ -123,13 +125,13 @@ The current release supports Shadowrocket connection status and TUN interfaces i
 <details>
 <summary><strong>Can it coexist with the original Claude Switcher?</strong></summary>
 
-Yes, but both share the same account directories. Do not switch accounts in both apps at once or run two guards together.
+Rename or back up the original first to avoid replacing an app with the same filename. Both share the same account directories. Do not switch accounts in both apps at once or run two guards together.
 
 </details>
 
 ## Scope
 
-This preview release operates as a **switch gate and periodic observer**, alongside host-level network controls. Network isolation and immediate enforcement are still under separate validation and are not part of this release.
+This release operates as a **switch gate and periodic observer**, alongside host-level network controls. Network isolation and immediate enforcement are still under separate validation and are not part of this release.
 
 - Only the saved default CLI login is synchronized; running tasks are not guaranteed to change identity immediately.
 - API-mode and unknown-mode desktops are not enrolled automatically.
@@ -138,7 +140,7 @@ This preview release operates as a **switch gate and periodic observer**, alongs
 
 ## Validation
 
-The public source currently passes 176 Core tests, 120 isolated controller checks, and a release build plus signature verification.
+The public source currently passes 176 Core tests, 121 isolated controller checks, and a release build plus signature verification.
 
 See [VALIDATION.md](docs/VALIDATION.md) and the [GitHub Actions workflow](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml).
 
@@ -166,7 +168,3 @@ See [CREDITS.md](CREDITS.md) and [LICENSE](LICENSE).
 Switch lightly. Keep working.
 
 </div>
-
-## Source update
-
-Source build `20261030.6.11` shows the API configuration manager on the home panel, exposes the CLI status check beside the terminal row, and disables credential prompts during background reads. See [API and CLI status behavior](docs/API-CLI-STATUS.md). Existing Release assets have not been replaced by this source update.

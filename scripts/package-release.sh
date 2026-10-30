@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build and package a separately named candidate. Never installs or controls a service.
+# Build and package a release. Never installs or controls a service.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 case "${1:-}" in
@@ -12,7 +12,7 @@ SOURCE="$PWD/build/Claude Switcher.app"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$SOURCE/Contents/Info.plist")"
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
-APP="$STAGE/Claude Switcher 候选版.app"
+APP="$STAGE/Claude Switcher.app"
 ditto --norsrc --noextattr "$SOURCE" "$APP"
 python3 - "$APP" <<'PY'
 from pathlib import Path
@@ -20,7 +20,7 @@ import plistlib, sys
 p = Path(sys.argv[1]) / 'Contents/Info.plist'
 v = plistlib.loads(p.read_bytes())
 assert not any(k.startswith('CSPreview') for k in v)
-v.update(CFBundleIdentifier='dev.claudeswitcher.candidate', CFBundleName='Claude Switcher 候选版', CFBundleDisplayName='Claude Switcher 候选版')
+v.update(CFBundleIdentifier='dev.claudeswitcher.candidate', CFBundleName='Claude Switcher', CFBundleDisplayName='Claude Switcher')
 p.write_bytes(plistlib.dumps(v))
 PY
 # Remove local debug paths from distributed executables, then sign the changed helpers.
@@ -45,7 +45,7 @@ root = Path.cwd()
 info = plistlib.loads((root / 'build/Claude Switcher.app/Contents/Info.plist').read_bytes())
 sums = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 (root / 'dist/SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in sums.items()))
-manifest = {'version': info['CFBundleShortVersionString'], 'build': info['CFBundleVersion'], 'architecture': subprocess.check_output(['uname', '-m'], text=True).strip(), 'sourceCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'bundleIdentifier': 'dev.claudeswitcher.candidate', 'appName': 'Claude Switcher 候选版.app', 'signing': 'ad-hoc; not notarized', 'files': sums}
+manifest = {'version': info['CFBundleShortVersionString'], 'build': info['CFBundleVersion'], 'architecture': subprocess.check_output(['uname', '-m'], text=True).strip(), 'sourceCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'bundleIdentifier': 'dev.claudeswitcher.candidate', 'appName': 'Claude Switcher.app', 'signing': 'ad-hoc; not notarized', 'files': sums}
 (root / 'dist/RELEASE-MANIFEST.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
 PY
 printf 'Packages and checksums written to dist/\n'
