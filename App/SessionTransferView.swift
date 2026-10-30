@@ -455,9 +455,30 @@ struct CopyThreadsView: View {
         let items = operation.items
         switch operation.state {
         case .completed:
-            guard let first = items.first else { return (text("copyCompleted"), operation.summary, .good) }
-            let key = items.count == 1 ? "copiedOne" : "copiedMany"
-            return (text("copyCompleted"), text(key, arguments: ["title": first.title, "count": String(items.count)]), .good)
+            let addedCount = items.filter { $0.kind == .add }.count
+            let updatedCount = items.filter { $0.kind == .update }.count
+            if addedCount > 0 && updatedCount > 0 {
+                return (text("copyCompleted"), text("copiedMixed", arguments: [
+                    "target": operation.targetName,
+                    "added": String(addedCount),
+                    "updated": String(updatedCount)
+                ]), .good)
+            }
+            if addedCount > 0 {
+                let key = addedCount == 1 ? "copiedAddedOne" : "copiedAddedMany"
+                return (text("copyCompleted"), text(key, arguments: [
+                    "target": operation.targetName,
+                    "count": String(addedCount)
+                ]), .good)
+            }
+            if updatedCount > 0 {
+                let key = updatedCount == 1 ? "copiedUpdatedOne" : "copiedUpdatedMany"
+                return (text("copyCompleted"), text(key, arguments: [
+                    "target": operation.targetName,
+                    "count": String(updatedCount)
+                ]), .good)
+            }
+            return (text("copyCompleted"), operation.summary, .good)
         case .undone:
             return (text("undone"), text("undoneSummary", arguments: ["count": String(items.count)]), .good)
         case .restored:
@@ -601,6 +622,10 @@ struct CopyThreadsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
+            Text(text("copyScope"))
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+                .fixedSize(horizontal: false, vertical: true)
             if !controller.backupItems.isEmpty {
                 sessionList(controller.backupItems, showKind: true)
             }

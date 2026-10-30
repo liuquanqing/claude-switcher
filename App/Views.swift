@@ -804,7 +804,7 @@ struct ImportLanguageMenu: View {
     @State private var hover = false
     var body: some View {
         Menu {
-            Picker("会话导入页语言（仅导入页）", selection: $selection) {
+            Picker("复制会话页语言（仅复制页）", selection: $selection) {
                 Text("中文").tag("zh")
                 Text("English").tag("en")
             }
@@ -817,8 +817,8 @@ struct ImportLanguageMenu: View {
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
         .fixedSize().frame(width: 28, height: 28)
         .onHover { hover = $0 }
-        .help("会话导入页语言（仅影响会话导入页，其余界面暂仅中文）")
-        .accessibilityLabel("会话导入页语言，仅影响会话导入页")
+        .help("复制会话页语言（仅影响复制会话页，其余界面暂仅中文）")
+        .accessibilityLabel("复制会话页语言，仅影响复制会话页")
     }
 }
 
@@ -954,7 +954,7 @@ struct Panel: View {
                 }
                 Spacer(minLength: 4)
                 if store.sessionMigrationEnabled {
-                    FooterButton(icon: "doc.on.doc", help: "导入 Claude Code 会话") { CopyWindow.show(store) }
+                    FooterButton(icon: "doc.on.doc", help: "复制会话") { CopyWindow.show(store) }
                 }
                 FooterButton(icon: "arrow.clockwise",
                              help: "刷新：先过网络门禁，再读取账号用量并核验默认 CLI 登录\n不改保护设置、不启用保护、不纳入桌面") {
