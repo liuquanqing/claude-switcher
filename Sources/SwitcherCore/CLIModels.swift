@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 public enum CLILoginStatus: String, Codable, Sendable {
-    case unverified, matched, different, needsLogin, otherAuthentication, unsupportedStorage
+    case unverified, matched, different, needsLogin, otherAuthentication, unsupportedStorage, reported, refreshNeeded
 }
 
 public enum DesktopProtectionScope: String, Codable, Sendable {

@@ -1,5 +1,7 @@
 import Foundation
 import SwiftUI
+import Security
+import LocalAuthentication
 import SwitcherCore
 
 actor FixtureGuardWorker: GuardWorking {
@@ -44,8 +46,44 @@ actor FixtureGuardWorker: GuardWorking {
  @MainActor static func main() async throws {
   var checks = 0
   func require(_ value: Bool, _ description: String) { precondition(value, description); checks += 1 }
+  var deniedRead = false
+  do {
+   _ = try KeychainReadAccess.read(service: "fixture", perform: { query, _ in
+    let q = query as NSDictionary
+    require((q[kSecUseAuthenticationContext] as? LAContext)?.interactionNotAllowed == true, "automatic credential query must prohibit authorization UI")
+    return errSecInteractionNotAllowed
+   })
+  } catch { deniedRead = true }
+  require(deniedRead, "authorization required is not missing login")
+  let credential = try KeychainReadAccess.read(service: "fixture", allowInteraction: true, perform: { query, output in
+   let q = query as NSDictionary
+   require((q[kSecUseAuthenticationContext] as? LAContext)?.interactionNotAllowed == false, "explicit verification may request authorization")
+   output.pointee = Data("fictional".utf8) as CFData
+   return errSecSuccess
+  })
+  require(credential == Data("fictional".utf8), "authorized fixture read succeeds without touching system Keychain")
+  require(try KeychainReadAccess.read(service: "fixture", perform: { _, _ in errSecItemNotFound }) == nil, "only missing item is absence")
   let root = FileManager.default.temporaryDirectory.appendingPathComponent("controller-fixture-" + UUID().uuidString)
   defer { try? FileManager.default.removeItem(at: root) }
+  let reportHome = root.appendingPathComponent("official-cli-fixture")
+  let reportBin = reportHome.appendingPathComponent(".local/bin/claude")
+  try FileManager.default.createDirectory(at: reportBin.deletingLastPathComponent(), withIntermediateDirectories: true)
+  let reportDir = reportHome.appendingPathComponent(".claude")
+  let reportedJSON = try CLIJSON.encode(["loggedIn": true, "authMethod": "claude.ai", "configDirectory": reportDir.path,
+                                        "accountId": "fixture-account", "orgId": "fixture-org", "email": "cli@example.test"])
+  let fakeProgram = "#!/bin/sh\n[ \"$1\" = auth ] && [ \"$2\" = status ] || exit 2\ncat <<'FIXTURE_JSON'\n" + String(decoding: reportedJSON, as: UTF8.self) + "\nFIXTURE_JSON\n"
+  try fakeProgram.write(to: reportBin, atomically: true, encoding: .utf8)
+  try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: reportBin.path)
+  let report = try await CLIStatusReader.read(home: reportHome)
+  let normalAuth = AuthenticationConfiguration.inspect(environment: [:], documents: [])
+  let localPresentation = CLIStatusPresentation.localReport(report, expectedDirectory: reportDir, configuration: normalAuth)
+  require(localPresentation.presentation.status == .reported && localPresentation.presentation.email == "cli@example.test", "explicit status reads official CLI report without a token or credential store")
+  require(!localPresentation.presentation.standaloneVerified && localPresentation.presentation.status != .matched, "local logged-in report never claims online verification or desktop match")
+  require(CLIStatusPresentation.localReport(report, expectedDirectory: root, configuration: normalAuth).presentation.status == .unsupportedStorage, "nondefault CLI config is not paired to default identity")
+  let apiReport = try CLIReportedStatus(data: CLIJSON.encode(["loggedIn": true, "authMethod": "api_key", "configDirectory": reportDir.path]))
+  require(CLIStatusPresentation.localReport(apiReport, expectedDirectory: reportDir, configuration: normalAuth).presentation.status == .otherAuthentication, "CLI API auth is independent of desktop mode")
+  let signedOut = try CLIReportedStatus(data: CLIJSON.encode(["loggedIn": false, "authMethod": "none", "configDirectory": reportDir.path]))
+  require(CLIStatusPresentation.localReport(signedOut, expectedDirectory: reportDir, configuration: normalAuth).presentation.status == .needsLogin, "only explicit CLI signed-out report indicates signed out")
   let files = SafetyFiles(directory: root.appendingPathComponent("state"))
   let config = SafetyConfig(enabled: true)
   try files.save(config, to: files.configURL)
@@ -69,6 +107,19 @@ actor FixtureGuardWorker: GuardWorking {
   await worker.setFailure(nil)
   liveBranch.country = "SG"; await liveBranch.enable()
   require(liveBranch.operationError == nil, "successful retry clears operation error")
+
+  let apiRoot = root.appendingPathComponent("api-mode")
+  let apiFiles = SafetyFiles(directory: apiRoot.appendingPathComponent("state"))
+  let apiController = ProtectionController(testFiles: apiFiles, worker: FixtureGuardWorker(files: apiFiles))
+  let library = apiRoot.appendingPathComponent("Claude-3p/configLibrary")
+  try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+  try CLIJSON.encode(["deploymentMode": "3p"]).write(to: apiRoot.appendingPathComponent("Claude-3p/claude_desktop_config.json"))
+  for (manager, expected) in [(APIConfigurationInspector.magpieID, APIConfigurationStatus.magpie), (APIConfigurationInspector.ccSwitchID, .ccSwitch)] {
+   try CLIJSON.encode(["appliedId": manager, "entries": [["id": manager]]]).write(to: library.appendingPathComponent("_meta.json"))
+   try CLIJSON.encode(["inferenceProvider": "gateway"]).write(to: library.appendingPathComponent(manager + ".json"))
+   apiController.refreshScope()
+   require(apiController.desktopScope == .api && apiController.apiConfiguration == expected, "local refresh identifies changed API manager without saved guard config or credential reads")
+  }
 
   let demo = ProtectionController(demo: true)
   require(!demo.hasUnsavedChanges, "saved demo settings begin clean")

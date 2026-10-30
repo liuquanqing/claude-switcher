@@ -295,35 +295,6 @@ struct TerminalProtectionCard: View {
         return summary + "\n" + detail
     }
 
-    private var apiConfigurationTitle: String? {
-        switch controller.apiConfiguration {
-        case .subscription: return nil
-        case .magpie: return "配置匹配 Magpie"
-        case .ccSwitch: return "配置匹配 CC Switch"
-        case .unknownAPI, .unconfirmed: return "API 配置来源未确认"
-        case .conflict: return "API 配置来源有冲突"
-        }
-    }
-
-    private var apiManagerActionTitle: String? {
-        switch controller.apiConfiguration {
-        case .magpie: return "打开 Magpie ↗"
-        case .ccSwitch: return "打开 CC Switch ↗"
-        case .subscription, .unknownAPI, .conflict, .unconfirmed: return nil
-        }
-    }
-
-    private var apiConfigurationColor: Color {
-        switch controller.apiConfiguration {
-        case .unknownAPI, .conflict, .unconfirmed: return .warn
-        case .subscription, .magpie, .ccSwitch: return .sub
-        }
-    }
-
-    private var apiConfigurationHelp: String {
-        "来源仅按已生效的配置标记匹配，不代表管理器当前正在代理或网关健康。\n退出 API 接管请在原工具中完成；此处只在来源已确认时打开原管理器，不修改模型、密钥或模式。来源未确认或有冲突时不提供打开入口。"
-    }
-
     // MARK: Notices
 
     /// The live problem behind an exception title (guard offline / blocked), with its next step.
@@ -517,7 +488,9 @@ struct TerminalProtectionCard: View {
         if controller.working || !controller.enabled { return .sub }
         if !controller.guardOnline { return .warn }
         if controller.lastDecision.reason == .terminationFailed { return .bad }
-        if controller.desktopScope != .subscription || desktopPendingTakeover { return .warn }
+        // API is a normal mode the guard simply doesn't cover; only an unknown desktop is a warning.
+        if controller.desktopScope == .api { return .sub }
+        if controller.desktopScope == .unknown || desktopPendingTakeover { return .warn }
         if protectedDesktop { return .good }
         if !store.claudeRunning && controller.lastDecision.allowed { return .good }
         return .warn
@@ -529,7 +502,7 @@ struct TerminalProtectionCard: View {
         if !controller.enabled { return "保护未启用" }
         if !controller.guardOnline { return "保护状态待确认" }
         if controller.lastDecision.reason == .terminationFailed { return "急停失败" }
-        if controller.desktopScope == .api { return "API 桌面未纳入" }
+        if controller.desktopScope == .api { return "守护不适用" }
         if controller.desktopScope == .unknown { return "桌面范围待确认" }
         if desktopPendingTakeover { return "桌面未纳入" }
         if !controller.lastDecision.allowed { return "已拦截" }
@@ -545,7 +518,13 @@ struct TerminalProtectionCard: View {
         if !controller.enabled { return showSettings ? "在下方打开开关" : "点此设置并开启" }
         if !controller.guardOnline || controller.lastDecision.reason == .terminationFailed { return target }
         switch controller.desktopScope {
-        case .api: return "守卫只管订阅桌面"
+        case .api:
+            switch controller.apiConfiguration {
+            case .magpie: return "API · 来源 Magpie"
+            case .ccSwitch: return "API · 来源 CC Switch"
+            case .conflict: return "API · 来源有冲突"
+            case .subscription, .unknownAPI, .unconfirmed: return "API · 来源未确认"
+            }
         case .unknown: return "确认前不算受保护"
         case .subscription: break
         }
@@ -559,7 +538,8 @@ struct TerminalProtectionCard: View {
         if controller.working { return "arrow.triangle.2.circlepath" }
         if !controller.enabled { return "shield" }
         if !controller.guardOnline { return "exclamationmark.triangle.fill" }
-        if controller.desktopScope != .subscription || desktopPendingTakeover || !controller.lastDecision.allowed {
+        if controller.desktopScope == .api { return "shield" }
+        if controller.desktopScope == .unknown || desktopPendingTakeover || !controller.lastDecision.allowed {
             return "shield.lefthalf.filled"
         }
         return protectedDesktop ? "checkmark.shield.fill" : "shield"
@@ -786,30 +766,6 @@ struct TerminalProtectionCard: View {
                 .popover(isPresented: $showCheckHelp, arrowEdge: .bottom) { checkHelpContent }
             }
             checkResults
-            if let apiConfigurationTitle {
-                HStack(spacing: 6) {
-                    Text("API 工具").foregroundColor(.sub)
-                    Text(apiConfigurationTitle)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundColor(apiConfigurationColor)
-                        .lineLimit(1)
-                    Spacer(minLength: 8)
-                    if let apiManagerActionTitle {
-                        Button(apiManagerActionTitle) {
-                            Task { await store.openAPIManager() }
-                        }
-                        .buttonStyle(.plain)
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundColor(.claude)
-                        .disabled(busy || controller.working)
-                        .opacity(busy || controller.working ? 0.55 : 1)
-                        .help(apiConfigurationHelp)
-                    }
-                }
-                .font(.system(size: 9.5))
-                .padding(.top, 2)
-                .help(apiConfigurationHelp)
-            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

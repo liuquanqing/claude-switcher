@@ -13,9 +13,9 @@
 | 套件 | 运行方式 | 公开发布源码副本上的结果 |
 | --- | --- | --- |
 | Core（`SwitcherCoreTests`） | `swift test`（或 `./build.sh test`） | 176 项通过 |
-| 控制器检查（`scripts/fixtures/controller-check.swift`） | `bash scripts/test-controller.sh` | 106 项通过（其中 9 项是静默刷新新增的检查） |
+| 控制器检查（`scripts/fixtures/controller-check.swift`） | `bash scripts/test-controller.sh` | 118 项通过 |
 
-上表来自公开发布源码的本机复跑，Core 176 项、控制器 106 项均通过，release 构建和签名验证通过。云端 CI 结果以 Release 中链接的运行记录为准。`scripts/test-controller.sh` 需要本机装有 `python3`（源码枚举使用系统 Bash，不依赖 ripgrep），中间产物写在 `_qa/` 下。
+上表来自公开发布源码的本机复跑，Core 176 项、控制器 118 项均通过，release 构建和签名验证通过。云端 CI 结果以 Release 中链接的运行记录为准。`scripts/test-controller.sh` 需要本机装有 `python3`（源码枚举使用系统 Bash，不依赖 ripgrep），中间产物写在 `_qa/` 下。
 
 ## 已覆盖的功能边界
 
@@ -47,7 +47,7 @@
 **静默刷新**
 - 已用原生演示窗口检查后台进行中、首次未核验和 API 模式的显示，全部为虚构数据。
 - 桌面档案或模式变化会使旧结论失效；API 下单独核验身份不冒充桌面账号一致。
-- 打开面板时只读本地状态；结果完成后一次性发布；检查过程中不会先降级；手动检查放在 ⓘ 中，主卡片不增加核验按钮。
+- 打开面板时只读本地状态；结果完成后一次性发布；检查过程中不会先降级；当前源码将主动检查入口放在终端状态行旁，读取官方 CLI 本地报告；ⓘ 只保留范围说明和检查时间。
 
 ## 尚未验证
 
@@ -73,3 +73,5 @@
 ## 反馈
 
 发现问题时，请在 Issue 里附上 macOS 版本、芯片架构、App 版本和复现步骤。**请勿附上**真实令牌、Keychain 内容、账号目录或会话原文。
+
+当前 API/CLI 状态行为与授权限制见 [API-CLI-STATUS.md](API-CLI-STATUS.md)。

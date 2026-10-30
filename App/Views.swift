@@ -174,6 +174,66 @@ struct Header: View {
         .accessibilityHint(desktopHelp)
     }
 
+    // MARK: API / unknown desktop
+    //
+    // Outside subscription mode the header names the desktop mode and the recognised source instead of
+    // a saved profile's identity. The only action is the existing `store.openAPIManager()` for a
+    // confirmed manager; an unconfirmed source gets no action and never falls back to opening Claude.
+
+    private var subscriptionDesktop: Bool { protection.desktopScope == .subscription }
+
+    private var sourceName: String? {
+        switch protection.apiConfiguration {
+        case .magpie: return "Magpie"
+        case .ccSwitch: return "CC Switch"
+        case .subscription, .unknownAPI, .conflict, .unconfirmed: return nil
+        }
+    }
+
+    private var modeTitle: String { protection.desktopScope == .api ? "API 模式" : "桌面模式待确认" }
+
+    private var sourceTag: String {
+        if protection.desktopScope != .api { return "未识别" }
+        switch protection.apiConfiguration {
+        case .magpie, .ccSwitch: return "来源 \(sourceName ?? "")"
+        case .conflict: return "来源有冲突"
+        case .subscription, .unknownAPI, .unconfirmed: return "来源未确认"
+        }
+    }
+
+    private var modeDetail: String {
+        guard protection.desktopScope == .api else { return "无法确认桌面配置" }
+        if let sourceName { return "已识别配置由 \(sourceName) 管理" }
+        return protection.apiConfiguration == .conflict ? "配置来源有冲突" : "配置来源未确认"
+    }
+
+    private var managerHelp: String {
+        "打开原 API 管理器；此处不改模式、模型或密钥。" + (store.isDemo ? "\n演示状态。" : "")
+    }
+
+    @ViewBuilder private var managerControl: some View {
+        if let sourceName {
+            Button { Task { await store.openAPIManager() } } label: {
+                HStack(spacing: 5) {
+                    Text("打开 \(sourceName)").font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                    Image(systemName: "arrow.up.right").font(.system(size: 8.5, weight: .bold))
+                }
+                .foregroundColor(.claude)
+                .padding(.horizontal, 12).frame(height: 30)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(openHover ? 0.2 : 0.1)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.claude.opacity(0.26), lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .buttonStyle(.plain)
+            .disabled(controlLocked)
+            .opacity(controlLocked ? 0.45 : 1)
+            .help(managerHelp)
+            .onHover { openHover = $0 }
+            .accessibilityLabel("打开 \(sourceName)")
+            .accessibilityHint(managerHelp)
+        }
+    }
+
     // MARK: Body
 
     private var iconView: some View {
@@ -213,17 +273,28 @@ struct Header: View {
                     .frame(width: 200, alignment: .leading).padding(12)
                 }
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
-                    Text("当前账号").font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude.opacity(0.85))
-                        .fixedSize()
+                if subscriptionDesktop {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
+                        Text("当前账号").font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude.opacity(0.85))
+                            .fixedSize()
+                    }
+                    Text([accountLine(a), s?.plan]
+                        .compactMap { $0 }.joined(separator: "  ·  "))
+                        .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
+                } else {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(modeTitle).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
+                        Text(sourceTag).font(.system(size: 9.5, weight: .medium))
+                            .foregroundColor(sourceName == nil ? .warn : .claude.opacity(0.85))
+                            .lineLimit(1).fixedSize()
+                    }
+                    Text(modeDetail).font(.system(size: 10.5)).foregroundColor(.sub)
+                        .lineLimit(1).truncationMode(.middle)
                 }
-                Text([accountLine(a), s?.plan]
-                    .compactMap { $0 }.joined(separator: "  ·  "))
-                    .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 8)
-            desktopControl
+            if subscriptionDesktop { desktopControl } else { managerControl }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
@@ -258,16 +329,16 @@ struct TerminalStrip: View {
         f.dateStyle = .short
         f.timeStyle = .short
         f.doesRelativeDateFormatting = true
+        // The UI is Chinese-only; follow it rather than the system locale so "今天" never shows as "Today".
+        f.locale = Locale(identifier: "zh_Hans_CN")
         return f
     }()
 
-    /// When the last full check finished. Says nothing about whether it succeeded.
+    /// When the last check finished. Says nothing about whether it succeeded.
     private var checkedLine: String {
-        guard let date = store.cliStatusCheckedAt else {
-            return checking ? "首次检查进行中，完成后更新。" : "尚未完成过检查。"
-        }
-        let when = "最近一次检查完成于 \(Self.checkedFormatter.string(from: date))，以上为该次结论，不是实时状态。"
-        return checking ? when + "\n新的检查进行中，完成后更新。" : when
+        guard let date = store.cliStatusCheckedAt else { return checking ? "检查中…" : "尚未检查" }
+        let when = "最近检查：\(Self.checkedFormatter.string(from: date))"
+        return checking ? when + "（新检查进行中）" : when
     }
 
     /// Sync is only offered after a check found a difference, and only against a subscription
@@ -275,10 +346,7 @@ struct TerminalStrip: View {
     private var canSync: Bool { store.cliStatus == .different && protection.desktopScope == .subscription }
 
     private var checkHelp: String {
-        switch protection.desktopScope {
-        case .subscription: return "只读检查默认保存的 CLI 登录并与当前桌面比较；不会修改登录，也不检测已运行的 CLI 任务"
-        case .api, .unknown: return "只读检查默认保存的 CLI 订阅登录；当前桌面无订阅账号可比较，不会修改登录"
-        }
+        checking ? "检查进行中" : "立即检查默认配置的 CLI 登录：读取 CLI 的本地报告，只读，不修改登录"
     }
 
     /// Green needs a real comparison against a subscription desktop. A `matched` seen under another
@@ -300,14 +368,17 @@ struct TerminalStrip: View {
         case .otherAuthentication: return "其他认证配置"
         // A limit of this app's checker, not a terminal fault: neutral colour, no "unsupported" alarm.
         case .unsupportedStorage: return "暂未核验"
+        // Local report from the official CLI: not remote validation, not a desktop comparison.
+        case .reported: return "CLI 报告已登录"
+        case .refreshNeeded: return "待 CLI 刷新"
         }
     }
 
     private var statusColor: Color {
         switch store.cliStatus {
         case .matched: return matched ? .good : .sub
-        case .different, .otherAuthentication: return .warn
-        case .unverified, .needsLogin, .unsupportedStorage: return .sub
+        case .different, .otherAuthentication, .refreshNeeded: return .warn
+        case .unverified, .needsLogin, .unsupportedStorage, .reported: return .sub
         }
     }
 
@@ -319,9 +390,14 @@ struct TerminalStrip: View {
     private var detail: String {
         switch store.cliStatus {
         case .unverified:
-            if let accountDetail { return accountDetail }
-            if standaloneVerified { return "桌面无订阅账号可比较" }
-            return store.cliStatusCheckedAt == nil ? "尚未完成检查" : "上次检查未能核验，原因见 ⓘ"
+            // Identity only before any check or after an independent online verification; once a
+            // check has run and failed, the failure reason must not be hidden behind the account.
+            if standaloneVerified { return accountDetail ?? "桌面无订阅账号可比较" }
+            if store.cliStatusCheckedAt == nil { return accountDetail ?? "尚未检查" }
+            if let reason = store.cliStatusDetail, !reason.isEmpty { return reason }
+            return "上次检查未得到结果"
+        case .reported: return accountDetail ?? "CLI 本地报告：默认配置已登录"
+        case .refreshNeeded: return "保存的 token 待 CLI 自行刷新，不代表已退出登录"
         case .matched: return matched ? accountDetail ?? "与当前桌面账号一致" : "桌面不是订阅模式，待重新检查"
         case .different: return accountDetail ?? "默认登录账号待确认"
         case .needsLogin: return "未检测到订阅登录"
@@ -330,42 +406,24 @@ struct TerminalStrip: View {
         }
     }
 
-    private var scopeHelp: String {
+    /// One boundary sentence per state. The row already shows the result; this only says what it is
+    /// not. API-mode CLI settings are independent and never covered here.
+    private var detailHelp: String {
         switch store.cliStatus {
-        case .unverified:
-            if standaloneVerified {
-                return "当前桌面为 API 或模式未知，没有可比较的订阅账号；这不表示与桌面一致。"
-            }
-            return "尚未核验切换器默认保存的 CLI 登录，不据此推断其他终端状态。"
-        case .matched:
-            guard matched else { return "当前桌面不是订阅模式，上次比较不再适用；请重新检查。" }
-            return "默认保存的 CLI 登录已核验，且与当前桌面账号一致。"
-        case .different:
-            if protection.desktopScope != .subscription {
-                return "默认保存的 CLI 登录与桌面状态不同；当前桌面不是订阅账号，无可同步目标。"
-            }
-            return "默认保存的 CLI 登录与当前桌面账号不同；可点“同步”，同步只处理订阅 OAuth，不改 API key、环境变量或 provider。"
-        case .needsLogin:
-            return "默认保存的 CLI 订阅登录需要登录；API 与 provider 配置保持原样。"
-        case .otherAuthentication:
-            return "检测到其他认证配置，可能覆盖订阅。"
-        case .unsupportedStorage:
-            return "仅支持默认位置的钥匙串或凭据文件；自定义目录等保存方式暂未适配，未核验也未同步。不表示终端有问题，无需重新登录。"
+        case .reported:
+            return "来自 CLI 的本地报告，非在线验证，也未与桌面比较；不代表已运行的终端。"
+        case .refreshNeeded:
+            return "来自对保存 token 的检查，非在线验证；不代表已退出登录，也不代表已运行的终端。"
+        case .matched, .different:
+            return "仅针对默认保存的登录，不代表已运行的终端。"
+        case .unverified where standaloneVerified:
+            return "桌面无订阅账号可比较，不表示与桌面一致；不代表已运行的终端。"
+        default:
+            return "仅针对默认保存的登录，不代表已运行的终端；API 配置不受影响。"
         }
     }
 
-    /// Popover text: the row already shows `detail`, so only add the backend note and the
-    /// scope once, then a single short disclaimer.
-    private var detailHelp: String {
-        var lines = [store.cliStatusDetail, scopeHelp].compactMap { $0 }.filter { !$0.isEmpty }
-        var seen = Set<String>()
-        lines = lines.filter { seen.insert($0).inserted }
-        lines.append("仅针对默认保存的登录，不代表已运行的 CLI 任务，也不保护 CLI 进程。")
-        return lines.joined(separator: "\n")
-    }
-
-    /// The only inline action is the sync remedy. Checking runs in the background (and from the
-    /// footer refresh); a manual check lives in the info popover, so no state grows a button row.
+    /// The only inline action row is the sync remedy. The check is a compact icon on the title row.
     private var showsActions: Bool { canSync }
 
     var body: some View {
@@ -383,40 +441,34 @@ struct TerminalStrip: View {
                         Text(status).font(.system(size: 10, weight: .medium))
                             .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
                         Spacer(minLength: 0)
+                        // Single check entry. Same frame idle and busy, so the row never shifts.
+                        Button { Task { await store.verifyDefaultCLI() } } label: {
+                            ZStack {
+                                Image(systemName: "arrow.clockwise").font(.system(size: 10.5, weight: .semibold))
+                                    .opacity(checking ? 0 : 1)
+                                if checking { ProgressView().controlSize(.mini) }
+                            }
+                            .foregroundColor(.sub).frame(width: 24, height: 24).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(controlsLocked || checking)
+                        .opacity(controlsLocked && !checking ? 0.45 : 1)
+                        .help(checkHelp)
+                        .accessibilityLabel(checking ? "正在检查终端登录" : "立即检查终端登录")
                         Button { showHelp.toggle() } label: {
                             Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
-                                .frame(width: 20, height: 16).contentShape(Rectangle())
+                                .frame(width: 24, height: 24).contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                         .help("查看这项状态的说明")
                         .accessibilityLabel("终端登录状态说明")
                         .popover(isPresented: $showHelp, arrowEdge: .bottom) {
-                            VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 6) {
                                 Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
                                     .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                                 Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
-                                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                                Divider().opacity(0.6)
-                                HStack(spacing: 8) {
-                                    Text("后台会定期检查，底部刷新也会检查。").font(.system(size: 10)).foregroundColor(.sub)
-                                    Spacer(minLength: 4)
-                                    Button {
-                                        showHelp = false
-                                        Task { await store.verifyDefaultCLI() }
-                                    } label: {
-                                        Text(checking ? "检查中…" : "立即检查").font(.system(size: 10.5, weight: .medium))
-                                            .padding(.horizontal, 10).frame(height: 24)
-                                            .foregroundColor(.txt)
-                                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.08)))
-                                            .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(controlsLocked || checking)
-                                    .opacity(controlsLocked || checking ? 0.45 : 1)
-                                    .help(checkHelp)
-                                }
                             }
-                            .frame(width: 280, alignment: .leading).padding(12)
+                            .frame(width: 260, alignment: .leading).padding(12)
                         }
                     }
                     Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
@@ -499,6 +551,9 @@ struct UsageMetric: View {
 struct ProfileCard: View {
     let p: Profile
     let active: Bool
+    /// The last-used saved profile while the desktop is API / unknown: kept in place but not marked
+    /// current, since it says nothing about the identity the desktop is actually using.
+    var savedOnly = false
     let busy: Bool
     let onSwitch: () -> Void
     @State private var hover = false
@@ -582,6 +637,11 @@ struct ProfileCard: View {
                     .help("正在使用的账号")
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("当前账号")
+                } else if savedOnly {
+                    Text("已保存").font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
+                        .padding(.vertical, 4)
+                        .help("保存的订阅档案，不代表桌面当前使用的 API 身份")
+                        .accessibilityLabel("已保存的订阅档案，非当前身份")
                 } else {
                     Button(action: onSwitch) {
                         Pill(text: "切换", fg: .txt, bg: hover ? Color(hex: 0x45423C) : .stroke)
@@ -794,7 +854,10 @@ struct Panel: View {
     private var accountGrid: some View {
         LazyVGrid(columns: cols, spacing: 10) {
             ForEach(store.profiles) { p in
-                ProfileCard(p: p, active: p.name == store.current, busy: store.busy != nil || store.refreshing) {
+                let isSaved = p.name == store.current
+                let subscription = protection.desktopScope == .subscription
+                ProfileCard(p: p, active: isSaved && subscription, savedOnly: isSaved && !subscription,
+                            busy: store.busy != nil || store.refreshing) {
                     Task { await store.switchTo(p.name) }
                 }
             }
