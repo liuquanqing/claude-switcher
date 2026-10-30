@@ -267,6 +267,10 @@ final class Store: ObservableObject {
             cliStatusDetail = "保存凭据待 CLI 刷新；不代表终端已退出登录。"
             cliStatusCheckedAt = Date()
         }
+        if Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIMetadata") as? Bool == true {
+            cliStatus = .unverified; cliStandaloneVerified = false
+            cliStatusDetail = nil; cliStatusCheckedAt = nil
+        }
         // Model an externally changed terminal login only when explicitly requested for QA.
         if CommandLine.arguments.contains("--demo-cli-mismatch") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIMismatch") as? Bool == true {
             cliProfile = "Business"

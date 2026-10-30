@@ -446,6 +446,14 @@ actor FixtureGuardWorker: GuardWorking {
   require(quietStore.cliStandaloneVerified && quietStore.cliStatus != .matched, "verified standalone CLI identity is distinct from a desktop match")
   quietStore.invalidateCLIStatus()
   require(!quietStore.cliStandaloneVerified && quietStore.cliEmail == nil, "context invalidation clears standalone verification as well as identity")
+  await quietStore.updateCLIStatus {
+   CLIStatusPresentation(status: .unverified, profile: "Personal", email: "saved@example.test", metadataOnly: true)
+  }
+  require(quietStore.cliStatusCheckedAt == nil && quietStore.cliStatusDetail == nil && quietStore.cliEmail == "saved@example.test", "saved metadata is shown without claiming a completed or failed check")
+  await quietStore.updateCLIStatus {
+   CLIStatusPresentation(status: .unverified, email: "saved@example.test", detail: "fixture status query failed")
+  }
+  require(quietStore.cliStatusCheckedAt != nil && quietStore.cliStatusDetail == "fixture status query failed", "real failed check retains its result even when a saved email exists")
   let passiveStore = Store(demo: true), passiveTime = Date()
   passiveStore.lastRefresh = passiveTime
   for _ in 0..<3 { passiveStore.panelWillOpen() }

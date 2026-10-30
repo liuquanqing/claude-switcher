@@ -13,9 +13,9 @@
 | 套件 | 运行方式 | 公开发布源码副本上的结果 |
 | --- | --- | --- |
 | Core（`SwitcherCoreTests`） | `swift test`（或 `./build.sh test`） | 176 项通过 |
-| 控制器检查（`scripts/fixtures/controller-check.swift`） | `bash scripts/test-controller.sh` | 118 项通过 |
+| 控制器检查（`scripts/fixtures/controller-check.swift`） | `bash scripts/test-controller.sh` | 120 项通过 |
 
-上表来自公开发布源码的本机复跑，Core 176 项、控制器 118 项均通过，release 构建和签名验证通过。云端 CI 结果以 Release 中链接的运行记录为准。`scripts/test-controller.sh` 需要本机装有 `python3`（源码枚举使用系统 Bash，不依赖 ripgrep），中间产物写在 `_qa/` 下。
+上表来自公开发布源码的本机复跑，Core 176 项、控制器 120 项均通过，release 构建和签名验证通过。云端 CI 结果以 Release 中链接的运行记录为准。`scripts/test-controller.sh` 需要本机装有 `python3`（源码枚举使用系统 Bash，不依赖 ripgrep），中间产物写在 `_qa/` 下。
 
 ## 已覆盖的功能边界
 

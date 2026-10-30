@@ -396,8 +396,8 @@ struct TerminalStrip: View {
             if store.cliStatusCheckedAt == nil { return accountDetail ?? "尚未检查" }
             if let reason = store.cliStatusDetail, !reason.isEmpty { return reason }
             return "上次检查未得到结果"
-        case .reported: return accountDetail ?? "CLI 本地报告：默认配置已登录"
-        case .refreshNeeded: return "保存的 token 待 CLI 自行刷新，不代表已退出登录"
+        case .reported: return accountDetail ?? "来自 CLI 的本地登录报告"
+        case .refreshNeeded: return "保存的登录凭据待 CLI 自行刷新"
         case .matched: return matched ? accountDetail ?? "与当前桌面账号一致" : "桌面不是订阅模式，待重新检查"
         case .different: return accountDetail ?? "默认登录账号待确认"
         case .needsLogin: return "未检测到订阅登录"
@@ -436,49 +436,54 @@ struct TerminalStrip: View {
             VStack(alignment: .leading, spacing: 5) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("终端 OAuth").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+                        Text("CLI 默认登录").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                         Text(status).font(.system(size: 10, weight: .medium))
                             .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
-                        Spacer(minLength: 0)
-                        // Single check entry. Same frame idle and busy, so the row never shifts.
-                        Button { Task { await store.verifyDefaultCLI() } } label: {
-                            ZStack {
-                                Image(systemName: "arrow.clockwise").font(.system(size: 10.5, weight: .semibold))
-                                    .opacity(checking ? 0 : 1)
-                                if checking { ProgressView().controlSize(.mini) }
+                        Spacer(minLength: 4)
+                        HStack(spacing: 2) {
+                            // Single check entry. Same frame idle and busy, so the row never shifts.
+                            Button { Task { await store.verifyDefaultCLI() } } label: {
+                                ZStack {
+                                    Image(systemName: "arrow.clockwise").font(.system(size: 10.5, weight: .semibold))
+                                        .opacity(checking ? 0 : 1)
+                                    if checking { ProgressView().controlSize(.mini) }
+                                }
+                                .foregroundColor(.sub).frame(width: 22, height: 22).contentShape(Rectangle())
                             }
-                            .foregroundColor(.sub).frame(width: 24, height: 24).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(controlsLocked || checking)
-                        .opacity(controlsLocked && !checking ? 0.45 : 1)
-                        .help(checkHelp)
-                        .accessibilityLabel(checking ? "正在检查终端登录" : "立即检查终端登录")
-                        Button { showHelp.toggle() } label: {
-                            Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
-                                .frame(width: 24, height: 24).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help("查看这项状态的说明")
-                        .accessibilityLabel("终端登录状态说明")
-                        .popover(isPresented: $showHelp, arrowEdge: .bottom) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(detailHelp).font(.system(size: 10.5)).foregroundColor(.txt)
-                                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                                Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
+                            .buttonStyle(.plain)
+                            .disabled(controlsLocked || checking)
+                            .opacity(controlsLocked && !checking ? 0.45 : 1)
+                            .help(checkHelp)
+                            .accessibilityLabel(checking ? "正在检查终端登录" : "立即检查终端登录")
+                            Button { showHelp.toggle() } label: {
+                                Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
+                                    .frame(width: 22, height: 22).contentShape(Rectangle())
                             }
-                            .frame(width: 260, alignment: .leading).padding(12)
+                            .buttonStyle(.plain)
+                            .help("查看这项状态的说明")
+                            .accessibilityLabel("终端登录状态说明")
+                            .popover(isPresented: $showHelp, arrowEdge: .bottom) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text(detail).font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
+                                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                                    Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
+                                }
+                                .frame(width: 260, alignment: .leading).padding(12)
+                            }
                         }
                     }
+                    .frame(height: 22)
                     Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
-                        .lineLimit(1).truncationMode(.middle).help(detailHelp)
+                        .lineLimit(1).truncationMode(.middle).help(detail)
                         .accessibilityHint(detailHelp)
                 }
                 if showsActions { actions }
             }
         }
-        .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
+        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         // Dialog and alert live on the container, not on the sync button, so a refresh that hides
         // the button mid-dialog can't swallow the "state changed" notice.

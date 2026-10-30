@@ -8,6 +8,8 @@ struct CLIStatusPresentation: Equatable, Sendable {
     var email: String?
     var detail: String?
     var standaloneVerified = false
+    /// Saved identity metadata alone is not a completed login check.
+    var metadataOnly = false
 }
 
 /// Only interprets the official CLI's local report. No token, Keychain or network
