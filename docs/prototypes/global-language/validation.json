@@ -1,0 +1,68 @@
+{
+  "baseCommit": "b00e9d3dedaac99375b86251efe08f243463c087",
+  "author": "Kimi CLI 2.3.0; configured default model",
+  "sessionID": "session_f1c85e80-b422-4a9b-b4f5-49c6648d0f4e",
+  "coreTests": 176,
+  "controllerChecks": 133,
+  "releaseBuildAndAdHocSignature": "passed",
+  "translationAudit": {
+    "App/AppLocalization.swift": {
+      "pairedKeys": 266,
+      "placeholdersMatch": true
+    },
+    "App/SessionTransferLocalization.swift": {
+      "pairedKeys": 75,
+      "placeholdersMatch": true
+    }
+  },
+  "nativeDemoChecks": [
+    "two-option language menu without header",
+    "English to Chinese and back updates home, footer, titles and menu",
+    "existing import window follows language and retains search",
+    "English mixed select/all and update confirmation cancellation",
+    "one add plus one update using fictional sessions",
+    "English backup preview and undo restores two fictional sessions",
+    "return to accounts",
+    "English protection settings, simulated diagnostics and help"
+  ],
+  "layout": {
+    "panelWidthPoints": 500,
+    "importWidthPoints": 680,
+    "review": "Chinese and English screenshots checked; no clipped primary controls in reviewed states"
+  },
+  "realAccountsOrConversationsUsed": false,
+  "liveNetworkFaultTest": false,
+  "installedAppUpdated": false,
+  "guardServiceChanged": false,
+  "demoProcessClosed": true,
+  "limits": [
+    "unmapped underlying CLI/system diagnostics remain original",
+    "raw user session titles, profile names and paths are not translated",
+    "no production install or new release in this task"
+  ],
+  "implementationSHA256": {
+    "App/APIManagement.swift": "171b408caf492532889b87c43f97b852da712a3be0ca03d73bdfa96349c7a6c8",
+    "App/AppLocalization.swift": "b25a993b906b1bebd830d44954f832c5a804d9b1b3117b6865f9e9f4eb569b81",
+    "App/ApplicationMenus.swift": "a81952ffdc6474ae2f17b10e929fe108c75ba2b07689c52db3def52ed255b0c2",
+    "App/CLILoginController.swift": "ed244870933134cb529f488d4ea89da2b846dd217677a16c440981f4e80353e1",
+    "App/CLIStatusPresentation.swift": "6f60200dcb89582abde89ca7a32d170ef3861594f65ffc95257b9f905d6f704a",
+    "App/CLIStatusReader.swift": "bee69e846875ef52ac1dd11acd213baca1ee1ed25caaf72d227c63a6f98f559d",
+    "App/DesktopLifecycle.swift": "6b5cd248bd2c1ba99539be81255b1b7168c6e22814e07aefe815d79c1bab996e",
+    "App/DesktopOnlySwitch.swift": "3c01c3da5f7822f720092d71c2604279d9324b1d24ea6235202ca3b583aabb3a",
+    "App/DesktopTokenReader.swift": "d62c01de44400093c6b0f1d9fa62838ecfee704799ca4c56970580dad5f85dbd",
+    "App/GuardWorker.swift": "b8a9c9eeda76280b26765a7795db6ee24de1ec840e5e05fb50eba76c7f6597f2",
+    "App/KeychainReadAccess.swift": "133fa09083fb26c976dc4b833fb0b8a637bc172479192cb8858f4bc35252f654",
+    "App/ManagedDesktop.swift": "b8c34a2ea3844d05c491fb3950ec9fe60353bc18574025ad3015a691378d7645",
+    "App/NativeCLIStorage.swift": "571de852e5668960cbcd90436c906551976e2c805698b3bfafb8cd2f70f4bccd",
+    "App/PanelPresentation.swift": "f27a406b9063e52510e07aceb39dfba04ca6e923ea07f4266e86975be7f32eb9",
+    "App/Protection.swift": "b110e36ec084bd531bf037cd0fbcaa191edb8c770b66ff7f2b80f704e47528de",
+    "App/ProtectionView.swift": "94e4511af2f2230810c2e625930295f1c135f2059e535b07ca8aac5fd18857b0",
+    "App/SessionTransferController.swift": "a556555775b01fa0a005e31f6332948186b3781b7122289622cb0f0d38c24dbd",
+    "App/SessionTransferDemo.swift": "21376a480e9c63b0cc8231389ef40725f293fa9b93968ab4a2fefd3d8bfb3fe7",
+    "App/SessionTransferLocalization.swift": "d571f34f23393d46fbdbbbff01fd4aa24e8b2e6eb785456761e876a1b065398d",
+    "App/SessionTransferView.swift": "376a743270a6c12bcb532db6f56dcce0573287a2a496b8b8654369f3abbba7f8",
+    "App/Views.swift": "292b14cba8317849b414621b93e2fe86232e2c2ac0273c713bd66d8e106fb30f",
+    "App/main.swift": "de0eb71626f6714b4cf15eac79b219dfa11e9011e1c316f195e922575a232ea8"
+  },
+  "controllerFixtureSHA256": "bae67df996ecf1eed31f1c074ef7ee57aed3b0e5ecad4bf52aac74648b9c170d"
+}

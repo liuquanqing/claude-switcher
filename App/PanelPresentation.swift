@@ -20,6 +20,7 @@ struct PanelViewport: View {
     var body: some View {
         ScrollView {
             Panel(store: store)
+                .environment(\.appLanguage, store.appLanguage)
                 .fixedSize(horizontal: false, vertical: true)
                 .background {
                     GeometryReader { geometry in

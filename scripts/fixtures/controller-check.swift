@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import AppKit
 import Security
 import LocalAuthentication
 import SwitcherCore
@@ -409,11 +410,60 @@ actor FixtureGuardWorker: GuardWorking {
   require(!usageProfile.signedIn && usageProfile.usageState == .notRequested, "confirmed absence of login terminates loading")
   let languageStore = Store(demo: true)
   let languageController = SessionTransferController(store: languageStore, testEnvironment: selectionFixture.0)
-  require(languageStore.importLanguage == "zh" && languageController.language == "zh", "demo language is isolated and starts in Chinese")
-  languageStore.setImportLanguage("en")
-  require(languageController.language == "en", "main preferences propagate to an existing import controller")
-  languageStore.setImportLanguage("invalid")
-  require(languageStore.importLanguage == "en" && languageController.language == "en", "invalid language cannot replace the active preference")
+  require(languageStore.appLanguage == "zh" && languageController.language == "zh", "demo language is isolated and starts in Chinese")
+  let languageProfile = languageStore.current
+  let languageAccounts = languageStore.profiles.map(\.name)
+  let languageCLIStatus = languageStore.cliStatus
+  let languageGuardDecision = languageStore.protection.lastDecision
+  languageStore.protection.country = "JP"
+  languageController.query = "fixture search query"
+  var languageChanges = 0
+  languageStore.onLanguageChange = { languageChanges += 1 }
+  languageStore.setAppLanguage("en")
+  require(languageStore.appLanguage == "en" && languageController.language == "en", "application language propagates to an already-open import controller")
+  languageStore.setAppLanguage("en")
+  languageStore.setAppLanguage("invalid")
+  require(languageStore.appLanguage == "en" && languageController.language == "en" && languageChanges == 1, "invalid or repeated language cannot replace preference or publish an extra change")
+  languageStore.setAppLanguage("zh")
+  require(languageController.language == "zh" && languageChanges == 2, "an existing import window follows language changes in both directions")
+  require(languageStore.current == languageProfile && languageStore.profiles.map(\.name) == languageAccounts
+          && languageStore.cliStatus == languageCLIStatus && languageStore.protection.lastDecision == languageGuardDecision,
+          "language selection does not change account, CLI observation or guard decision")
+  require(languageStore.protection.country == "JP" && languageStore.protection.activeCountry == "SG"
+          && languageStore.protection.hasUnsavedChanges && languageController.query == "fixture search query",
+          "language changes retain unsaved protection input and the open import window's search")
+  let languageSuite = "dev.claudeswitcher.fixture.language." + UUID().uuidString
+  let languageDefaults = UserDefaults(suiteName: languageSuite)!
+  defer { languageDefaults.removePersistentDomain(forName: languageSuite) }
+  require(Store.loadApplicationLanguage(from: languageDefaults) == "zh", "a new isolated preference store starts in Chinese")
+  languageDefaults.removeObject(forKey: "applicationLanguage")
+  languageDefaults.set("en", forKey: "importInterfaceLanguage")
+  require(Store.loadApplicationLanguage(from: languageDefaults) == "en"
+          && languageDefaults.string(forKey: "applicationLanguage") == "en"
+          && languageDefaults.object(forKey: "importInterfaceLanguage") == nil,
+          "legacy import preference migrates in isolated defaults without constructing a live Store")
+  let reopenedDefaults = UserDefaults(suiteName: languageSuite)!
+  require(Store.loadApplicationLanguage(from: reopenedDefaults) == "en", "the persisted application preference survives a new defaults instance")
+  languageDefaults.set("zh", forKey: "applicationLanguage")
+  languageDefaults.set("en", forKey: "importInterfaceLanguage")
+  require(Store.loadApplicationLanguage(from: languageDefaults) == "zh", "application preference takes precedence over the legacy import key")
+  languageDefaults.set("unsupported", forKey: "applicationLanguage")
+  require(Store.loadApplicationLanguage(from: languageDefaults) == "zh", "unsupported persisted language has a supported display fallback")
+  let languageDecision = SafetyDecision(.countryMismatch, expected: "SG", observed: "JP")
+  let englishDecision = AppLocalization.decision(languageDecision, language: "en")
+  require(englishDecision.contains("SG") && englishDecision.contains("JP") && !languageDecision.allowed
+          && englishDecision.range(of: "[\\u4e00-\\u9fff]", options: .regularExpression) == nil,
+          "translated safety details retain observed and target countries without changing the verdict")
+  let rawDiagnostic = "/fixture/客户甲 --receipt fixture-receipt-123"
+  require(AppLocalization.message(rawDiagnostic, language: "en") == rawDiagnostic, "unknown diagnostics and user paths are never auto-translated")
+  let localizedFailure = AppLocalization.message("打开 Claude 失败：" + rawDiagnostic, language: "en")
+  require(!localizedFailure.hasPrefix("打开 Claude 失败：") && localizedFailure.hasSuffix(rawDiagnostic),
+          "known application error prefixes translate without modifying the raw diagnostic suffix")
+  let englishMenu = NSMenu()
+  ApplicationMenus.addEditMenu(to: englishMenu, language: "en")
+  require(englishMenu.items.first?.title == "Edit"
+          && englishMenu.items.first?.submenu?.items.first(where: { $0.keyEquivalent == "v" })?.action == #selector(NSText.paste(_:)),
+          "English edit menu retains standard paste keyboard behavior")
   let probeHome = root.appendingPathComponent("cli-report-home")
   let probeExecutable = probeHome.appendingPathComponent(".local/bin/claude")
   try FileManager.default.createDirectory(at: probeExecutable.deletingLastPathComponent(), withIntermediateDirectories: true)

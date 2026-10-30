@@ -199,13 +199,15 @@ final class Store: ObservableObject {
     var cliStatusGeneration = 0
     var cliScopeObservation: AnyCancellable?
     @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?
-    @Published private(set) var importLanguage = "zh"
-    func setImportLanguage(_ value: String) {
-        guard ["zh", "en"].contains(value), value != importLanguage else { return }
-        importLanguage = value
-        if !isDemo { UserDefaults.standard.set(value, forKey: "importInterfaceLanguage") }
+    @Published private(set) var appLanguage = AppLocalization.defaultLanguage
+    func setAppLanguage(_ value: String) {
+        guard ["zh", "en"].contains(value), value != appLanguage else { return }
+        appLanguage = value
+        if !isDemo { UserDefaults.standard.set(value, forKey: "applicationLanguage") }
+        onLanguageChange?()
     }
     var onChange: (() -> Void)?
+    var onLanguageChange: (() -> Void)?
     var onShowAccounts: (() -> Void)?
     func returnToAccounts() { onShowAccounts?() }
     let protection: ProtectionController
@@ -218,6 +220,7 @@ final class Store: ObservableObject {
     init(demo: Bool) {
         isDemo = true
         protection = ProtectionController(demo: true)
+        appLanguage = AppLocalization.normalized(Bundle.main.object(forInfoDictionaryKey: "CSPreviewLanguage") as? String ?? "zh")
         let now = Date()
         func snap(_ email: String, _ plan: String, _ s: Double, _ sh: Double, _ w: Double, _ wh: Double) -> Snapshot {
             Snapshot(email: email, name: nil, plan: plan,
@@ -299,12 +302,22 @@ final class Store: ObservableObject {
         openAtLogin = SMAppService.mainApp.status == .enabled
     }
 
+    nonisolated static func loadApplicationLanguage(from defaults: UserDefaults) -> String {
+        if let savedLanguage = defaults.string(forKey: "applicationLanguage") {
+            return AppLocalization.normalized(savedLanguage)
+        }
+        let legacyLanguage = defaults.string(forKey: "importInterfaceLanguage")
+        let language = AppLocalization.normalized(legacyLanguage ?? AppLocalization.defaultLanguage)
+        defaults.set(language, forKey: "applicationLanguage")
+        if legacyLanguage != nil { defaults.removeObject(forKey: "importInterfaceLanguage") }
+        return language
+    }
+
     init() {
         isDemo = false
         protection = ProtectionController()
         observeCLIStatusScope()
-        let savedLanguage = UserDefaults.standard.string(forKey: "importInterfaceLanguage") ?? "zh"
-        importLanguage = ["zh", "en"].contains(savedLanguage) ? savedLanguage : "zh"
+        appLanguage = Self.loadApplicationLanguage(from: .standard)
         openAtLogin = SMAppService.mainApp.status == .enabled
         try? fm.createDirectory(at: parkDir, withIntermediateDirectories: true)
         if !fm.fileExists(atPath: currentFile.path) {
@@ -531,11 +544,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var store: Store!
     var previewWindow: NSWindow?
     var previewContentHeight: CGFloat?
+    var previewNote: NSTextField?
+    var previewButton: NSButton?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         MainActor.assumeIsolated {
             store = demoMode ? Store(demo: true) : Store()
             store.onChange = { [weak self] in self?.updateTitle() }
+            store.onLanguageChange = { [weak self] in self?.updateLanguage() }
             store.onShowAccounts = { [weak self] in self?.showPanel() }
             popover.behavior = .transient
             popover.animates = true
@@ -548,16 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.button?.target = self
             item.button?.action = #selector(toggle)
             updateTitle()
-            let applicationMenu = NSMenu()
-            let rootItem = NSMenuItem()
-            applicationMenu.addItem(rootItem)
-            let commands = NSMenu()
-            commands.addItem(withTitle: "打开 Claude Switcher", action: #selector(showPanel), keyEquivalent: "o").target = self
-            commands.addItem(.separator())
-            commands.addItem(withTitle: "退出界面（保护状态不变）", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-            rootItem.submenu = commands
-            ApplicationMenus.addEditMenu(to: applicationMenu)
-            NSApp.mainMenu = applicationMenu
+            rebuildMainMenu()
             let transferPreview = demoMode && Bundle.main.object(forInfoDictionaryKey: "CSPreviewTransfer") as? Bool == true
             if transferPreview {
                 item.isVisible = false
@@ -569,7 +576,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let initialViewportHeight = max(1, (NSScreen.main?.visibleFrame.height ?? 800) * 0.75)
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 500, height: initialViewportHeight),
                                       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-                window.title = "Claude Switcher · 演示（不操作真实账号）"
+                window.title = appText("demo.windowTitle", language: store.appLanguage)
                 window.isReleasedWhenClosed = false
                 let contentRect = window.contentRect(forFrameRect: window.frame)
                 let decorationHeight = window.frame.height - contentRect.height
@@ -591,21 +598,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 item.isVisible = false
                 let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 104),
                                       styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-                window.title = "Claude Switcher · 弹层演示（假数据）"
+                window.title = appText("demo.popoverTitle", language: store.appLanguage)
                 window.isReleasedWhenClosed = false
                 window.appearance = NSAppearance(named: .darkAqua)
                 let content = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 104))
-                let note = NSTextField(labelWithString: "假数据演示，不操作真实账号")
+                let note = NSTextField(labelWithString: appText("demo.note", language: store.appLanguage))
                 note.font = .systemFont(ofSize: 11)
                 note.textColor = .secondaryLabelColor
                 note.alignment = .center
                 note.frame = NSRect(x: 12, y: 66, width: 276, height: 18)
                 content.addSubview(note)
-                let button = NSButton(title: "打开菜单弹层", target: self, action: #selector(openPreviewPopover(_:)))
+                previewNote = note
+                let button = NSButton(title: appText("demo.openPopover", language: store.appLanguage), target: self, action: #selector(openPreviewPopover(_:)))
                 button.bezelStyle = .rounded
                 button.font = .systemFont(ofSize: 13, weight: .medium)
                 button.frame = NSRect(x: 60, y: 20, width: 180, height: 32)
                 content.addSubview(button)
+                previewButton = button
                 window.contentView = content
                 window.center()
                 if let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame {
@@ -618,6 +627,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.async { self.openPreviewPopover(button) }
             }
         }
+    }
+
+    @MainActor func rebuildMainMenu() {
+        let applicationMenu = NSMenu()
+        let rootItem = NSMenuItem()
+        applicationMenu.addItem(rootItem)
+        let commands = NSMenu()
+        commands.addItem(withTitle: appText("menu.open", language: store.appLanguage),
+                         action: #selector(showPanel), keyEquivalent: "o").target = self
+        commands.addItem(.separator())
+        commands.addItem(withTitle: appText("menu.quit", language: store.appLanguage),
+                         action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        rootItem.submenu = commands
+        ApplicationMenus.addEditMenu(to: applicationMenu, language: store.appLanguage)
+        NSApp.mainMenu = applicationMenu
+    }
+
+    @MainActor func updateLanguage() {
+        rebuildMainMenu()
+        if demoMode {
+            previewWindow?.title = appText(demoPopover ? "demo.popoverTitle" : "demo.windowTitle", language: store.appLanguage)
+            previewNote?.stringValue = appText("demo.note", language: store.appLanguage)
+            previewButton?.title = appText("demo.openPopover", language: store.appLanguage)
+        }
+        CopyWindow.updateTitle(store: store, language: store.appLanguage)
     }
 
     @MainActor func resizePreviewWindow(to contentHeight: CGFloat) {
@@ -729,7 +763,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--snapshot") {
         Task { @MainActor in
             let r = CommandLine.arguments.contains("--copy")
                 ? ImageRenderer(content: AnyView(CopyThreadsView(store: store).frame(width: 680, height: 580)))
-                : ImageRenderer(content: AnyView(Panel(store: store)))
+                : ImageRenderer(content: AnyView(Panel(store: store).environment(\.appLanguage, store.appLanguage)))
             r.scale = 2
             guard let cg = r.cgImage,
                   let data = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {

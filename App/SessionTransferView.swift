@@ -150,7 +150,7 @@ struct CopyThreadsView: View {
         case "选择或空间已变化，请重新复制。": return text("statusSelectionChanged")
         case "请先在相应账号或 API 工作区打开 Code 页，再重新检查。": return text("statusOpenCode")
         case "请选择不同的来源和目标空间。": return text("statusDifferentSpaces")
-        default: return status
+        default: return generated(status)
         }
     }
 
@@ -206,7 +206,7 @@ struct CopyThreadsView: View {
             }
 
             if let error = controller.errorMessage {
-                message(error, color: .bad)
+                message(generated(error), color: .bad)
             } else if let status = visibleStatusMessage {
                 message(status, color: .sub)
             }
@@ -269,7 +269,7 @@ struct CopyThreadsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .help(row.cwd)
                         if !row.selectable && row.kind == .blocked {
-                            Text(row.reason)
+                            Text(generated(row.reason))
                                 .font(.system(size: 11))
                                 .foregroundColor(Color.txt.opacity(0.72))
                                 .fixedSize(horizontal: false, vertical: true)
@@ -292,8 +292,8 @@ struct CopyThreadsView: View {
                 .padding(.vertical, 9)
                 .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.importAccent.opacity(0.22) : Color.clear))
                 .contentShape(Rectangle())
-                .help(row.reason)
-                .accessibilityHint(row.reason)
+                .help(generated(row.reason))
+                .accessibilityHint(generated(row.reason))
                 .onTapGesture {
                     guard row.selectable, !controller.isWorking else { return }
                     controller.setPicked(row.id, selected: !controller.picked.contains(row.id))
@@ -335,16 +335,18 @@ struct CopyThreadsView: View {
                 .buttonStyle(.link)
                 .font(.system(size: 12))
                 .foregroundColor(.sub)
+                .fixedSize()
                 .disabled(!controller.canExport || controller.isWorking)
                 Button(text("copy")) {
                     Task { await controller.copySelected() }
                 }
                 .buttonStyle(ImportProminentButtonStyle())
+                .fixedSize()
                 .disabled(!controller.canCopy || controller.isWorking)
             }
         }
         .padding(16)
-        .frame(minWidth: 620, minHeight: 520)
+        .frame(minWidth: 680, minHeight: 520)
         .background(Color.bg)
         .preferredColorScheme(.dark)
         .task { await controller.refresh() }
@@ -394,7 +396,8 @@ struct CopyThreadsView: View {
                   sequence == instructionCopySequence else { return }
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
-            guard pasteboard.setString(instructions, forType: .string),
+            let localized = SessionTransferLocalization.instructions(instructions, language: controller.language)
+            guard pasteboard.setString(localized, forType: .string),
                   sequence == instructionCopySequence else { return }
             instructionsCopied = true
             Task {
@@ -409,9 +412,15 @@ struct CopyThreadsView: View {
         SessionTransferLocalization.text(key, language: controller.language, arguments: arguments)
     }
 
+    private func generated(_ value: String) -> String {
+        SessionTransferLocalization.message(value, language: controller.language)
+    }
+
     private func picker(_ label: String, selection: Binding<String>, options: [TransferLocationOption]) -> some View {
         Picker(label, selection: selection) {
-            ForEach(options) { Text($0.name).tag($0.id) }
+            ForEach(options) { option in
+                Text(option.id == "api" ? text("apiWorkspace") : option.name).tag(option.id)
+            }
         }
         .frame(width: 210)
         .disabled(controller.isWorking)
@@ -420,7 +429,9 @@ struct CopyThreadsView: View {
     private func spacePicker(_ label: String, selection: Binding<String>, options: [TransferSpaceOption]) -> some View {
         Picker(label, selection: selection) {
             Text(text("chooseSpace")).tag("")
-            ForEach(options) { Text($0.name).tag($0.id) }
+            ForEach(options) { option in
+                Text(SessionTransferLocalization.spaceName(option.name, language: controller.language)).tag(option.id)
+            }
         }
         .frame(width: 210)
         .disabled(controller.isWorking)
@@ -455,7 +466,7 @@ struct CopyThreadsView: View {
         let items = operation.items
         switch operation.state {
         case .completed:
-            guard let first = items.first else { return (text("copyCompleted"), operation.summary, .good) }
+            guard let first = items.first else { return (text("copyCompleted"), generated(operation.summary), .good) }
             let key = items.count == 1 ? "copiedOne" : "copiedMany"
             return (text("copyCompleted"), text(key, arguments: ["title": first.title, "count": String(items.count)]), .good)
         case .undone:
@@ -464,13 +475,13 @@ struct CopyThreadsView: View {
             return (text("restored"), text("restoredSummary"), .good)
         case .preserved:
             if operation.summary.contains("备份缺失或无法核对") {
-                return (text("preserved"), operation.summary, .warn)
+                return (text("preserved"), generated(operation.summary), .warn)
             }
             return (text("preserved"), text("preservedSummary"), .warn)
         case .copying, .restoring, .recoveryRequired:
             return (text("recoveryRequired"), text("recoverySummary"), .bad)
         @unknown default:
-            return (operation.title, operation.summary, .sub)
+            return (generated(operation.title), generated(operation.summary), .sub)
         }
     }
 
@@ -537,7 +548,7 @@ struct CopyThreadsView: View {
         case "preserve":
             return (text("confirmPreserveTitle"), text("confirmPreserveBody"), text("confirmPreserveButton"), confirmation.items)
         default:
-            return (confirmation.title, confirmation.message, confirmation.buttonTitle, confirmation.items)
+            return (generated(confirmation.title), generated(confirmation.message), generated(confirmation.buttonTitle), confirmation.items)
         }
     }
 
@@ -587,7 +598,7 @@ struct CopyThreadsView: View {
         switch information {
         case "正在核对备份…": return text("backupChecking")
         case "备份已核对；只包含本次索引变更，不包含聊天原文。": return text("backupVerified")
-        default: return information
+        default: return generated(information)
         }
     }
 
@@ -621,7 +632,7 @@ struct CopyThreadsView: View {
                 .font(.system(size: 11))
                 .foregroundColor(.sub)
             ScrollView {
-                Text(controller.handoffInformation ?? "")
+                Text(SessionTransferLocalization.instructions(controller.handoffInformation ?? "", language: controller.language))
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.txt)
                     .textSelection(.enabled)
@@ -639,7 +650,7 @@ struct CopyThreadsView: View {
                     guard let information = controller.handoffInformation else { return }
                     let pasteboard = NSPasteboard.general
                     pasteboard.clearContents()
-                    pasteboard.setString(information, forType: .string)
+                    pasteboard.setString(SessionTransferLocalization.instructions(information, language: controller.language), forType: .string)
                     handoffCopied = true
                 }
                 .buttonStyle(ImportProminentButtonStyle())
@@ -735,7 +746,7 @@ enum CopyWindow {
                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
             w.appearance = NSAppearance(named: .darkAqua)
-            w.contentMinSize = NSSize(width: 620, height: 520)
+            w.contentMinSize = NSSize(width: 680, height: 520)
             window = w
             install(store: store, controller: controller, on: w)
             w.center()

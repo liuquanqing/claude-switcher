@@ -31,40 +31,43 @@ func levelColor(_ left: Double?) -> Color {
 func left(_ w: Window?) -> Double? { w.map { max(0, 100 - $0.used) } }
 func pct(_ v: Double?) -> String { v.map { String(Int($0.rounded())) } ?? "--" }
 
-func countdown(_ d: Date?) -> String {
-    guard let d else { return "重置时间未知" }
+func countdown(_ d: Date?, language: String) -> String {
+    guard let d else { return appText("format.resetUnknown", language: language) }
     let s = Int(d.timeIntervalSinceNow)
-    if s <= 0 { return "已到重置时间" }
+    if s <= 0 { return appText("format.resetDue", language: language) }
     let h = s / 3600, m = (s % 3600) / 60
-    if h > 0 { return "\(h) 小时 \(m) 分后重置" }
-    if m > 0 { return "\(m) 分钟后重置" }
-    return "1 分钟内重置"
+    if h > 0 {
+        return appText("format.resetHours", language: language,
+                       arguments: ["hours": String(h), "minutes": String(m)])
+    }
+    if m > 0 { return appText("format.resetMinutes", language: language, arguments: ["minutes": String(m)]) }
+    return appText("format.resetWithinMinute", language: language)
 }
 
-func weekdayTime(_ d: Date?) -> String {
+func weekdayTime(_ d: Date?, language: String) -> String {
     guard let d else { return "--" }
     let f = DateFormatter()
-    f.locale = Locale(identifier: "zh_CN")
+    f.locale = AppLocalization.locale(for: language)
     f.dateFormat = "E HH:mm"
     return f.string(from: d)
 }
 
-func ago(_ d: Date?) -> String {
-    guard let d else { return "尚未更新" }
+func ago(_ d: Date?, language: String) -> String {
+    guard let d else { return appText("format.notUpdated", language: language) }
     let s = max(0, Int(-d.timeIntervalSinceNow))
-    if s < 60 { return "刚刚" }
-    if s < 3600 { return "\(s / 60) 分钟前" }
-    if s < 86400 { return "\(s / 3600) 小时前" }
-    return "\(s / 86400) 天前"
+    if s < 60 { return appText("format.justNow", language: language) }
+    if s < 3600 { return appText("format.minutesAgo", language: language, arguments: ["count": String(s / 60)]) }
+    if s < 86400 { return appText("format.hoursAgo", language: language, arguments: ["count": String(s / 3600)]) }
+    return appText("format.daysAgo", language: language, arguments: ["count": String(s / 86400)])
 }
 
 /// Identity line for a profile. Loading wording only appears while a request is really running;
 /// otherwise a missing identity is just "no account info".
-func accountLine(_ p: Profile?) -> String? {
+func accountLine(_ p: Profile?, language: String) -> String? {
     guard let p else { return nil }
-    if !p.signedIn { return "尚未登录" }
+    if !p.signedIn { return appText("account.signedOut", language: language) }
     if let email = p.snapshot?.email { return email }
-    return p.usageState == .loading ? "正在读取账号信息…" : "暂无账号信息"
+    return appText(p.usageState == .loading ? "account.readingInfo" : "account.noInfo", language: language)
 }
 
 // MARK: - Views
@@ -94,6 +97,7 @@ struct Bar: View {
 struct Header: View {
     @ObservedObject var store: Store
     @ObservedObject var protection: ProtectionController
+    @Environment(\.appLanguage) private var language
     let openClaude: () -> Void
     @State private var openHover = false
     @State private var showAbout = false
@@ -108,9 +112,10 @@ struct Header: View {
         let short = info?["CFBundleShortVersionString"] as? String
         let build = info?["CFBundleVersion"] as? String
         switch (short, build) {
-        case (let s?, let b?) where s != b: return "版本 \(s)（\(b)）"
-        case (let s?, _): return "版本 \(s)"
-        case (nil, let b?): return "版本 \(b)"
+        case (let s?, let b?) where s != b:
+            return appText("account.versionBuild", language: language, arguments: ["version": s, "build": b])
+        case (let s?, _): return appText("account.version", language: language, arguments: ["version": s])
+        case (nil, let b?): return appText("account.version", language: language, arguments: ["version": b])
         default: return nil
         }
     }
@@ -118,26 +123,27 @@ struct Header: View {
     // MARK: Desktop control
     //
     // One control carries both the process state and the action. The action always goes through
-    // `openClaude` (Store.openProtectedClaude → network gate first); "显示" is only a label for the
-    // running case, never a shortcut around the gate or around the takeover confirmation.
+    // `openClaude` (Store.openProtectedClaude → network gate first); the running label is never a
+    // shortcut around the gate or around the takeover confirmation.
 
     private var running: Bool { store.claudeRunning }
     private var controlLocked: Bool { store.busy != nil || protection.working }
 
-    private var actionTitle: String { running ? "显示" : "打开" }
+    private var actionTitle: String { appText(running ? "desktop.show" : "desktop.open", language: language) }
     private var actionIcon: String { running ? "macwindow" : "play.fill" }
 
     private var desktopHelp: String {
         var lines: [String]
         if !running {
-            lines = ["先检查网络门禁，通过后打开 \(store.current)。"]
+            lines = [appText("desktop.openHelp", language: language, arguments: ["account": store.current])]
         } else if protection.desktopScope == .subscription && !protection.desktopManaged {
-            lines = ["先检查网络门禁；当前桌面尚未纳入保护，会提示先在保护卡片中确认纳入，不会自动接管或关闭。"]
+            lines = [appText("desktop.unmanagedHelp", language: language)]
         } else {
-            lines = ["先检查网络门禁，通过后把已纳入保护的桌面切到前台。"]
+            lines = [appText("desktop.showHelp", language: language)]
         }
-        if protection.desktopScope != .subscription { lines.append("当前桌面不是已确认的订阅配置，门禁会拦下。") }
-        lines.append((store.isDemo ? "演示状态。" : "") + "“运行中”只表示进程存在，不代表已登录、网络可用或已保护。")
+        if protection.desktopScope != .subscription { lines.append(appText("desktop.unsupportedHelp", language: language)) }
+        lines.append((store.isDemo ? appText("desktop.demo", language: language) : "")
+            + appText("desktop.runningMeaning", language: language))
         return lines.joined(separator: "\n")
     }
 
@@ -146,7 +152,7 @@ struct Header: View {
             HStack(spacing: 0) {
                 HStack(spacing: 5) {
                     Circle().fill(running ? Color.good : Color.sub.opacity(0.7)).frame(width: 6, height: 6)
-                    Text(running ? "桌面运行中" : "桌面未运行")
+                    Text(appText(running ? "desktop.running" : "desktop.stopped", language: language))
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundColor(running ? .txt : .sub)
                         .lineLimit(1).fixedSize()
@@ -170,7 +176,10 @@ struct Header: View {
         .opacity(controlLocked ? 0.45 : 1)
         .help(desktopHelp)
         .onHover { openHover = $0 }
-        .accessibilityLabel("Claude 桌面\(running ? "运行中" : "未运行")，\(actionTitle)")
+        .accessibilityLabel(appText("desktop.accessibility", language: language, arguments: [
+            "state": appText(running ? "desktop.running" : "desktop.stopped", language: language),
+            "action": actionTitle
+        ]))
         .accessibilityHint(desktopHelp)
     }
 
@@ -190,32 +199,37 @@ struct Header: View {
         }
     }
 
-    private var modeTitle: String { protection.desktopScope == .api ? "API 模式" : "桌面模式待确认" }
+    private var modeTitle: String {
+        appText(protection.desktopScope == .api ? "api.mode" : "api.unknownMode", language: language)
+    }
 
     private var sourceTag: String {
-        if protection.desktopScope != .api { return "未识别" }
+        if protection.desktopScope != .api { return appText("api.unrecognized", language: language) }
         switch protection.apiConfiguration {
-        case .magpie, .ccSwitch: return "来源 \(sourceName ?? "")"
-        case .conflict: return "来源有冲突"
-        case .subscription, .unknownAPI, .unconfirmed: return "来源未确认"
+        case .magpie, .ccSwitch:
+            return appText("api.source", language: language, arguments: ["source": sourceName ?? ""])
+        case .conflict: return appText("api.sourceConflict", language: language)
+        case .subscription, .unknownAPI, .unconfirmed: return appText("api.sourceUnconfirmed", language: language)
         }
     }
 
     private var modeDetail: String {
-        guard protection.desktopScope == .api else { return "无法确认桌面配置" }
-        if let sourceName { return "已识别配置由 \(sourceName) 管理" }
-        return protection.apiConfiguration == .conflict ? "配置来源有冲突" : "配置来源未确认"
+        guard protection.desktopScope == .api else { return appText("api.unknownDetail", language: language) }
+        if let sourceName { return appText("api.managedBy", language: language, arguments: ["source": sourceName]) }
+        return appText(protection.apiConfiguration == .conflict ? "api.sourceConflict" : "api.sourceUnconfirmed", language: language)
     }
 
     private var managerHelp: String {
-        "打开原 API 管理器；此处不改模式、模型或密钥。" + (store.isDemo ? "\n演示状态。" : "")
+        appText("api.managerHelp", language: language)
+            + (store.isDemo ? "\n" + appText("desktop.demo", language: language) : "")
     }
 
     @ViewBuilder private var managerControl: some View {
         if let sourceName {
             Button { Task { await store.openAPIManager() } } label: {
                 HStack(spacing: 5) {
-                    Text("打开 \(sourceName)").font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                    Text(appText("api.openManager", language: language, arguments: ["source": sourceName]))
+                        .font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
                     Image(systemName: "arrow.up.right").font(.system(size: 8.5, weight: .bold))
                 }
                 .foregroundColor(.claude)
@@ -229,7 +243,7 @@ struct Header: View {
             .opacity(controlLocked ? 0.45 : 1)
             .help(managerHelp)
             .onHover { openHover = $0 }
-            .accessibilityLabel("打开 \(sourceName)")
+            .accessibilityLabel(appText("api.openManager", language: language, arguments: ["source": sourceName]))
             .accessibilityHint(managerHelp)
         }
     }
@@ -261,14 +275,14 @@ struct Header: View {
             Button { showAbout.toggle() } label: { iconView.contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .help("Claude Switcher" + (versionText.map { " · \($0)" } ?? ""))
-                .accessibilityLabel("关于 Claude Switcher")
+                .accessibilityLabel(appText("account.about", language: language))
                 .popover(isPresented: $showAbout, arrowEdge: .bottom) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Claude Switcher").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
                         if let versionText {
                             Text(versionText).font(.system(size: 10, design: .monospaced)).foregroundColor(.sub)
                         }
-                        Text("多账号切换与订阅桌面保护").font(.system(size: 10.5)).foregroundColor(.sub)
+                        Text(appText("account.tagline", language: language)).font(.system(size: 10.5)).foregroundColor(.sub)
                     }
                     .frame(width: 200, alignment: .leading).padding(12)
                 }
@@ -276,10 +290,10 @@ struct Header: View {
                 if subscriptionDesktop {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
-                        Text("当前账号").font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude.opacity(0.85))
+                        Text(appText("account.current", language: language)).font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude.opacity(0.85))
                             .fixedSize()
                     }
-                    Text([accountLine(a), s?.plan]
+                    Text([accountLine(a, language: language), s?.plan]
                         .compactMap { $0 }.joined(separator: "  ·  "))
                         .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
                 } else {
@@ -305,6 +319,7 @@ struct Header: View {
 struct TerminalStrip: View {
     @ObservedObject var store: Store
     @ObservedObject private var protection: ProtectionController
+    @Environment(\.appLanguage) private var language
     @State private var hover = false
     @State private var showHelp = false
     @State private var confirmSync = false
@@ -318,36 +333,36 @@ struct TerminalStrip: View {
         self.protection = store.protection
     }
 
+    private func t(_ key: String, arguments: [String: String] = [:]) -> String {
+        appText(key, language: language, arguments: arguments)
+    }
+
+    private func generated(_ message: String) -> String {
+        if message == protection.lastDecision.message {
+            return AppLocalization.decision(protection.lastDecision, language: language)
+        }
+        return AppLocalization.message(message, language: language)
+    }
+
     private var controlsLocked: Bool { store.busy != nil || store.refreshing }
 
     /// A background check is in flight. The strip keeps showing the last finished result; only the
     /// info popover mentions the check, so periodic refreshes never reshape the card.
     private var checking: Bool { store.cliStatusRefreshing }
 
-    private static let checkedFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateStyle = .short
-        f.timeStyle = .short
-        f.doesRelativeDateFormatting = true
-        // The UI is Chinese-only; follow it rather than the system locale so "今天" never shows as "Today".
-        f.locale = Locale(identifier: "zh_Hans_CN")
-        return f
-    }()
-
     /// When the last check finished. Says nothing about whether it succeeded.
     private var checkedLine: String {
-        guard let date = store.cliStatusCheckedAt else { return checking ? "检查中…" : "尚未检查" }
-        let when = "最近检查：\(Self.checkedFormatter.string(from: date))"
-        return checking ? when + "（新检查进行中）" : when
+        guard let date = store.cliStatusCheckedAt else { return checking ? t("common.checking") : t("cli.notChecked") }
+        let value = AppLocalization.date(date, language: language, dateStyle: .short, timeStyle: .short, relative: true)
+        let when = t("cli.lastCheck", arguments: ["date": value])
+        return checking ? when + t("cli.newCheck") : when
     }
 
     /// Sync is only offered after a check found a difference, and only against a subscription
     /// desktop; API / unknown desktops have no subscription account to sync to.
     private var canSync: Bool { store.cliStatus == .different && protection.desktopScope == .subscription }
 
-    private var checkHelp: String {
-        checking ? "检查进行中" : "立即检查默认配置的 CLI 登录：读取 CLI 的本地报告，只读，不修改登录"
-    }
+    private var checkHelp: String { t(checking ? "cli.checkingHelp" : "cli.checkHelp") }
 
     /// Green needs a real comparison against a subscription desktop. A `matched` seen under another
     /// scope is stale (the backend invalidates on scope change) and is never shown as a match.
@@ -361,16 +376,16 @@ struct TerminalStrip: View {
 
     private var status: String {
         switch store.cliStatus {
-        case .unverified: return standaloneVerified ? "身份已核验" : "未核验"
-        case .matched: return matched ? "已与桌面一致" : "未核验"
-        case .different: return "与桌面不同"
-        case .needsLogin: return "需要登录"
-        case .otherAuthentication: return "其他认证配置"
+        case .unverified: return t(standaloneVerified ? "cli.identityVerified" : "cli.unverified")
+        case .matched: return t(matched ? "cli.matched" : "cli.unverified")
+        case .different: return t("cli.different")
+        case .needsLogin: return t("cli.needsLogin")
+        case .otherAuthentication: return t("cli.otherAuthentication")
         // A limit of this app's checker, not a terminal fault: neutral colour, no "unsupported" alarm.
-        case .unsupportedStorage: return "暂未核验"
+        case .unsupportedStorage: return t("cli.unsupported")
         // Local report from the official CLI: not remote validation, not a desktop comparison.
-        case .reported: return "CLI 报告已登录"
-        case .refreshNeeded: return "待 CLI 刷新"
+        case .reported: return t("cli.reported")
+        case .refreshNeeded: return t("cli.refreshNeeded")
         }
     }
 
@@ -392,17 +407,17 @@ struct TerminalStrip: View {
         case .unverified:
             // Identity only before any check or after an independent online verification; once a
             // check has run and failed, the failure reason must not be hidden behind the account.
-            if standaloneVerified { return accountDetail ?? "桌面无订阅账号可比较" }
-            if store.cliStatusCheckedAt == nil { return accountDetail ?? "尚未检查" }
-            if let reason = store.cliStatusDetail, !reason.isEmpty { return reason }
-            return "上次检查未得到结果"
-        case .reported: return accountDetail ?? "来自 CLI 的本地登录报告"
-        case .refreshNeeded: return "保存的登录凭据待 CLI 自行刷新"
-        case .matched: return matched ? accountDetail ?? "与当前桌面账号一致" : "桌面不是订阅模式，待重新检查"
-        case .different: return accountDetail ?? "默认登录账号待确认"
-        case .needsLogin: return "未检测到订阅登录"
-        case .otherAuthentication: return "可能覆盖订阅"
-        case .unsupportedStorage: return accountDetail ?? "切换器暂无法核验；不代表终端有问题"
+            if standaloneVerified { return accountDetail ?? t("cli.noDesktopComparison") }
+            if store.cliStatusCheckedAt == nil { return accountDetail ?? t("cli.notChecked") }
+            if let reason = store.cliStatusDetail, !reason.isEmpty { return generated(reason) }
+            return t("cli.noResult")
+        case .reported: return accountDetail ?? t("cli.localReport")
+        case .refreshNeeded: return t("cli.savedCredentials")
+        case .matched: return matched ? accountDetail ?? t("cli.matchesDesktop") : t("cli.recheckDesktop")
+        case .different: return accountDetail ?? t("cli.defaultAccountUnknown")
+        case .needsLogin: return t("cli.noSubscription")
+        case .otherAuthentication: return t("cli.mayOverride")
+        case .unsupportedStorage: return accountDetail ?? t("cli.checkerUnavailable")
         }
     }
 
@@ -410,16 +425,11 @@ struct TerminalStrip: View {
     /// not. API-mode CLI settings are independent and never covered here.
     private var detailHelp: String {
         switch store.cliStatus {
-        case .reported:
-            return "来自 CLI 的本地报告，非在线验证，也未与桌面比较；不代表已运行的终端。"
-        case .refreshNeeded:
-            return "来自对保存 token 的检查，非在线验证；不代表已退出登录，也不代表已运行的终端。"
-        case .matched, .different:
-            return "仅针对默认保存的登录，不代表已运行的终端。"
-        case .unverified where standaloneVerified:
-            return "桌面无订阅账号可比较，不表示与桌面一致；不代表已运行的终端。"
-        default:
-            return "仅针对默认保存的登录，不代表已运行的终端；API 配置不受影响。"
+        case .reported: return t("cli.reportedHelp")
+        case .refreshNeeded: return t("cli.refreshHelp")
+        case .matched, .different: return t("cli.savedLoginHelp")
+        case .unverified where standaloneVerified: return t("cli.standaloneHelp")
+        default: return t("cli.defaultHelp")
         }
     }
 
@@ -436,7 +446,7 @@ struct TerminalStrip: View {
             VStack(alignment: .leading, spacing: 5) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        Text("CLI 默认登录").font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+                        Text(t("cli.title")).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                         Text(status).font(.system(size: 10, weight: .medium))
                             .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
@@ -455,14 +465,14 @@ struct TerminalStrip: View {
                             .disabled(controlsLocked || checking)
                             .opacity(controlsLocked && !checking ? 0.45 : 1)
                             .help(checkHelp)
-                            .accessibilityLabel(checking ? "正在检查终端登录" : "立即检查终端登录")
+                            .accessibilityLabel(t(checking ? "cli.checkingNow" : "cli.checkNow"))
                             Button { showHelp.toggle() } label: {
                                 Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
                                     .frame(width: 22, height: 22).contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
-                            .help("查看这项状态的说明")
-                            .accessibilityLabel("终端登录状态说明")
+                            .help(t("cli.statusHelp"))
+                            .accessibilityLabel(t("cli.statusAccessibility"))
                             .popover(isPresented: $showHelp, arrowEdge: .bottom) {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(detail).font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
@@ -487,9 +497,9 @@ struct TerminalStrip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // Dialog and alert live on the container, not on the sync button, so a refresh that hides
         // the button mid-dialog can't swallow the "state changed" notice.
-        .confirmationDialog("将默认 CLI 登录同步到 \(syncTarget)？", isPresented: $confirmSync,
+        .confirmationDialog(t("cli.syncTitle", arguments: ["account": syncTarget]), isPresented: $confirmSync,
                             titleVisibility: .visible) {
-            Button("同步") {
+            Button(t("cli.sync")) {
                 // Re-validate at confirm time; the state may have changed while the dialog was open.
                 guard canSync, !controlsLocked, !checking, store.current == syncTarget else {
                     syncStale = true
@@ -498,14 +508,14 @@ struct TerminalStrip: View {
                 let target = syncTarget
                 Task { await store.moveTerminal(to: target) }
             }
-            Button("取消", role: .cancel) {}
+            Button(t("common.cancel"), role: .cancel) {}
         } message: {
-            Text("会先备份当前 CLI 登录，再恢复 \(syncTarget) 的已保存登录并回读核验。不会关闭 CLI 任务，运行中的任务何时采用新登录由 CLI 决定；不改 API 设置。")
+            Text(t("cli.syncBody", arguments: ["account": syncTarget]))
         }
-        .alert("状态已变化，未同步", isPresented: $syncStale) {
-            Button("好") {}
+        .alert(t("cli.staleTitle"), isPresented: $syncStale) {
+            Button(t("cli.ok")) {}
         } message: {
-            Text("当前账号或状态已变化，请重新检查后再同步。")
+            Text(t("cli.staleBody"))
         }
     }
 
@@ -514,7 +524,7 @@ struct TerminalStrip: View {
     private var actions: some View {
         HStack(spacing: 6) {
             Button { syncTarget = store.current; confirmSync = true } label: {
-                Text("同步到 \(store.current)").font(.system(size: 10.5, weight: .semibold))
+                Text(t("cli.syncTo", arguments: ["account": store.current])).font(.system(size: 10.5, weight: .semibold))
                     .lineLimit(1).truncationMode(.middle)
                     .padding(.horizontal, 9).padding(.vertical, 4)
                     .foregroundColor(.claude)
@@ -524,7 +534,7 @@ struct TerminalStrip: View {
             }
             .buttonStyle(.plain).disabled(controlsLocked || checking)
             .opacity(controlsLocked || checking ? 0.45 : 1)
-            .help("同步到 \(store.current)：仅同步终端 OAuth 登录；不改 API key、环境变量或 provider 设置")
+            .help(t("cli.syncHelp", arguments: ["account": store.current]))
             .onHover { hover = $0 }
             Spacer(minLength: 0)
         }
@@ -561,11 +571,16 @@ struct ProfileCard: View {
     var savedOnly = false
     let busy: Bool
     let onSwitch: () -> Void
+    @Environment(\.appLanguage) private var language
     @State private var hover = false
 
     /// Every account card shares one height, so empty / loading / failed cards sit on the same
     /// row rhythm as data cards instead of floating at their own height.
     static let height: CGFloat = 156
+
+    private func t(_ key: String, arguments: [String: String] = [:]) -> String {
+        appText(key, language: language, arguments: arguments)
+    }
 
     private struct Placeholder {
         let icon: String
@@ -576,37 +591,40 @@ struct ProfileCard: View {
     }
 
     private var placeholder: Placeholder {
-        if !p.signedIn { return Placeholder(icon: "person.crop.circle.badge.plus", title: "切换后，在 Claude 中登录") }
+        if !p.signedIn { return Placeholder(icon: "person.crop.circle.badge.plus", title: t("usage.signInAfterSwitch")) }
         switch p.usageState {
-        case .loading: return Placeholder(icon: "", title: "正在读取用量…", spinner: true)
-        case .blocked: return Placeholder(icon: "shield.lefthalf.filled", title: "未请求用量", detail: "保护检查通过后再读取")
-        case .failed: return Placeholder(icon: "exclamationmark.triangle", title: "用量读取失败",
-                                         detail: p.error, color: .warn)
-        case .notRequested, .cached, .loaded: return Placeholder(icon: "chart.bar", title: "暂无用量数据")
+        case .loading: return Placeholder(icon: "", title: t("usage.loading"), spinner: true)
+        case .blocked:
+            return Placeholder(icon: "shield.lefthalf.filled", title: t("usage.notRequested"), detail: t("usage.afterProtection"))
+        case .failed:
+            return Placeholder(icon: "exclamationmark.triangle", title: t("usage.failed"),
+                               detail: p.error.map { AppLocalization.message($0, language: language) }, color: .warn)
+        case .notRequested, .cached, .loaded: return Placeholder(icon: "chart.bar", title: t("usage.noData"))
         }
     }
 
     @ViewBuilder private func usageFooter(_ snapshot: Snapshot) -> some View {
-        let age = ago(snapshot.fetchedAt)
+        let age = ago(snapshot.fetchedAt, language: language)
         switch p.usageState {
         case .loading:
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)
-                Text("正在更新…")
+                Text(t("usage.updating"))
             }.foregroundColor(.sub.opacity(0.8))
         case .failed:
-            Label("刷新失败 · 显示\(age)的缓存", systemImage: "exclamationmark.triangle.fill")
-                .foregroundColor(.warn).lineLimit(1).help(p.error ?? "用量请求失败")
+            Label(t("usage.failedCached", arguments: ["age": age]), systemImage: "exclamationmark.triangle.fill")
+                .foregroundColor(.warn).lineLimit(1)
+                .help(p.error.map { AppLocalization.message($0, language: language) } ?? t("usage.requestFailed"))
         case .blocked:
-            Text("未刷新 · \(age)的缓存").foregroundColor(.sub.opacity(0.8))
-                .help("保护检查未通过，本次没有请求用量；原因见顶部提示。")
+            Text(t("usage.blockedCached", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+                .help(t("usage.blockedHelp"))
         case .loaded where p.live:
             // Fresh from the latest round: the footer's round time already says when; stay quiet.
             EmptyView()
         case .loaded:
-            Text("\(age)更新").foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
         case .notRequested, .cached:
-            Text("缓存 · \(age)更新").foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
         }
     }
 
@@ -624,46 +642,48 @@ struct ProfileCard: View {
                                 .foregroundColor(.sub)
                                 .background(RoundedRectangle(cornerRadius: 4).fill(Color.stroke.opacity(0.7)))
                         }
-                        Text(accountLine(p) ?? "")
+                        Text(accountLine(p, language: language) ?? "")
                             .font(.system(size: 10)).foregroundColor(.sub)
                             .lineLimit(1).truncationMode(.middle)
                     }
                 }
                 Spacer(minLength: 0)
-                // The top-right slot is shared: other cards put "切换" here, the current card a plain
-                // status mark (dot + text, no fill) so it never reads as a second, selectable control.
+                // The top-right slot is shared: other cards put a switch action here, the current card
+                // a plain status mark so it never reads as a second, selectable control.
                 if active {
                     HStack(spacing: 4) {
                         Circle().fill(Color.claude).frame(width: 5, height: 5)
-                        Text("当前").font(.system(size: 10, weight: .semibold))
+                        Text(t("common.current")).font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundColor(.claude)
                     .padding(.vertical, 4)
-                    .help("正在使用的账号")
+                    .help(t("account.currentHelp"))
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("当前账号")
+                    .accessibilityLabel(t("account.current"))
                 } else if savedOnly {
-                    Text("已保存").font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
+                    Text(t("common.saved")).font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
                         .padding(.vertical, 4)
-                        .help("保存的订阅档案，不代表桌面当前使用的 API 身份")
-                        .accessibilityLabel("已保存的订阅档案，非当前身份")
+                        .help(t("account.savedHelp"))
+                        .accessibilityLabel(t("account.savedAccessibility"))
                 } else {
                     Button(action: onSwitch) {
-                        Pill(text: "切换", fg: .txt, bg: hover ? Color(hex: 0x45423C) : .stroke)
+                        Pill(text: t("common.switch"), fg: .txt, bg: hover ? Color(hex: 0x45423C) : .stroke)
                     }
                     .buttonStyle(.plain).disabled(busy).opacity(busy ? 0.45 : 1)
-                    .help("检查网络与地区后切换到此账号")
+                    .help(t("account.switchHelp"))
                     .onHover { hover = $0 }
                 }
             }
 
             if p.signedIn, let snapshot = s {
                 HStack(alignment: .top, spacing: 12) {
-                    UsageMetric(title: "5 小时剩余", value: left(snapshot.session),
-                                reset: countdown(snapshot.session?.resetsAt), prominent: true)
+                    UsageMetric(title: t("usage.fiveHours"), value: left(snapshot.session),
+                                reset: countdown(snapshot.session?.resetsAt, language: language), prominent: true)
                     Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 58)
-                    UsageMetric(title: "每周剩余", value: left(snapshot.weekly),
-                                reset: snapshot.weekly?.resetsAt.map { "\(weekdayTime($0)) 重置" } ?? "重置时间未知")
+                    UsageMetric(title: t("usage.weekly"), value: left(snapshot.weekly),
+                                reset: snapshot.weekly?.resetsAt.map {
+                                    t("format.weeklyReset", arguments: ["date": weekdayTime($0, language: language)])
+                                } ?? t("format.resetUnknown"))
                 }
                 Spacer(minLength: 0)
                 usageFooter(snapshot).font(.system(size: 9.5))
@@ -684,7 +704,7 @@ struct ProfileCard: View {
                     }
                 }
                 .frame(maxWidth: .infinity)
-                .help(p.usageState == .blocked ? "保护检查未通过，本次没有请求用量；原因见顶部提示。" : "")
+                .help(p.usageState == .blocked ? t("usage.blockedHelp") : "")
                 Spacer(minLength: 0)
             }
         }
@@ -702,11 +722,14 @@ struct ProfileCard: View {
 /// field, Return adds, Esc or 取消 leaves without adding.
 struct AddAccountEntry: View {
     let onAdd: (String) -> Void
+    @Environment(\.appLanguage) private var language
     @State private var editing = false
     @State private var name = ""
     @State private var hover = false
     @FocusState private var focused: Bool
     private var valid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private func t(_ key: String) -> String { appText(key, language: language) }
 
     var body: some View {
         Group {
@@ -725,7 +748,7 @@ struct AddAccountEntry: View {
         Button { editing = true } label: {
             VStack(spacing: 7) {
                 Image(systemName: "plus").font(.system(size: 17, weight: .light))
-                Text("添加账号").font(.system(size: 11.5, weight: .medium))
+                Text(t("account.add")).font(.system(size: 11.5, weight: .medium))
             }
             .foregroundColor(hover ? .txt : .sub)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -733,11 +756,11 @@ struct AddAccountEntry: View {
         }
         .buttonStyle(.plain)
         .onHover { hover = $0 }
-        .help("新建一个空账号；切换过去后在 Claude 中登录")
+        .help(t("account.addHelp"))
     }
 
     private var field: some View {
-        TextField("账号名称，如 客户 A", text: $name)
+        TextField(t("account.namePlaceholder"), text: $name)
             .textFieldStyle(.plain).font(.system(size: 11.5)).foregroundColor(.txt)
             .focused($focused)
             .onSubmit(commit)
@@ -746,14 +769,14 @@ struct AddAccountEntry: View {
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.bg))
             .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
             .onAppear { DispatchQueue.main.async { focused = true } }
-            .accessibilityLabel("新账号名称")
+            .accessibilityLabel(t("account.newName"))
     }
 
     private var buttons: some View {
         HStack(spacing: 10) {
-            Button("取消", action: reset).buttonStyle(.plain)
+            Button(t("common.cancel"), action: reset).buttonStyle(.plain)
                 .font(.system(size: 10.5)).foregroundColor(.sub)
-            Button("添加", action: commit).buttonStyle(.plain)
+            Button(t("common.add"), action: commit).buttonStyle(.plain)
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundColor(valid ? .white : .sub)
                 .padding(.horizontal, 11).frame(height: 24)
@@ -764,7 +787,7 @@ struct AddAccountEntry: View {
 
     private var editor: some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text("新账号").font(.system(size: 11, weight: .semibold)).foregroundColor(.sub)
+            Text(t("account.new")).font(.system(size: 11, weight: .semibold)).foregroundColor(.sub)
             field
             HStack { Spacer(minLength: 0); buttons }
         }
@@ -799,26 +822,29 @@ struct FooterButton: View {
 /// Footer language menu, styled like FooterButton. `.borderlessButton` menus on macOS tend to ignore the
 /// label's foregroundColor (drawing it brighter than neighbours), so this uses `.menuStyle(.button)` +
 /// `.buttonStyle(.plain)`, which renders our own label view; the Menu itself stays the native one.
-struct ImportLanguageMenu: View {
+struct LanguageMenu: View {
     @Binding var selection: String
     @State private var hover = false
     var body: some View {
         Menu {
-            Picker("会话导入页语言（仅导入页）", selection: $selection) {
+            Picker(selection: $selection) {
                 Text("中文").tag("zh")
                 Text("English").tag("en")
+            } label: {
+                EmptyView()
             }
             .pickerStyle(.inline)
+            .labelsHidden()
         } label: {
-            Image(systemName: "globe").font(.system(size: 13, weight: .medium))
+            Text("文A").font(.system(size: 11.5, weight: .medium))
                 .foregroundColor(hover ? .txt : .sub).frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
         }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
         .fixedSize().frame(width: 28, height: 28)
         .onHover { hover = $0 }
-        .help("会话导入页语言（仅影响会话导入页，其余界面暂仅中文）")
-        .accessibilityLabel("会话导入页语言，仅影响会话导入页")
+        .help("语言 / Language")
+        .accessibilityLabel("语言 / Language")
     }
 }
 
@@ -826,29 +852,41 @@ struct ImportLanguageMenu: View {
 struct Panel: View {
     @ObservedObject var store: Store
     @ObservedObject var protection: ProtectionController
+    @Environment(\.appLanguage) private var language
     @State private var quitHover = false
     let cols = [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)]
 
-    /// What the last refresh round actually achieved. `lastRefresh` only moves when a round finishes
-    /// (blocked rounds don't move it), so per-card failures and blocks are surfaced instead of "刚刚".
-    private var refreshSummary: (text: String, color: Color, help: String) {
-        if store.profiles.contains(where: { $0.usageState == .blocked }) {
-            return ("用量未刷新", .warn, "网络门禁未通过，本轮没有请求用量；原因见上方提示。卡片显示的是缓存。")
-        }
-        guard let last = store.lastRefresh else {
-            return ("尚未刷新", .sub, "还没有完成过一轮刷新")
-        }
-        let failed = store.profiles.filter { $0.usageState == .failed }.count
-        if failed > 0 {
-            return ("最近刷新：\(ago(last)) · \(failed) 个失败", .warn,
-                    "最近一次刷新动作完成于\(ago(last))；其中有账号用量读取失败，对应卡片显示缓存")
-        }
-        return ("最近刷新：\(ago(last))", .sub,
-                "最近一次刷新动作（账号用量与默认 CLI 登录核验）的完成时间。\n各账号是否读取成功以卡片上的提示为准；这不是后台守卫的检查时间。")
+    private func t(_ key: String, arguments: [String: String] = [:]) -> String {
+        appText(key, language: language, arguments: arguments)
     }
 
-    private var importLanguageBinding: Binding<String> {
-        Binding(get: { store.importLanguage }, set: { store.setImportLanguage($0) })
+    private func generated(_ message: String) -> String {
+        if message == protection.lastDecision.message {
+            return AppLocalization.decision(protection.lastDecision, language: language)
+        }
+        return AppLocalization.message(message, language: language)
+    }
+
+    /// What the last refresh round actually achieved. `lastRefresh` only moves when a round finishes
+    /// (blocked rounds don't move it), so per-card failures and blocks are surfaced instead of "just now".
+    private var refreshSummary: (text: String, color: Color, help: String) {
+        if store.profiles.contains(where: { $0.usageState == .blocked }) {
+            return (t("refresh.blocked"), .warn, t("refresh.blockedHelp"))
+        }
+        guard let last = store.lastRefresh else {
+            return (t("refresh.never"), .sub, t("refresh.neverHelp"))
+        }
+        let age = ago(last, language: language)
+        let failed = store.profiles.filter { $0.usageState == .failed }.count
+        if failed > 0 {
+            return (t("refresh.failureSummary", arguments: ["age": age, "count": String(failed)]), .warn,
+                    t("refresh.failureHelp", arguments: ["age": age]))
+        }
+        return (t("refresh.summary", arguments: ["age": age]), .sub, t("refresh.summaryHelp"))
+    }
+
+    private var languageBinding: Binding<String> {
+        Binding(get: { store.appLanguage }, set: { store.setAppLanguage($0) })
     }
     init(store: Store) {
         self.store = store
@@ -877,7 +915,8 @@ struct Panel: View {
             }
             TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil)
             if let b = store.banner {
-                Label("上次操作：\(b)", systemImage: "exclamationmark.triangle.fill").font(.system(size: 11))
+                Label(t("banner.lastOperation", arguments: ["message": generated(b)]), systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
                     .foregroundColor(.warn).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 10).padding(.vertical, 8)
@@ -891,20 +930,20 @@ struct Panel: View {
                             .foregroundColor(.warn)
                             .padding(.top, 1)
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("CLI 准备未完成，可选择仅切换桌面")
+                            Text(t("desktopOnly.title"))
                                 .font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
-                            Text("目标：\(offer.target)；CLI 保持原样")
+                            Text(t("desktopOnly.detail", arguments: ["target": offer.target]))
                                 .font(.system(size: 10)).foregroundColor(.sub)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     HStack(spacing: 12) {
                         Spacer(minLength: 0)
-                        Button("取消") { store.desktopOnlyOffer = nil }
+                        Button(t("common.cancel")) { store.desktopOnlyOffer = nil }
                             .buttonStyle(.plain)
                             .font(.system(size: 10.5, weight: .medium))
                             .foregroundColor(.sub)
-                        Button("仅切换桌面") {
+                        Button(t("desktopOnly.action")) {
                             Task { await store.confirmDesktopOnlySwitch() }
                         }
                         .buttonStyle(.plain)
@@ -920,7 +959,9 @@ struct Panel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.65)))
                 .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.5), lineWidth: 1))
-                .help("原因：\(offer.reason)\n仅从 \(offer.source) 切换到 \(offer.target)；CLI 保持原样。")
+                .help(t("desktopOnly.help", arguments: [
+                    "reason": generated(offer.reason), "source": offer.source, "target": offer.target
+                ]))
             }
             // Capacity counts every grid cell, including the add entry: more than two rows (4 cells) scrolls.
             if store.profiles.count + 1 > 2 * cols.count {
@@ -929,50 +970,52 @@ struct Panel: View {
                 accountGrid
             }
             HStack(spacing: 7) {
-                FooterButton(icon: "folder", help: "显示账号目录") {
+                FooterButton(icon: "folder", help: t("footer.showDirectory")) {
                     if !store.isDemo { NSWorkspace.shared.activateFileViewerSelecting([parkDir]) }
                 }
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 if let b = store.busy {
                     ProgressView().controlSize(.small)
-                    Text(b).font(.system(size: 11, weight: .medium)).foregroundColor(.claude).lineLimit(1)
+                    Text(generated(b)).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
+                        .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
                 } else if store.refreshing {
                     ProgressView().controlSize(.small)
-                    Text("刷新中…").font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
+                    Text(t("common.refreshing")).font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
+                        .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
                 } else {
                     TimelineView(.periodic(from: .now, by: 30)) { _ in
                         let summary = refreshSummary
                         HStack(spacing: 5) {
                             Image(systemName: summary.color == .sub ? "clock" : "exclamationmark.triangle")
                                 .font(.system(size: 10))
-                            Text(summary.text).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                            Text(summary.text).font(.system(size: 11, weight: .medium))
+                                .lineLimit(1).minimumScaleFactor(0.85)
                         }
                         .foregroundColor(summary.color)
                         .help(summary.help)
                         .accessibilityElement(children: .combine)
+                        .layoutPriority(-1)
                     }
                 }
                 Spacer(minLength: 4)
                 if store.sessionMigrationEnabled {
-                    FooterButton(icon: "doc.on.doc", help: "导入 Claude Code 会话") { CopyWindow.show(store) }
+                    FooterButton(icon: "doc.on.doc", help: t("footer.import")) { CopyWindow.show(store) }
                 }
-                FooterButton(icon: "arrow.clockwise",
-                             help: "刷新：先过网络门禁，再读取账号用量并核验默认 CLI 登录\n不改保护设置、不启用保护、不纳入桌面") {
+                FooterButton(icon: "arrow.clockwise", help: t("footer.refresh")) {
                     Task { await store.refresh() }
                 }
                 FooterButton(icon: store.openAtLogin ? "sunrise.fill" : "sunrise",
-                             help: store.openAtLogin ? "已设置登录时打开界面，点击关闭" : "设置登录时打开界面") {
+                             help: t(store.openAtLogin ? "footer.loginEnabled" : "footer.loginDisabled")) {
                     store.toggleOpenAtLogin()
                 }
-                // Rarely used preferences live here rather than on the import page. Only the session
-                // import page is bilingual so far; the label says so instead of implying app-wide English.
-                ImportLanguageMenu(selection: importLanguageBinding)
+                LanguageMenu(selection: languageBinding)
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "power").font(.system(size: 11, weight: .medium))
-                        Text("退出界面").font(.system(size: 11, weight: .medium))
+                        Text(t("footer.quit")).font(.system(size: 11, weight: .medium))
                     }
+                    .fixedSize()
                     .foregroundColor(quitHover ? .txt : .sub)
                     .padding(.horizontal, 9).padding(.vertical, 6)
                     .background(RoundedRectangle(cornerRadius: 7)
@@ -980,7 +1023,7 @@ struct Panel: View {
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
                 }
                 .buttonStyle(.plain)
-                .help("退出界面，不改变后台保护开关")
+                .help(t("footer.quitHelp"))
                 .disabled(store.busy != nil || protection.working)
                 .onHover { quitHover = $0 }
             }

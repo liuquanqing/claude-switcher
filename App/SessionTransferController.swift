@@ -119,7 +119,7 @@ actor SessionTransferWorker {
     @Published private(set) var backupInformation: String?
     @Published private(set) var backupItems: [TransferSessionItem] = []
     @Published private(set) var handoffInformation: String?
-    @Published var language = "zh" // Legacy per-window control remains until Kimi moves it into preferences.
+    @Published private(set) var language = AppLocalization.defaultLanguage
     private var languageObservation: AnyCancellable?
     private let store: Store
     private let worker: SessionTransferWorker
@@ -162,8 +162,8 @@ actor SessionTransferWorker {
             fixedEnvironment = nil; demoRoot = nil
             self.worker = worker ?? SessionTransferWorker()
         }
-        language = store.importLanguage
-        languageObservation = store.$importLanguage.removeDuplicates().sink { [weak self] value in self?.language = value }
+        language = store.appLanguage
+        languageObservation = store.$appLanguage.removeDuplicates().sink { [weak self] value in self?.language = value }
     }
     deinit { if let demoRoot { try? FileManager.default.removeItem(at: demoRoot) } }
     var visibleRows: [SessionTransferRow] {

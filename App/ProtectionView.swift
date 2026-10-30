@@ -4,6 +4,7 @@ import SwitcherCore
 struct TerminalProtectionCard: View {
     @ObservedObject var store: Store
     @ObservedObject var controller: ProtectionController
+    @Environment(\.appLanguage) private var language
     let busy: Bool
     @State private var confirmStop = false
     @State private var confirmProtectCurrentDesktop = false
@@ -22,6 +23,17 @@ struct TerminalProtectionCard: View {
     @State private var resultsHover = false
     /// Shared by the open column and the panel beneath it, so the two read as one region.
     private let panelTint = Color.white.opacity(0.03)
+
+    private func t(_ key: String, arguments: [String: String] = [:]) -> String {
+        appText(key, language: language, arguments: arguments)
+    }
+
+    private func generated(_ message: String) -> String {
+        if message == controller.lastDecision.message {
+            return AppLocalization.decision(controller.lastDecision, language: language)
+        }
+        return AppLocalization.message(message, language: language)
+    }
 
     // MARK: Network check results
 
@@ -45,13 +57,13 @@ struct TerminalProtectionCard: View {
             case .pending: return "ellipsis.circle"
             }
         }
-        var spoken: String {
+        func spoken(_ language: String) -> String {
             switch self {
-            case .passed: return "通过"
-            case .failed: return "未通过"
-            case .unknown: return "未知，不放行"
-            case .notRun: return "未检查"
-            case .pending: return "本轮结果未出"
+            case .passed: return appText("protection.passed", language: language)
+            case .failed: return appText("protection.failed", language: language)
+            case .unknown: return appText("protection.unknownFailClosed", language: language)
+            case .notRun: return appText("protection.notRun", language: language)
+            case .pending: return appText("protection.pending", language: language)
             }
         }
     }
@@ -66,70 +78,80 @@ struct TerminalProtectionCard: View {
     private var networkItems: [NetworkItem] {
         // While re-checking, never show the previous round's results as if they were this round's.
         if controller.checking {
-            return ["代理", "TUN", "出口国家"].map { NetworkItem(title: $0, value: "检查中…", status: .pending) }
+            return [t("protection.proxy"), "TUN", t("protection.exitCountry")].map {
+                NetworkItem(title: $0, value: t("common.checking"), status: .pending)
+            }
         }
         let observation = controller.lastCheckReport?.observation
         let proxy: NetworkItem
         if let observation {
             if checkedMode == .auto {
                 // Auto mode has no separate proxy probe; it is the TUN result, so don't count it twice.
-                proxy = NetworkItem(title: "代理", value: "随 TUN 判定", status: .notRun,
-                                    help: "自动模式不单独检查代理，以 TUN 结果为准。")
+                proxy = NetworkItem(title: t("protection.proxy"), value: t("protection.autoProxy"), status: .notRun,
+                                    help: t("protection.autoProxyHelp"))
             } else {
-                proxy = NetworkItem(title: "代理", value: observation.proxyConnected ? "已连接" : "未连接",
+                proxy = NetworkItem(title: t("protection.proxy"),
+                                    value: t(observation.proxyConnected ? "protection.connected" : "protection.disconnected"),
                                     status: observation.proxyConnected ? .passed : .failed)
             }
         } else {
-            proxy = NetworkItem(title: "代理", value: "未检查", status: .notRun)
+            proxy = NetworkItem(title: t("protection.proxy"), value: t("protection.notRun"), status: .notRun)
         }
         let tun = observation.map {
-            NetworkItem(title: "TUN", value: $0.tunOnline ? "在线" : "未检测到", status: $0.tunOnline ? .passed : .failed,
-                        help: "仅识别 198.18.* TUN 地址。")
-        } ?? NetworkItem(title: "TUN", value: "未检查", status: .notRun)
+            NetworkItem(title: "TUN", value: t($0.tunOnline ? "protection.online" : "protection.notDetected"),
+                        status: $0.tunOnline ? .passed : .failed, help: t("protection.tunHelp"))
+        } ?? NetworkItem(title: "TUN", value: t("protection.notRun"), status: .notRun)
         return [proxy, tun, countryItem]
     }
 
     private var countryItem: NetworkItem {
         guard let report = controller.lastCheckReport, let observation = report.observation else {
-            return NetworkItem(title: "出口国家", value: "未检查", status: .notRun)
+            return NetworkItem(title: t("protection.exitCountry"), value: t("protection.notRun"), status: .notRun)
         }
         if observation.routesDisagree {
-            return NetworkItem(title: "出口国家", value: "各域名不一致", status: .failed,
-                               help: "Claude 各域名的出口国家不同，不放行。")
+            return NetworkItem(title: t("protection.exitCountry"), value: t("protection.routesDisagree"), status: .failed,
+                               help: t("protection.routesHelp"))
         }
         guard let country = observation.country, !country.isEmpty else {
             // A missing country can't tell whether the request was skipped or ran and was then discarded,
             // so it is "unconfirmed", never "not run".
             let help = observation.proxyConnected && observation.tunOnline
-                ? "无法确认出口国家，按未通过处理。"
-                : "代理或 TUN 未通过，本次没有可用的出口国家结果；按未通过处理。"
-            return NetworkItem(title: "出口国家", value: "未确认", status: .unknown, help: help)
+                ? t("protection.countryUnknown") : t("protection.countryUnavailable")
+            return NetworkItem(title: t("protection.exitCountry"), value: t("protection.unconfirmed"), status: .unknown, help: help)
         }
         guard let target = report.targetCountry else {
-            return NetworkItem(title: "出口国家", value: country, status: .unknown)
+            return NetworkItem(title: t("protection.exitCountry"), value: country, status: .unknown)
         }
         let matches = country.uppercased() == target.uppercased()
-        return NetworkItem(title: "出口国家", value: matches ? country : "\(country) ≠ \(target)",
+        return NetworkItem(title: t("protection.exitCountry"), value: matches ? country : "\(country) ≠ \(target)",
                            status: matches ? .passed : .failed)
     }
 
     private func failureText(_ decision: SafetyDecision) -> String {
         switch decision.reason {
-        case .proxyDisconnected: return "未通过：代理未连接"
-        case .tunMissing: return "未通过：未检测到 TUN"
-        case .routesDisagree: return "未通过：各域名出口不一致"
-        case .countryUnknown: return "未通过：无法确认出口国家"
+        case .proxyDisconnected: return t("protection.failedProxy")
+        case .tunMissing: return t("protection.failedTUN")
+        case .routesDisagree: return t("protection.failedRoutes")
+        case .countryUnknown: return t("protection.failedCountry")
         case .countryMismatch:
-            return "未通过：出口 \(decision.observedCountry ?? "未知")，目标 \(decision.expectedCountry ?? "未知")"
-        default: return "未通过：" + decision.message
+            return t("protection.failedMismatch", arguments: [
+                "observed": decision.observedCountry ?? t("common.unknown"),
+                "expected": decision.expectedCountry ?? t("common.unknown")
+            ])
+        default:
+            return t("protection.failedPrefix", arguments: ["message": AppLocalization.decision(decision, language: language)])
         }
     }
 
     private var verdict: (text: String, color: Color, icon: String) {
-        guard let report = controller.lastCheckReport else { return ("尚未检查", .sub, "minus.circle") }
-        if let message = report.validationMessage { return ("输入无效：" + message, .warn, "exclamationmark.triangle.fill") }
-        guard report.observation != nil else { return ("检查未完成", .sub, "questionmark.circle") }
-        if report.passed { return ("网络通过 · 目标 \(report.targetCountry ?? "")", .good, "checkmark.circle.fill") }
+        guard let report = controller.lastCheckReport else { return (t("protection.neverChecked"), .sub, "minus.circle") }
+        if let message = report.validationMessage {
+            return (t("protection.invalidInput", arguments: ["message": generated(message)]), .warn, "exclamationmark.triangle.fill")
+        }
+        guard report.observation != nil else { return (t("protection.incomplete"), .sub, "questionmark.circle") }
+        if report.passed {
+            return (t("protection.passedTarget", arguments: ["country": report.targetCountry ?? ""]), .good, "checkmark.circle.fill")
+        }
         return (failureText(report.decision), .bad, "xmark.circle.fill")
     }
 
@@ -144,7 +166,7 @@ struct TerminalProtectionCard: View {
     /// The headline used both expanded and folded. A stale pass must never read as a fresh one,
     /// so a stale result loses its verdict colour and icon in either state.
     private var displayVerdict: (text: String, color: Color, icon: String) {
-        if resultStale { return ("输入已修改，请重新检查", .warn, "arrow.triangle.2.circlepath") }
+        if resultStale { return (t("protection.stale"), .warn, "arrow.triangle.2.circlepath") }
         return verdict
     }
 
@@ -152,8 +174,8 @@ struct TerminalProtectionCard: View {
     private var reportContextNote: String? {
         guard let report = controller.lastCheckReport, report.validationMessage == nil,
               let target = report.targetCountry else { return nil }
-        if resultStale { return "以下是上次输入（目标 \(target)）的结果，不代表当前输入。" }
-        if controller.hasUnsavedChanges { return "按未保存的输入检查；保存前顶部目标不变。" }
+        if resultStale { return t("protection.staleNote", arguments: ["country": target]) }
+        if controller.hasUnsavedChanges { return t("protection.unsavedCheck") }
         return nil
     }
 
@@ -172,7 +194,7 @@ struct TerminalProtectionCard: View {
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.card))
         .help(item.help ?? "")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(item.title)：\(item.value)，\(item.status.spoken)")
+        .accessibilityLabel("\(item.title): \(item.value), \(item.status.spoken(language))")
     }
 
     /// The verdict row doubles as the fold toggle: the whole row is the hit area, and folded it is the
@@ -184,7 +206,7 @@ struct TerminalProtectionCard: View {
             HStack(spacing: 6) {
                 if checking {
                     ProgressView().controlSize(.small)
-                    Text("正在检查代理、TUN 和出口国家…").foregroundColor(.sub).lineLimit(1)
+                    Text(t("protection.checkingNetwork")).foregroundColor(.sub).lineLimit(1)
                 } else {
                     Image(systemName: result.icon)
                     Text(result.text)
@@ -193,7 +215,8 @@ struct TerminalProtectionCard: View {
                 }
                 Spacer(minLength: 6)
                 if !checking, let date = controller.lastCheckReport?.checkedAt {
-                    Text(date, style: .time).font(.system(size: 9.5, weight: .regular)).foregroundColor(.sub)
+                    Text(AppLocalization.date(date, language: language, timeStyle: .short))
+                        .font(.system(size: 9.5, weight: .regular)).foregroundColor(.sub)
                 }
                 Image(systemName: resultsExpanded ? "chevron.up" : "chevron.down")
                     .font(.system(size: 8, weight: .semibold)).foregroundColor(resultsHover ? .txt : .sub)
@@ -207,9 +230,9 @@ struct TerminalProtectionCard: View {
         }
         .buttonStyle(.plain)
         .onHover { resultsHover = $0 }
-        .help(resultsExpanded ? "收起检查结果" : "展开检查结果")
-        .accessibilityLabel(checking ? "网络检查进行中" : "网络检查：\(result.text)")
-        .accessibilityHint(resultsExpanded ? "收起检查结果" : "展开检查结果")
+        .help(t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults"))
+        .accessibilityLabel(checking ? t("protection.checkingAccessibility") : t("protection.resultsAccessibility", arguments: ["result": result.text]))
+        .accessibilityHint(t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults"))
     }
 
     /// Shown in place as soon as a check runs. Expanded: verdict, the three real results, one footnote.
@@ -233,13 +256,13 @@ struct TerminalProtectionCard: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("仅诊断，不改变设置与保护状态。")
+                            Text(t("protection.diagnosticOnly"))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                             Link("IP / WebRTC ↗", destination: URL(string: "https://ip.net.coffee/claude/")!)
                                 .foregroundColor(.claude)
-                                .help("第三方网页体检，结果仅供参考，不作为打开 Claude 的门禁")
-                                .accessibilityLabel("第三方 IP 与 WebRTC 体检，仅供参考")
+                                .help(t("protection.webCheckHelp"))
+                                .accessibilityLabel(t("protection.webCheckAccessibility"))
                         }
                         .font(.system(size: 9.5)).foregroundColor(.sub)
                     }
@@ -257,13 +280,13 @@ struct TerminalProtectionCard: View {
 
     private var checkHelpContent: some View {
         VStack(alignment: .leading, spacing: 9) {
-            helpRow("仅检查网络", "按当前输入只读诊断；不保存、不启用保护、不打开 Claude。")
-            helpRow("顶部 打开 / 显示", "按已保存配置复查门禁；未运行则打开当前账号，已纳入保护的桌面切到前台。")
-            helpRow("桌面未纳入（可点击）", "守卫服务在线但未接管当前订阅桌面；点该标签确认一次后才纳入，右侧箭头仅展开设置。")
+            helpRow(t("protection.checkOnly"), t("protection.checkOnlyHelp"))
+            helpRow(t("protection.openShow"), t("protection.openShowHelp"))
+            helpRow(t("protection.unmanagedClickable"), t("protection.unmanagedHelp"))
             Divider().opacity(0.6)
-            Text("后台守卫约每 \(Int(SafetyConfig.interval)) 秒复查一次，非实时；失败或未知均不放行。")
+            Text(t("protection.guardInterval", arguments: ["seconds": String(Int(SafetyConfig.interval))]))
             // The current desktop's scope detail lives on the column / switch hover help; not repeated here.
-            Text("只保护订阅桌面；API 桌面不纳入，CLI 只核验默认登录、不保护 CLI 进程。")
+            Text(t("protection.scopeExplanation"))
         }
         .font(.system(size: 10.5)).foregroundColor(.sub)
         .lineSpacing(2)
@@ -286,13 +309,13 @@ struct TerminalProtectionCard: View {
     private var desktopScopeHelp: String {
         let summary: String
         switch controller.desktopScope {
-        case .subscription: summary = "本入口启动的订阅桌面自动纳入；其他已运行的订阅桌面需确认一次。"
-        case .api: summary = "检测到桌面 API 配置，不纳入订阅守护。"
-        case .unknown: summary = "尚不能确认桌面配置，不将运行中的桌面视为已纳入。"
+        case .subscription: summary = t("protection.subscriptionScope")
+        case .api: summary = t("protection.apiScope")
+        case .unknown: summary = t("protection.unknownScope")
         }
         guard let detail = controller.desktopScopeDetail?.trimmingCharacters(in: .whitespacesAndNewlines),
               !detail.isEmpty else { return summary }
-        return summary + "\n" + detail
+        return summary + "\n" + generated(detail)
     }
 
     // MARK: Notices
@@ -304,7 +327,7 @@ struct TerminalProtectionCard: View {
         guard !controller.guardOnline || !controller.lastDecision.allowed else { return nil }
         if controller.guardOnline, controller.desktopScope != .subscription,
            controller.lastDecision.reason == .unsupportedMode { return nil }
-        return controller.status
+        return generated(controller.status)
     }
 
     /// Problems first, then a dismissible failed-operation note. Placed under the header when folded and
@@ -334,9 +357,9 @@ struct TerminalProtectionCard: View {
                     .font(.system(size: 10)).foregroundColor(.bad)
                     .padding(.top, 2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("上次操作未完成")
+                    Text(t("protection.lastOperationFailed"))
                         .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.bad)
-                    Text(message)
+                    Text(generated(message))
                         .font(.system(size: 10)).foregroundColor(.sub)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -350,8 +373,8 @@ struct TerminalProtectionCard: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.sub)
-                .help("关闭提示；当前状态以上方为准，关闭不改变保护")
-                .accessibilityLabel("关闭上次操作提示")
+                .help(t("protection.dismissNotice"))
+                .accessibilityLabel(t("protection.dismissAccessibility"))
             }
             .padding(.leading, 10).padding(.trailing, 2).padding(.vertical, 4)
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.bad.opacity(0.08)))
@@ -359,11 +382,8 @@ struct TerminalProtectionCard: View {
     }
 
     /// While the desktop can be taken over, the state and the action are one control: the tinted
-    /// "桌面未纳入" pill states the fact and, when clicked, only opens the confirmation dialog (that
-    /// meaning lives in help/accessibilityHint; the second line shows only the saved target). The
-    /// settings fold is a separate chevron button beside it (siblings in an HStack, never nested or
-    /// overlaid), so the two hit areas cannot intercept each other. Only used while
-    /// `offerDesktopProtection` holds.
+    /// unmanaged-desktop pill only opens the confirmation dialog. The settings fold is a separate
+    /// chevron button beside it, so the two hit areas cannot intercept each other.
     private var offerHeader: some View {
         let disabled = busy || controller.working
         return VStack(alignment: .leading, spacing: 4) {
@@ -389,12 +409,12 @@ struct TerminalProtectionCard: View {
                 .disabled(disabled)
                 .opacity(disabled ? 0.5 : 1)
                 .onHover { takeoverHover = $0 }
-                .help("守卫服务已在线，但这个桌面还没交给守卫；点击后先确认，不会开启或关闭服务")
-                .accessibilityLabel("桌面未纳入保护，目标 \(controller.activeCountry ?? "未设置")")
-                .accessibilityHint("纳入当前桌面；会先弹出确认，取消不做任何改动")
+                .help(t("protection.takeoverHelp"))
+                .accessibilityLabel(t("protection.unmanagedAccessibility", arguments: ["country": controller.activeCountry ?? t("common.notSet")]))
+                .accessibilityHint(t("protection.takeoverHint"))
                 settingsToggleButton
             }
-            Text("目标 \(controller.activeCountry ?? "未设置")")
+            Text(t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")]))
                 .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
                 .lineLimit(1).fixedSize()
                 .padding(.leading, 7)
@@ -417,9 +437,9 @@ struct TerminalProtectionCard: View {
         }
         .buttonStyle(.plain)
         .onHover { settingsHover = $0 }
-        .help((showSettings ? "收起保护设置" : "展开保护设置") + "\n" + desktopScopeHelp)
-        .accessibilityLabel(showSettings ? "收起保护设置" : "展开保护设置")
-        .accessibilityHint("开关、目标国家、代理模式与网络检查")
+        .help(t(showSettings ? "protection.collapseSettings" : "protection.expandSettings") + "\n" + desktopScopeHelp)
+        .accessibilityLabel(t(showSettings ? "protection.collapseSettings" : "protection.expandSettings"))
+        .accessibilityHint(t("protection.settingsHint"))
     }
 
     /// The column header: what the guard means for the desktop right now (line 1) and the one fact or
@@ -443,10 +463,10 @@ struct TerminalProtectionCard: View {
                 }
                 .frame(height: 22)
                 .foregroundColor(statusColor)
-                // Sized to fit the 164pt column; nothing here is allowed to end in "…".
+                // Keep the detail inside the 164pt column without shrinking the rest of the panel.
                 Text(statusDetail)
                     .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                    .lineLimit(1).fixedSize()
+                    .lineLimit(1).minimumScaleFactor(0.78)
                     .padding(.leading, 20)
             }
             .padding(.horizontal, 6).padding(.vertical, 6)
@@ -457,9 +477,9 @@ struct TerminalProtectionCard: View {
         }
         .buttonStyle(.plain)
         .onHover { settingsHover = $0 }
-        .help((showSettings ? "收起保护设置" : "展开保护设置") + "\n" + desktopScopeHelp)
-        .accessibilityLabel("保护：\(statusTitle)，\(statusDetail)")
-        .accessibilityHint(showSettings ? "收起保护设置" : "展开保护设置：开关、目标国家、代理模式与网络检查")
+        .help(t(showSettings ? "protection.collapseSettings" : "protection.expandSettings") + "\n" + desktopScopeHelp)
+        .accessibilityLabel(t("protection.statusAccessibility", arguments: ["title": statusTitle, "detail": statusDetail]))
+        .accessibilityHint(t(showSettings ? "protection.collapseSettings" : "protection.expandSettings") + ": " + t("protection.settingsHint"))
     }
 
     // MARK: State
@@ -499,40 +519,40 @@ struct TerminalProtectionCard: View {
     /// Titles describe the guard against the desktop only. "Protected" always names the desktop, so it
     /// can't be read as covering the terminal strip beside it or the account as a whole.
     private var statusTitle: String {
-        if controller.working { return "正在更新设置" }
-        if !controller.enabled { return "保护未启用" }
-        if !controller.guardOnline { return "保护状态待确认" }
-        if controller.lastDecision.reason == .terminationFailed { return "急停失败" }
-        if controller.desktopScope == .api { return "守护不适用" }
-        if controller.desktopScope == .unknown { return "桌面范围待确认" }
-        if desktopPendingTakeover { return "桌面未纳入" }
-        if !controller.lastDecision.allowed { return "已拦截" }
-        if !store.claudeRunning { return "守护已就绪" }
-        if protectedDesktop { return "桌面保护中" }
-        return "保护状态待确认"
+        if controller.working { return t("protection.updating") }
+        if !controller.enabled { return t("protection.disabled") }
+        if !controller.guardOnline { return t("protection.unconfirmedStatus") }
+        if controller.lastDecision.reason == .terminationFailed { return t("protection.terminationFailed") }
+        if controller.desktopScope == .api { return t("protection.notApplicable") }
+        if controller.desktopScope == .unknown { return t("protection.scopeUnknown") }
+        if desktopPendingTakeover { return t("protection.unmanaged") }
+        if !controller.lastDecision.allowed { return t("protection.blocked") }
+        if !store.claudeRunning { return t("protection.ready") }
+        if protectedDesktop { return t("protection.active") }
+        return t("protection.unconfirmedStatus")
     }
     /// The one useful fact per state. The target shown is always the saved one the guard runs with,
     /// never the draft in the settings field.
     private var statusDetail: String {
-        let target = "目标 \(controller.activeCountry ?? "未设置")"
+        let target = t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")])
         if controller.working { return target }
-        if !controller.enabled { return showSettings ? "在下方打开开关" : "点此设置并开启" }
+        if !controller.enabled { return t(showSettings ? "protection.enableBelow" : "protection.clickToEnable") }
         if !controller.guardOnline || controller.lastDecision.reason == .terminationFailed { return target }
         switch controller.desktopScope {
         case .api:
             switch controller.apiConfiguration {
-            case .magpie: return "API · 来源 Magpie"
-            case .ccSwitch: return "API · 来源 CC Switch"
-            case .conflict: return "API · 来源有冲突"
-            case .subscription, .unknownAPI, .unconfirmed: return "API · 来源未确认"
+            case .magpie: return "API · " + t("api.source", arguments: ["source": "Magpie"])
+            case .ccSwitch: return "API · " + t("api.source", arguments: ["source": "CC Switch"])
+            case .conflict: return t("protection.apiConflict")
+            case .subscription, .unknownAPI, .unconfirmed: return t("protection.apiUnconfirmed")
             }
-        case .unknown: return "确认前不算受保护"
+        case .unknown: return t("protection.unconfirmedNotProtected")
         case .subscription: break
         }
         // Guard-online is implied by reaching here; when takeover is offered, `offerHeader` shows
         // its own target line instead of this one.
         if !controller.lastDecision.allowed { return target }
-        if !store.claudeRunning { return target + " · 桌面未运行" }
+        if !store.claudeRunning { return target + " · " + t("desktop.stopped") }
         return target
     }
     private var statusIcon: String {
@@ -548,21 +568,23 @@ struct TerminalProtectionCard: View {
     private func modeName(_ mode: ProxyMode?) -> String {
         switch mode {
         case .shadowrocket: return "Shadowrocket"
-        case .auto: return "自动识别 TUN"
-        case nil: return "未设置"
+        case .auto: return t("protection.autoTUN")
+        case nil: return t("common.notSet")
         }
     }
     /// Shown only while the form differs from the saved config. States the saved values only;
     /// whether the guard is actually running is shown by the status block, not here.
     private var unsavedNote: String? {
         guard controller.enabled, controller.hasUnsavedChanges else { return nil }
-        guard let active = controller.activeCountry else { return "未保存 · 尚无已保存设置" }
-        return "未保存 · 已保存为 \(active) · \(modeName(controller.activeProxyMode))"
+        guard let active = controller.activeCountry else { return t("protection.noSavedSettings") }
+        return t("protection.unsavedValues", arguments: [
+            "country": active, "mode": modeName(controller.activeProxyMode)
+        ])
     }
     private var modeDetail: String {
         switch controller.mode {
-        case .shadowrocket: return "Shadowrocket 需显示已连接；仅识别 198.18.* TUN 地址。"
-        case .auto: return "自动模式仅识别 198.18.* TUN 地址，不单独检查代理，也不修改系统代理。"
+        case .shadowrocket: return t("protection.shadowrocketDetail")
+        case .auto: return t("protection.autoDetail")
         }
     }
 
@@ -611,21 +633,20 @@ struct TerminalProtectionCard: View {
             checkedMode = controller.mode
             resultsExpanded = true
         }
-        .confirmationDialog("将当前桌面纳入保护？", isPresented: $confirmProtectCurrentDesktop,
+        .confirmationDialog(t("protection.takeoverTitle"), isPresented: $confirmProtectCurrentDesktop,
                             titleVisibility: .visible) {
-            Button("纳入保护") {
+            Button(t("protection.takeoverAction")) {
                 // Re-validate at confirm time; the desktop, network or guard may have changed meanwhile.
                 guard offerDesktopProtection, !busy else { return }
                 Task { await controller.protectCurrentDesktop() }
             }
-            Button("取消", role: .cancel) {}
+            Button(t("common.cancel"), role: .cancel) {}
         } message: {
-            Text("仅限订阅桌面（非 API）。纳入后若网络不符，守卫可能关闭此桌面；不会切换账号，也不会停止 CLI。")
+            Text(t("protection.takeoverBody"))
         }
-        .confirmationDialog("停止后台保护？独立守卫将停用，切换器也不再放行打开或切换 Claude。仅退出界面不会停止保护。",
-                            isPresented: $confirmStop) {
-            Button("确认停止保护", role: .destructive) { controller.disable() }
-            Button("取消", role: .cancel) {}
+        .confirmationDialog(t("protection.stopTitle"), isPresented: $confirmStop) {
+            Button(t("protection.stopAction"), role: .destructive) { controller.disable() }
+            Button(t("common.cancel"), role: .cancel) {}
         }
     }
 
@@ -637,25 +658,24 @@ struct TerminalProtectionCard: View {
             }
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("后台保护")
+                    Text(t("protection.background"))
                         .font(.system(size: 11.5, weight: .semibold)).foregroundColor(.txt)
                     if !controller.enabled {
-                        Text("填好目标国家和代理模式，再打开右侧开关。")
+                        Text(t("protection.setupPrompt"))
                             .font(.system(size: 9.5)).foregroundColor(.sub)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 Spacer()
-                Toggle("后台保护", isOn: protectionEnabled)
+                Toggle(t("protection.background"), isOn: protectionEnabled)
                     .toggleStyle(.switch)
                     .labelsHidden()
                     .disabled(busy || controller.working)
-                    .help("开启后按下方设置保存并启动守卫；关闭前会先确认。\n" + desktopScopeHelp
-                          + "\n终端只核验默认保存的登录，不停止运行中的 CLI。")
+                    .help(t("protection.toggleHelp", arguments: ["scope": desktopScopeHelp]))
             }
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("目标国家").font(.system(size: 10)).foregroundColor(.sub)
+                    Text(t("protection.targetCountry")).font(.system(size: 10)).foregroundColor(.sub)
                         .frame(height: 22)
                     TextField("SG", text: $controller.country)
                         .textFieldStyle(.plain)
@@ -665,14 +685,14 @@ struct TerminalProtectionCard: View {
                         .frame(height: 28)
                         .background(RoundedRectangle(cornerRadius: 6).fill(Color.bg))
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
-                        .help("两位国家代码，例如 SG；保存后顶部目标才更新")
-                        .accessibilityLabel("目标国家")
+                        .help(t("protection.countryHelp"))
+                        .accessibilityLabel(t("protection.targetCountry"))
                         .disabled(busy || controller.working || controller.checking)
                 }
                 .frame(width: 78, alignment: .leading)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 2) {
-                        Text("代理模式").font(.system(size: 10)).foregroundColor(.sub)
+                        Text(t("protection.proxyMode")).font(.system(size: 10)).foregroundColor(.sub)
                         Button { showProxyHelp.toggle() } label: {
                             Image(systemName: "questionmark.circle")
                                 .font(.system(size: 10)).foregroundColor(.sub)
@@ -680,8 +700,8 @@ struct TerminalProtectionCard: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .help("代理与 TUN 兼容说明")
-                        .accessibilityLabel("代理与 TUN 兼容说明")
+                        .help(t("protection.compatibility"))
+                        .accessibilityLabel(t("protection.compatibility"))
                         .popover(isPresented: $showProxyHelp, arrowEdge: .bottom) {
                             Text(modeDetail)
                                 .font(.system(size: 10.5)).foregroundColor(.txt)
@@ -690,21 +710,21 @@ struct TerminalProtectionCard: View {
                         }
                     }
                     .frame(height: 22)
-                    Picker("代理模式", selection: $controller.mode) {
+                    Picker(t("protection.proxyMode"), selection: $controller.mode) {
                         Text("Shadowrocket").tag(ProxyMode.shadowrocket)
-                        Text("自动识别 TUN").tag(ProxyMode.auto)
+                        Text(t("protection.autoTUN")).tag(ProxyMode.auto)
                     }
                     .pickerStyle(.menu).labelsHidden()
                     .font(.system(size: 11))
                     .frame(maxWidth: .infinity)
                     .frame(height: 28)
                     .disabled(busy || controller.working || controller.checking)
-                    .help("保存后生效；仅检查网络不会保存")
+                    .help(t("protection.saveToApply"))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if controller.enabled {
                     Button { Task { await controller.enable() } } label: {
-                        Text(controller.hasUnsavedChanges ? "保存设置" : "已保存")
+                        Text(t(controller.hasUnsavedChanges ? "protection.saveSettings" : "common.saved"))
                             .font(.system(size: 10.5, weight: .semibold))
                             .frame(width: 76, height: 28)
                             .contentShape(Rectangle())
@@ -717,7 +737,7 @@ struct TerminalProtectionCard: View {
                         .stroke(Color.stroke.opacity(controller.hasUnsavedChanges ? 0 : 1), lineWidth: 1))
                     .disabled(busy || controller.working || !controller.hasUnsavedChanges)
                     .opacity(busy || controller.working ? 0.55 : 1)
-                    .help(controller.hasUnsavedChanges ? "保存当前输入并应用保护；顶部目标在保存后更新" : "国家与代理模式均已保存")
+                    .help(t(controller.hasUnsavedChanges ? "protection.saveHelp" : "protection.savedHelp"))
                 }
             }
             if let unsavedNote {
@@ -730,7 +750,7 @@ struct TerminalProtectionCard: View {
                 Button { Task { await controller.checkNow() } } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "network").font(.system(size: 10, weight: .semibold))
-                        Text(controller.checking ? "检查中…" : "仅检查网络")
+                        Text(t(controller.checking ? "common.checking" : "protection.checkOnly"))
                             .font(.system(size: 10.5, weight: .semibold))
                     }
                     .padding(.horizontal, 12)
@@ -742,17 +762,17 @@ struct TerminalProtectionCard: View {
                 }
                 .buttonStyle(.plain).disabled(busy || controller.working || controller.checking)
                 .opacity(busy || controller.working || controller.checking ? 0.55 : 1)
-                .help("按当前输入只读诊断；不保存、不启用保护、不打开 Claude")
-                .accessibilityHint("只读诊断，不保存、不启用保护、不打开 Claude")
+                .help(t("protection.checkOnlyHelp"))
+                .accessibilityHint(t("protection.checkOnlyHelp"))
                 if controller.lastCheckReport == nil && !controller.checking {
-                    Text("只读，不保存")
+                    Text(t("protection.readOnly"))
                         .font(.system(size: 9.5)).foregroundColor(.sub).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 Button { showCheckHelp.toggle() } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "questionmark.circle").font(.system(size: 10.5))
-                        Text("检查说明").font(.system(size: 10, weight: .medium))
+                        Text(t("protection.checkHelpButton")).font(.system(size: 10, weight: .medium))
                     }
                     .foregroundColor(helpHover || showCheckHelp ? .txt : .sub)
                     .padding(.horizontal, 9).frame(height: 28)
@@ -762,8 +782,8 @@ struct TerminalProtectionCard: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { helpHover = $0 }
-                .help("三种动作的区别、后台间隔与保护范围")
-                .accessibilityLabel("检查说明")
+                .help(t("protection.checkHelpSummary"))
+                .accessibilityLabel(t("protection.checkHelpButton"))
                 .popover(isPresented: $showCheckHelp, arrowEdge: .bottom) { checkHelpContent }
             }
             checkResults
