@@ -146,6 +146,8 @@ def main():
     control = None
     events = queue.Queue()
     streams = []
+    workers = []
+    kernel_cases = []
     error = None
     cleanup = False
     results = Path(os.environ["CS_PROXY_RESULT"])
@@ -379,6 +381,50 @@ def main():
             new_flows("fresh-evidence-recovers", True)
             command("revoke")
             new_flows("explicit-revoke", False)
+            # The deprecated launcher is an experimental, per-process kernel
+            # restriction. It is not a global app filter and cannot retrofit an
+            # already-running process. No system network settings are changed.
+            policy = root / "fixture.sb"
+            policy.write_text('(version 1)\n(allow default)\n(deny network*)\n' +
+                '(allow network-outbound (remote ip "localhost:' + str(ports[0]) + '") (remote ip "localhost:' + str(ports[1]) + '"))\n')
+            worker_path = str(Path(__file__).with_name("socket_worker.py"))
+            protected = subprocess.Popen(["/usr/bin/sandbox-exec", "-f", str(policy), sys.executable, worker_path],
+                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=(root/'worker.stderr').open('w'), text=True)
+            ordinary = subprocess.Popen([sys.executable, worker_path], stdin=subprocess.PIPE,
+                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+            workers.extend([protected, ordinary])
+            def call(worker, message, expected, name):
+                worker.stdin.write(json.dumps(message) + "\n")
+                worker.stdin.flush()
+                reply = json.loads(worker.stdout.readline())
+                row = dict(case=name, expected=expected, result=reply, family=4 if message.get('host') == HOSTS[0] else 6)
+                kernel_cases.append(row)
+                if reply.get('ok') != expected or reply.get('unexpectedBytes'):
+                    raise AssertionError(row)
+                return reply
+            for family, host in enumerate(HOSTS):
+                key = str(family)
+                direct = dict(op="connect", host=host, port=SERVERS[family].server_address[1], key=key)
+                call(ordinary, direct, True, "unrelated-existing-open")
+                call(protected, direct, False, "kernel-direct-TCP-denied")
+                call(protected, dict(op="udp", host=host, port=SERVERS[2+family].server_address[1], token=uuid.uuid4().hex), False, "kernel-direct-UDP-denied")
+                call(protected, dict(op="child", command=direct), False, "child-inherits-direct-denial")
+            command()
+            for family, host in enumerate(HOSTS):
+                proxy = dict(op="connect", host=host, port=ports[family], key=str(family),
+                             authority="fixture4.invalid:443" if family == 0 else "fixture6.invalid:443")
+                call(protected, proxy, True, "kernel-proxy-route-allowed")
+                call(protected, dict(op="send", host=host, key=str(family), token=uuid.uuid4().hex), True, "kernel-proxy-existing-positive")
+            command("revoke")
+            for family, host in enumerate(HOSTS):
+                call(protected, dict(op="send", host=host, key=str(family), token=uuid.uuid4().hex), False, "kernel-proxy-existing-revoked")
+                call(protected, dict(op="connect", host=host, port=ports[family], key="new", authority="fixture4.invalid:443" if family == 0 else "fixture6.invalid:443"), False, "kernel-proxy-new-revoked")
+                call(protected, dict(op="connect", host=host, port=SERVERS[family].server_address[1], key="direct-after"), False, "kernel-direct-after-revoke-denied")
+                call(ordinary, dict(op="send", host=host, key=str(family), token=uuid.uuid4().hex), True, "unrelated-existing-unaffected-by-kernel-gate")
+                call(ordinary, dict(op="connect", host=host, port=SERVERS[family].server_address[1], key="new-unrelated"), True, "unrelated-new-unaffected-by-kernel-gate")
+            command()
+            for family, host in enumerate(HOSTS):
+                call(protected, dict(op="connect", host=host, port=ports[family], key="recovery", authority="fixture4.invalid:443" if family == 0 else "fixture6.invalid:443"), True, "kernel-fresh-proxy-recovery")
             with LOCK:
                 if "expired-queued-fixture" in SEEN:
                     raise AssertionError("expired buffered bytes were forwarded")
@@ -391,6 +437,13 @@ def main():
         except BaseException as failure:
             error = repr(failure)
         finally:
+            for worker in workers:
+                worker.stdin.close()
+                try:
+                    worker.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    worker.terminate()
+                    worker.wait(timeout=2)
             stop_hops()
             if control:
                 control.close()
@@ -407,6 +460,8 @@ def main():
                   experimentCompleted=error is None and cleanup, sourceOrchestration="fixture clients, same UID",
                   directBypassBlocked=False, actualClaudeOrCLI=False, nativePerAppFirewall="NOT_RUN",
                   noSystemNetworkOrGuardMutation=True, gatewayStderr=stderr, productionIntegration="HOLD")
+    result.update(kernelLauncherCases=kernel_cases, kernelLauncher="deprecated sandbox-exec, launched fixtures only",
+                  preexistingUnwrappedProcessesCovered=False, actualClaudeOrCLICompatibility="NOT_RUN")
     results.write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps({k:v for k,v in result.items() if k != "cases"}, indent=2), flush=True)
     os._exit(0 if result["experimentCompleted"] else 1)
