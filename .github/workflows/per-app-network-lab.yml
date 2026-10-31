@@ -17,6 +17,15 @@ jobs:
           swiftc research/per-app-network-lab/SelectivePolicy.swift research/per-app-network-lab/policy_checks.swift -o "$RUNNER_TEMP/policy-checks"
           "$RUNNER_TEMP/policy-checks" > "$RUNNER_TEMP/policy-results.json"
           swiftc -swift-version 5 -target x86_64-apple-macos13.0 -parse-as-library -emit-module -module-name AppScopeProbe research/per-app-network-lab/AuditTokenBridge.swift -o "$RUNNER_TEMP/AppScopeProbe.swiftmodule"
+      - name: Resolve audit identity of signed fictional processes (not filter flows)
+        run: |
+          clang -c research/per-app-network-lab/self_audit_token.c -o "$RUNNER_TEMP/self-token.o"
+          swiftc research/per-app-network-lab/AuditTokenBridge.swift research/per-app-network-lab/self_identity_probe.swift "$RUNNER_TEMP/self-token.o" -o "$RUNNER_TEMP/self-identity"
+          for role in protected-cli unrelated-app; do
+            cp "$RUNNER_TEMP/self-identity" "$RUNNER_TEMP/$role"
+            codesign --force -s - --identifier "dev.claudeswitcher.fixture.$role" "$RUNNER_TEMP/$role"
+            "$RUNNER_TEMP/$role" "dev.claudeswitcher.fixture.$role" > "$RUNNER_TEMP/identity-$role.json"
+          done
       - name: Same-user isolation negative control on disposable hosted Mac
         run: |
           sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" SUDO_UID="$(id -u)" RUNNER_TEMP="$RUNNER_TEMP" CS_APP_SCOPE_LAB=ephemeral-loopback-only CS_SCOPE_RESULT="$RUNNER_TEMP/scope-results.json" "$(command -v python3)" "$PWD/research/per-app-network-lab/macos_scope_probe.py"
@@ -28,4 +37,5 @@ jobs:
           path: |
             ${{ runner.temp }}/scope-results.json
             ${{ runner.temp }}/policy-results.json
+            ${{ runner.temp }}/identity-*.json
           retention-days: 14
