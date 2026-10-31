@@ -1,0 +1,26 @@
+name: Dedicated proxy data-path isolation (fixtures, no host rules)
+on:
+  push:
+    branches: [codex/dedicated-proxy-lab-20261101]
+permissions:
+  contents: read
+jobs:
+  dedicated-proxy-fixtures:
+    runs-on: macos-15-intel
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Existing streams, new streams, unaffected controls and direct bypass
+        env:
+          CS_PROXY_LAB: loopback-only
+          CS_PROXY_RESULT: ${{ runner.temp }}/dedicated-proxy-results.json
+        run: python3 research/dedicated-proxy-lab/probe.py
+      - name: Preserve evidence (expected bypass means integration HOLD)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: dedicated-proxy-evidence
+          path: ${{ runner.temp }}/dedicated-proxy-results.json
+          retention-days: 14
