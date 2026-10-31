@@ -1,0 +1,40 @@
+{
+  "checkedOnSingapore": "2026-11-01",
+  "reviewer": "Codex in this chat",
+  "hostReadScope": "app bundle metadata and UI localization only",
+  "installedApp": {
+    "CFBundleIdentifier": "com.liguangming.Shadowrocket",
+    "CFBundleShortVersionString": "2.2.92",
+    "CFBundleVersion": "3445"
+  },
+  "localizationEvidence": {
+    "Base.lproj": {
+      "sourceSHA256": "5282bb9f1aed5d518e7d081535cba25fd43bbff420b5de35adabc9157462183b",
+      "keysPresent": [
+        "Enforce Routes",
+        "Include All Networks",
+        "Always On"
+      ]
+    },
+    "zh-Hans.lproj": {
+      "sourceSHA256": "1e2fa5ec57bea64d9820701eb033f586708c314155dd01132a0bcaa4461d0a02",
+      "keysPresent": [
+        "Enforce Routes",
+        "Include All Networks",
+        "Always On"
+      ]
+    }
+  },
+  "officialDocSHA256": {
+    "routing-your-vpn-network-traffic.json": "1dab059fb4f3f1e69614c736b0e90ac2cf5c7ff84c7e73cc2830f84419e1a9fb",
+    "nevpnprotocol-enforceroutes.json": "a4c653e6d4630924581e4657a40f682dda82eec4e8e615ec5110013376f38833"
+  },
+  "currentVPNPreferenceValuesRead": false,
+  "appReceiptOrAppleIDRead": false,
+  "appCopiedOrUploaded": false,
+  "hostNetworkGuardOrSessionsModified": false,
+  "ShadowrocketRuntimeIsolation": "NOT_RUN: no confirmed licensed isolated test environment",
+  "enforceRoutesIsProvenKillSwitch": false,
+  "includeAllNetworksPlatformDropBehavior": "DOCUMENTED_BY_APPLE_NOT_SHADOWROCKET_RUNTIME_TEST",
+  "productionIntegration": "HOLD"
+}
