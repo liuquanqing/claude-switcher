@@ -1,0 +1,9 @@
+{
+  "checks" : 6,
+  "layer" : "own-fictional-process-audit-token",
+  "networkFilterFlow" : "NOT_RUN",
+  "otherProcessExamined" : false,
+  "passed" : true,
+  "productionReady" : false,
+  "signedFixtureIdentifier" : "dev.claudeswitcher.fixture.protected-cli"
+}

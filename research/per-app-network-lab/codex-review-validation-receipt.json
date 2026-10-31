@@ -1,0 +1,46 @@
+{
+  "checkedOnSingapore": "2026-11-01",
+  "reviewer": "Codex in this chat; author-side review",
+  "externalReviewModelsInvoked": false,
+  "sourceCommit": "956c7e9092e01350c0480ab62dda1073421c8381",
+  "runURL": "https://github.com/liuquanqing/claude-switcher/actions/runs/41220740248",
+  "workflowConclusion": "success",
+  "environmentGuardChecks": 9,
+  "policyFixtureChecks": 54,
+  "ownFictionalAuditIdentityChecks": 12,
+  "kernelLoopbackObservations": 32,
+  "expectedCollateralDamageControls": 4,
+  "uniqueProbeTokensArchived": 32,
+  "lateDeliveryRecheckedWithinExperimentWindow": true,
+  "kernelCleanup": true,
+  "appSelectiveBlockingRequirement": "NOT_PASSED",
+  "productionIntegration": "HOLD",
+  "sourceSHA256": {
+    "research/per-app-network-lab/self_identity_probe.swift": "deb65079dbe143f5aef5511fc389d0bb26adc2f6203e3615ea7be270a07dbf81",
+    "research/per-app-network-lab/AuditTokenBridge.swift": "76291bf22a6f4bad58c2ab51068d009e1f971b871635f74f3429c1584e9f5c5f",
+    "research/per-app-network-lab/policy_checks.swift": "bbd429429482376f47683b1ab98a4b5b220c7510096f0cc4ec1c6dc29191a195",
+    "research/per-app-network-lab/self_audit_token.c": "48d9dbd05cc7bb7219ed123c19adbbb2238cfa3ddc03158ad113066f212f9c2e",
+    "research/per-app-network-lab/SelectivePolicy.swift": "9f764d477c9cad0908fff5582a698a3a59ebc3a89900dd8331a150bfd4b5a342",
+    "research/per-app-network-lab/macos_scope_probe.py": "8662f829e3da926fbf1b3272b7f6031fd8880c3cc1c3393eb6e3290683cca758",
+    "research/per-app-network-lab/check_environment_guards.py": "3b4183d3d6e370c3daef8e271bcf5293ada5123bb175a07d9d7f1b8502126543",
+    ".github/workflows/per-app-network-lab.yml": "c57c88aae80398bf96c8636a65729164e20803fe9a99b5c4216d59b7fe58ca2e"
+  },
+  "artifactSHA256": {
+    "scope-results.json": "df9901a50d2bf8e9fb3209fbcdcde7bc9ddcf070b05331493642265e799ca197",
+    "identity-protected-cli.json": "25a436c4e936cd3bef2d16254b989063c560ee2e444d6b4108bf5b49166a9d92",
+    "environment-guard-results.json": "0d601d74b05b1e1ee92ba6ed9cd734014f434893a2c245e635c7395421533aa0",
+    "policy-results.json": "630955d1f1d2606728814a57762455b55468a72d234d61d4bfa2d1e2b7a7859c",
+    "workflow-summary.json": "4ebaea406d1db692edb5ad49fa9771c14d48b69d4b700c89591bccccea7eb4b9",
+    "identity-unrelated-app.json": "4797c6bf518ea85c7cedf1068dc10ea72ae427d6a8f1b1a33d14c25ac3613813"
+  },
+  "personalNetworkGuardAccountsSessionsTouched": false,
+  "notRun": [
+    "deployed Network Extension",
+    "real filter flow attribution",
+    "trusted publisher/enrollment classifier",
+    "existing flow revocation",
+    "provider crash behavior",
+    "real Claude/CLI coverage",
+    "third-party TUN coexistence"
+  ]
+}

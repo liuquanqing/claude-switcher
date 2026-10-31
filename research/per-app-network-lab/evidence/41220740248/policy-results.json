@@ -1,0 +1,8 @@
+{
+  "actualFlowAttribution" : "NOT_RUN",
+  "checks" : 54,
+  "layer" : "pure-policy-fixtures",
+  "OSFilterInstalled" : false,
+  "passed" : true,
+  "productionReady" : false
+}
