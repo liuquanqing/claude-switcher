@@ -86,6 +86,8 @@ class Gateway:
         try:
             header = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 2)
             verb, authority, version = header.split(b"\r\n", 1)[0].decode("ascii").split()
+            print(json.dumps({"event": "connect-attempt", "authority": authority,
+                              "at": time.monotonic(), "active": self.active()}), flush=True)
             if verb != "CONNECT" or authority not in self.targets:
                 writer.write(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
                 await writer.drain()
