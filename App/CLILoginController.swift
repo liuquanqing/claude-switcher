@@ -20,30 +20,41 @@ import SwitcherCore
         return try await fetch(token)
     }
 
-    private func profileDescriptor(_ name: String, allowInteraction: Bool = true) async throws -> CLIProfileIdentity {
-        guard ProfileTransaction.validName(name), let index = profiles.firstIndex(where: { $0.name == name }) else { throw err("桌面档案不存在或名称无效，未修改登录。") }
+    func profileDescriptor(_ name: String, allowInteraction: Bool = true) async throws -> CLIProfileIdentity {
+        guard ProfileTransaction.validName(name), profiles.contains(where: { $0.name == name }) else { throw err("桌面档案不存在或名称无效，未修改登录。") }
+        let originalMarker = try confirmedCurrentProfile()
         let directory = profileDir(name)
         let kind = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         guard kind.isDirectory == true, kind.isSymbolicLink != true else { throw err("桌面档案路径不是普通目录，未读取登录。") }
         guard let access = try await token(for: directory, allowExpired: true, allowInteraction: allowInteraction) else { return CLIProfileIdentity(name: name, identity: nil) }
         let config = try CLIJSON.object(Data(contentsOf: directory.appendingPathComponent("config.json")))
         let localAccount = config["lastKnownAccountUuid"] as? String
-        if let snapshot = profiles[index].snapshot, snapshot.identity.isComplete,
+        if let snapshot = profiles.first(where: { $0.name == name })?.snapshot, snapshot.identity.isComplete,
            snapshot.identityTokenDigest == desktopTokenDigest(access),
            localAccount == nil || localAccount == snapshot.identity.accountID {
+            guard try confirmedCurrentProfile() == originalMarker else { throw err("读取期间桌面账号发生变化，未采纳旧身份。") }
             return CLIProfileIdentity(name: name, identity: snapshot.identity)
         }
         let identity: CLIIdentity
-        do { identity = try await checkedCLIIdentity(access) }
+        var observedProfile: [String: Any]?
+        do {
+            identity = try await checkedCLIIdentity(access) { access in
+                let value = try await getJSON("profile", access)
+                observedProfile = value
+                return CLIIdentity.profile(value)
+            }
+        }
         catch let failure as SafetyError { throw failure }
         catch { throw err("桌面档案“\(name)”的保存身份未能确认；未移动目录，请先在原客户端确认登录。") }
         guard identity.isComplete, localAccount == nil || localAccount == identity.accountID else {
             throw err("桌面保存身份与档案标识不一致，未修改登录；请先在原客户端确认该档案。")
         }
-        var snapshot = profiles[index].snapshot ?? Snapshot(fetchedAt: .distantPast)
-        snapshot.accountID = identity.accountID; snapshot.organizationID = identity.organizationID; snapshot.email = identity.email
-        snapshot.identityTokenDigest = desktopTokenDigest(access)
-        profiles[index].snapshot = snapshot; saveCache(name, snapshot)
+        guard try confirmedCurrentProfile() == originalMarker,
+              try await token(for: directory, allowExpired: true, allowInteraction: allowInteraction) == access else {
+            throw err("读取期间桌面账号发生变化，未采纳旧身份。")
+        }
+        try applyVerifiedDesktopIdentity(name: name, identity: identity, tokenDigest: desktopTokenDigest(access),
+                                         plan: planName(observedProfile?["organization"] as? [String: Any]))
         return CLIProfileIdentity(name: name, identity: identity)
     }
 
@@ -155,7 +166,9 @@ import SwitcherCore
         let result = await operation()
         guard current == profileAtStart, cliStatusGeneration == generationAtStart else { invalidateCLIStatus(); return }
         let sameIdentity = result.identity.map { cliObservedIdentity?.samePrincipal(as: $0) == true } ?? false
-        let preserveCompleted = sameIdentity && result.profile == cliProfile
+        let sameProfile = result.profile == cliProfile
+            || (cliProfile == nil && cliStatus == .reported && result.profile == current)
+        let preserveCompleted = sameIdentity && sameProfile && result.status != .different
             && (result.metadataOnly && (cliStatus == .reported || cliStatus == .matched && result.profile == current)
                 || result.status == .reported && cliStatus == .matched && result.profile == current)
         cliObservedIdentity = result.identity

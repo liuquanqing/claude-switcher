@@ -624,6 +624,104 @@ actor FixtureGuardWorker: GuardWorking {
   let afterAmbiguousSample = try usageSnapshotEncoder.encode(mappedStore.profiles[0].snapshot)
   require(mappedStore.usageNotice != nil && afterAmbiguousSample == latestSnapshot,
           "ambiguous account mappings never overwrite a card using email or a guessed profile")
+  func emptyAccountStore() -> Store {
+   let store = Store(demo: true)
+   for i in store.profiles.indices { store.profiles[i].snapshot = nil; store.profiles[i].usageState = .notRequested }
+   store.lastRefresh = nil
+   return store
+  }
+  let emptyParkedFolder = root.appendingPathComponent("first-install-empty-parked")
+  try FileManager.default.createDirectory(at: emptyParkedFolder, withIntermediateDirectories: true)
+  require(!profileHasLocalData(directory: emptyParkedFolder, cached: nil),
+          "an empty first-run Business slot is not presented as a detected signed-in account")
+  guard let bootstrapSample = officialSample else { throw SafetyError("fixture sample missing") }
+  let coldStore = emptyAccountStore()
+  let coldGuard = coldStore.protection.lastDecision
+  require(coldStore.needsActiveAccountBootstrap, "an explicit open can detect that first-install desktop information still needs initialization")
+  var bootstrapSteps: [String] = []
+  try await coldStore.refreshAccountAndUsage(allowInteraction: false, observeDesktop: { name, interaction in
+   require(name == "Personal" && !interaction, "cold automatic refresh observes only the active desktop without requesting authorization UI")
+   bootstrapSteps.append("desktop")
+   return CLIProfileIdentity(name: name, identity: bootstrapSample.identity)
+  }, readUsage: {
+   bootstrapSteps.append("usage")
+   require(coldStore.active?.snapshot?.identity.samePrincipal(as: bootstrapSample.identity) == true,
+           "first-install desktop identity is established before reading quota")
+   return bootstrapSample
+  })
+  require(bootstrapSteps == ["desktop", "usage"] && coldStore.active?.snapshot?.session?.used == 31
+          && coldStore.lastRefresh == nativeSampleDate && coldStore.active?.snapshot?.email == bootstrapSample.identity.email,
+          "first install with no switcher cache displays verified desktop identity and matched native quota")
+  require(!coldStore.needsActiveAccountBootstrap, "showing an initialized desktop does not schedule first-open quota initialization again")
+  require(coldStore.profiles.dropFirst().allSatisfy { $0.snapshot == nil } && coldStore.protection.lastDecision == coldGuard,
+          "bootstrap never invents inactive account records or changes guard state")
+  coldStore.cliStatus = .reported; coldStore.cliProfile = nil
+  coldStore.cliObservedIdentity = bootstrapSample.identity; coldStore.cliStatusCheckedAt = nativeSampleDate
+  var newlyMappedStatus = CLIStatusPresentation()
+  newlyMappedStatus.identity = bootstrapSample.identity; newlyMappedStatus.profile = coldStore.current
+  newlyMappedStatus.metadataOnly = true
+  await coldStore.updateCLIStatus { newlyMappedStatus }
+  require(coldStore.cliStatus == .reported && coldStore.cliProfile == coldStore.current
+          && coldStore.cliStatusCheckedAt == nativeSampleDate,
+          "first desktop mapping does not erase the official CLI report or manufacture a new verification time")
+  coldStore.cliStatus = .reported; coldStore.cliProfile = nil
+  var newlyDiscoveredMismatch = newlyMappedStatus
+  newlyDiscoveredMismatch.profile = nil; newlyDiscoveredMismatch.status = .different
+  await coldStore.updateCLIStatus { newlyDiscoveredMismatch }
+  require(coldStore.cliStatus == .different,
+          "a newly established desktop mismatch supersedes a previous standalone logged-in report")
+  let mismatchedColdStore = emptyAccountStore()
+  let differentDesktop = CLIIdentity(accountID: "fixture-other-desktop", organizationID: "fixture-other-org", email: "desktop-only@example.test")
+  try await mismatchedColdStore.refreshAccountAndUsage(allowInteraction: true, observeDesktop: { name, _ in
+   CLIProfileIdentity(name: name, identity: differentDesktop)
+  }, readUsage: { bootstrapSample })
+  require(mismatchedColdStore.active?.snapshot?.identity.samePrincipal(as: differentDesktop) == true
+          && mismatchedColdStore.active?.snapshot?.session == nil && mismatchedColdStore.lastRefresh == nil
+          && mismatchedColdStore.usageNotice != nil,
+          "a first-install desktop/CLI mismatch retains desktop identity and never attaches the CLI's quota to it")
+  let deniedColdStore = emptyAccountStore()
+  var deniedUsageReads = 0
+  var deniedIdentityRejected = false
+  do {
+   try await deniedColdStore.refreshAccountAndUsage(allowInteraction: false, observeDesktop: { _, _ in
+    throw SafetyError("fixture authorization unavailable")
+   }, readUsage: { deniedUsageReads += 1; return bootstrapSample })
+  } catch { deniedIdentityRejected = true }
+  require(deniedIdentityRejected && deniedUsageReads == 0 && deniedColdStore.active?.snapshot == nil,
+          "unavailable desktop authorization does not fall back to the CLI identity or query quota first")
+  let partialColdStore = emptyAccountStore()
+  var partialRejected = false
+  do {
+   try await partialColdStore.refreshAccountAndUsage(allowInteraction: true, observeDesktop: { name, _ in
+    CLIProfileIdentity(name: name, identity: CLIIdentity(accountID: bootstrapSample.identity.accountID, organizationID: nil, email: bootstrapSample.identity.email))
+   }, readUsage: { bootstrapSample })
+  } catch { partialRejected = true }
+  require(partialRejected && partialColdStore.active?.snapshot == nil, "matching account/email without a desktop organization is not complete identity proof")
+  let changedColdStore = emptyAccountStore()
+  var changedBootstrapRejected = false
+  do {
+   try await changedColdStore.refreshAccountAndUsage(allowInteraction: true, observeDesktop: { name, _ in
+    changedColdStore.current = "Business"
+    return CLIProfileIdentity(name: name, identity: bootstrapSample.identity)
+   }, readUsage: { bootstrapSample })
+  } catch { changedBootstrapRejected = true }
+  require(changedBootstrapRejected && changedColdStore.profiles.allSatisfy { $0.snapshot == nil },
+          "account changed during first-install identity read cannot commit stale metadata")
+  let metadataOnlyStore = emptyAccountStore()
+  try await metadataOnlyStore.refreshAccountAndUsage(allowInteraction: false, observeDesktop: { name, _ in
+   CLIProfileIdentity(name: name, identity: bootstrapSample.identity)
+  }, readUsage: { nil })
+  require(metadataOnlyStore.active?.snapshot?.email != nil && metadataOnlyStore.lastRefresh == nil
+          && metadataOnlyStore.active?.snapshot?.session == nil,
+          "confirmed desktop identity can be shown without fabricating quota or sample time")
+  let previousSampleTime = coldStore.active?.snapshot?.fetchedAt
+  try coldStore.applyVerifiedDesktopIdentity(name: "Personal", identity: bootstrapSample.identity, tokenDigest: "fixture-token-next", plan: "Max 5x")
+  require(coldStore.active?.snapshot?.session?.used == 31 && coldStore.active?.snapshot?.fetchedAt == previousSampleTime,
+          "refreshing the same desktop identity retains the actual quota sample timestamp")
+  require(coldStore.active?.snapshot?.plan == "Max 5x", "verified desktop plan metadata is retained without another quota endpoint")
+  try coldStore.applyVerifiedDesktopIdentity(name: "Personal", identity: differentDesktop, tokenDigest: "fixture-token-other")
+  require(coldStore.active?.snapshot?.session == nil && coldStore.active?.snapshot?.weekly == nil,
+          "a changed desktop principal never inherits the previous account's quota")
   require(languageStore.appLanguage == "zh" && languageController.language == "zh", "demo language is isolated and starts in Chinese")
   let languageProfile = languageStore.current
   let languageAccounts = languageStore.profiles.map(\.name)

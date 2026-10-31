@@ -350,7 +350,8 @@ final class Store: ObservableObject {
         profiles = allProfileNames().map { n in
             if let existing = profiles.first(where: { $0.name == n }) { return existing }
             let snapshot = loadCache(n)
-            return Profile(name: n, snapshot: snapshot, signedIn: true, usageState: snapshot == nil ? .notRequested : .cached)
+            return Profile(name: n, snapshot: snapshot, signedIn: profileHasLocalData(directory: profileDir(n), cached: snapshot),
+                           usageState: snapshot == nil ? .notRequested : .cached)
         }
         onChange?()
     }
@@ -394,9 +395,7 @@ final class Store: ObservableObject {
             }
         }
         do {
-            let sample = try await OfficialCLIUsageReader.read(home: FileManager.default.homeDirectoryForCurrentUser,
-                                                              manual: allowInteraction)
-            applyOfficialUsage(sample)
+            try await refreshAccountAndUsage(allowInteraction: allowInteraction)
         } catch { usageNotice = error.localizedDescription }
         if allowInteraction { await refreshCLI(verify: false) }
         onChange?()
@@ -453,9 +452,19 @@ final class Store: ObservableObject {
         let decision = await protection.preflight()
         guard decision.allowed else { banner = decision.message; return }
         if !isDemo {
-            do { try await launchProtectedDesktop(files: protection.files); protection.refreshStatus() } catch { banner = "打开 Claude 失败：" + error.localizedDescription }
+            do { try await launchProtectedDesktop(files: protection.files); protection.refreshStatus() }
+            catch {
+                banner = "打开 Claude 失败：" + error.localizedDescription
+                reloadAfterOperation(); return
+            }
         }
         reloadAfterOperation()
+        // An explicit first open should initialize account information as well.
+        // Showing an already-known desktop does not start another usage query.
+        if !isDemo && needsActiveAccountBootstrap {
+            busy = nil
+            await refresh(allowInteraction: true)
+        }
     }
 
     func switchTo(_ target: String) async {

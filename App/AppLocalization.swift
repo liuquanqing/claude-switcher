@@ -82,6 +82,9 @@ enum AppLocalization {
     ]
 
     private static let generatedMessages = [
+        "桌面档案或身份尚未确认，未改写账号资料。": "The desktop profile or identity is not confirmed. No account metadata was changed.",
+        "桌面账号身份尚未确认，未将 CLI 账号作为桌面账号。": "The desktop identity is not confirmed. The CLI account was not used as the desktop account.",
+        "读取期间桌面账号发生变化，未采纳旧身份。": "The desktop account changed during the read. The old result was not accepted.",
         "登录已过期，请在对应客户端确认登录后重试。": "Your login has expired. Confirm it in the corresponding client and try again.",
         "保存的订阅访问凭据已过期；未刷新或改写登录，请在对应账号更新登录后重试。": "The saved subscription access credential has expired. No login was refreshed or rewritten; update the login in the corresponding account and try again.",
         "查询期间账号档案已变化，未采纳旧用量结果。": "The account profile changed during the query, so the stale usage result was discarded.",

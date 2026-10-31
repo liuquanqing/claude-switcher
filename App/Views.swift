@@ -690,7 +690,7 @@ struct ProfileCard: View {
                 }
             }
 
-            if p.signedIn, let snapshot = s {
+            if p.signedIn, let snapshot = s, snapshot.session != nil || snapshot.weekly != nil {
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     let sampled = fullDateTime(snapshot.fetchedAt, language: language)
                     VStack(alignment: .leading, spacing: 8) {
