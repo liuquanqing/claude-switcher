@@ -1,0 +1,22 @@
+{
+  "revision": 3,
+  "confirmedBy": "user-in-this-chat-2026-11-01",
+  "supersedes": "research/network-validation/requirements-v2.json in the earlier planning checkout",
+  "priority": ["block-unsafe-Claude-traffic", "preserve-unrelated-traffic", "preserve-processes-and-work"],
+  "scope": ["Claude Desktop", "Claude Code already running or started in ordinary terminals", "verified helpers and attributed delegated flows"],
+  "notScope": ["all Terminal traffic", "all Node or Python processes", "other apps contacting the same domain"],
+  "existingConnectionsMustBeRevoked": true,
+  "newConnectionsMustBeDenied": true,
+  "proxyDirectFallbackAllowed": false,
+  "sameCountryNodeChangeAllowed": true,
+  "countryChangeIsInstantlyKnowable": false,
+  "blockMustPrecedeNotification": true,
+  "networkBlockRequiresIncidentConfirmation": false,
+  "closeDesktopAfterVerifiedBlock": "optional-user-action",
+  "dismissNotificationRestoresNetwork": false,
+  "restoreRequiresFreshValidation": true,
+  "apiModeExemption": "not promised: the same executables can host subscription and API tasks",
+  "wholeDeviceFallback": "not selected for this iteration; report unmet selectivity instead",
+  "localNetworkOrGuardChangesAllowed": false,
+  "productionIntegration": "HOLD"
+}

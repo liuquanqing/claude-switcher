@@ -1,0 +1,31 @@
+name: Per-app network scope research (no production integration)
+on:
+  push:
+    branches: [codex/per-app-network-lab-20261101]
+permissions:
+  contents: read
+jobs:
+  selective-scope:
+    runs-on: macos-15-intel
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Compile and test fictional policy only
+        run: |
+          swiftc research/per-app-network-lab/SelectivePolicy.swift research/per-app-network-lab/policy_checks.swift -o "$RUNNER_TEMP/policy-checks"
+          "$RUNNER_TEMP/policy-checks" > "$RUNNER_TEMP/policy-results.json"
+          swiftc -swift-version 5 -target x86_64-apple-macos13.0 -parse-as-library -emit-module -module-name AppScopeProbe research/per-app-network-lab/AuditTokenBridge.swift -o "$RUNNER_TEMP/AppScopeProbe.swiftmodule"
+      - name: Same-user isolation negative control on disposable hosted Mac
+        run: |
+          sudo -n env GITHUB_ACTIONS=true RUNNER_ENVIRONMENT=github-hosted GITHUB_REPOSITORY="$GITHUB_REPOSITORY" SUDO_UID="$(id -u)" RUNNER_TEMP="$RUNNER_TEMP" CS_APP_SCOPE_LAB=ephemeral-loopback-only CS_SCOPE_RESULT="$RUNNER_TEMP/scope-results.json" "$(command -v python3)" "$PWD/research/per-app-network-lab/macos_scope_probe.py"
+      - name: Preserve scope evidence (green job does not mean protection passed)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: per-app-scope-evidence
+          path: |
+            ${{ runner.temp }}/scope-results.json
+            ${{ runner.temp }}/policy-results.json
+          retention-days: 14
