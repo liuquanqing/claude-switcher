@@ -932,6 +932,7 @@ struct Panel: View {
     @ObservedObject var protection: ProtectionController
     @Environment(\.appLanguage) private var language
     @State private var quitHover = false
+    @State private var bannerDismissHover = false
     let cols = [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)]
 
     private func t(_ key: String, arguments: [String: String] = [:]) -> String {
@@ -1006,12 +1007,27 @@ struct Panel: View {
             }
             TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil)
             if let b = store.banner {
-                Label(t("banner.lastOperation", arguments: ["message": generated(b)]), systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(.warn).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10).padding(.vertical, 8)
-                    .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))
+                HStack(spacing: 8) {
+                    Label(t("banner.lastOperation", arguments: ["message": generated(b)]), systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.warn).fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button { store.banner = nil } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(bannerDismissHover ? .txt : .sub)
+                            .frame(width: 24, height: 24)
+                            .background(RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.stroke.opacity(bannerDismissHover ? 0.65 : 0)))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(t("protection.dismissAccessibility"))
+                    .accessibilityLabel(t("protection.dismissAccessibility"))
+                    .onHover { bannerDismissHover = $0 }
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))
             }
             if let offer = store.desktopOnlyOffer {
                 VStack(alignment: .leading, spacing: 7) {
