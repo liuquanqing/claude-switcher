@@ -6,6 +6,7 @@ struct CLIStatusPresentation: Equatable, Sendable {
     var status: CLILoginStatus = .unverified
     var profile: String?
     var email: String?
+    var identity: CLIIdentity?
     var detail: String?
     var standaloneVerified = false
     /// Saved identity metadata alone is not a completed login check.
@@ -30,7 +31,7 @@ extension CLIStatusPresentation {
         guard report.authMethod == "claude.ai", !configuration.otherAuthentication else {
             result.status = .otherAuthentication; result.detail = "CLI 使用 API 或其他认证来源。"; return (result, false)
         }
-        result.status = .reported; result.email = report.identity.email
+        result.status = .reported; result.email = report.identity.email; result.identity = report.identity
         result.detail = "官方 CLI 报告已登录；尚未验证在线有效性。"
         return (result, true)
     }

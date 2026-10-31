@@ -251,9 +251,13 @@ actor FixtureGuardWorker: GuardWorking {
    usageProbeCount += 1
    return NetworkObservation(proxyConnected: true, tunOnline: true, country: "SG")
   })
+  apiUsageController.country = "JP" // unsaved input must not replace the operation's saved target
   let apiUsageGate = await apiUsageController.preflight(target: .subscriptionUsage)
   require(apiUsageGate.allowed && usageProbeCount == 1 && apiUsageController.desktopScope == .api,
           "API subscription usage uses an injected live-network gate without probing real network or adopting a desktop")
+  require(apiUsageController.lastCheckReport?.origin == .operation && apiUsageController.lastCheckReport?.targetCountry == "SG"
+          && apiUsageController.lastCheckReport?.observation?.country == "SG" && apiUsageController.lastCheckReport?.proxyMode == .shadowrocket,
+          "operation preflight publishes its actual saved target and observation without requiring a manual check")
   require((await apiUsageController.preflight(target: .desktop)).reason == .unsupportedMode && usageProbeCount == 1,
           "allowing saved usage reads never opens the API desktop through the subscription launch gate")
   let apiUsageBlocked = ProtectionController(testFiles: apiUsageFiles, worker: FixtureGuardWorker(files: apiUsageFiles), observeNetwork: { _ in
@@ -761,6 +765,44 @@ actor FixtureGuardWorker: GuardWorking {
    CLIStatusPresentation(status: .unverified, email: "saved@example.test", detail: "fixture status query failed")
   }
   require(quietStore.cliStatusCheckedAt != nil && quietStore.cliStatusDetail == "fixture status query failed", "real failed check retains its result even when a saved email exists")
+  let proofStore = Store(demo: true)
+  let proofIdentity = proofStore.profiles[0].snapshot!.identity
+  await proofStore.updateCLIStatus {
+   CLIStatusPresentation(status:.unverified,profile:"Personal",email:"fixture@example.test",identity:proofIdentity,metadataOnly:true)
+  }
+  proofStore.presentCLIRestoration(.verifiedLogin,target:"Personal",identity:proofIdentity)
+  require(proofStore.cliStatus == .matched && proofStore.cliStatusCheckedAt != nil,"a verified and read-back transaction directly publishes the match without another credential query")
+  let proofTime = proofStore.cliStatusCheckedAt
+  await proofStore.updateCLIStatus {
+   CLIStatusPresentation(status:.unverified,profile:"Personal",email:"fixture@example.test",identity:proofIdentity,metadataOnly:true)
+  }
+  require(proofStore.cliStatus == .matched && proofStore.cliStatusCheckedAt == proofTime,"same-identity automatic metadata reads retain the completed match and its original time")
+  await proofStore.updateCLIStatus {
+   CLIStatusPresentation(status:.reported,profile:"Personal",email:"fixture@example.test",identity:proofIdentity)
+  }
+  require(proofStore.cliStatus == .matched && proofStore.cliStatusCheckedAt == proofTime,"a weaker matching local report does not replace an online transaction proof")
+  let changedProofIdentity = CLIIdentity(accountID:"fixture-external",organizationID:"fixture-external-org",email:"fixture@example.test")
+  await proofStore.updateCLIStatus {
+   CLIStatusPresentation(status:.unverified,profile:"Business",email:"fixture@example.test",identity:changedProofIdentity,metadataOnly:true)
+  }
+  require(proofStore.cliStatus == .unverified && proofStore.cliStatusCheckedAt == nil,"another saved account or organization invalidates the old match even when the email is identical")
+  proofStore.presentCLIRestoration(.verifiedLogin,target:"Personal",identity:proofIdentity)
+  require(proofStore.cliStatus != .matched,"a changed local identity prevents publication of a stale transaction result")
+  await proofStore.updateCLIStatus {
+   CLIStatusPresentation(status:.unverified,profile:"Personal",email:"fixture@example.test",identity:proofIdentity,metadataOnly:true)
+  }
+  proofStore.presentCLIRestoration(.storedLogin,target:"Personal",identity:proofIdentity)
+  require(proofStore.cliStatus == .unverified && proofStore.cliStatusCheckedAt == nil,"restoring trusted but expired credentials does not claim a fresh online verification")
+  let gatedIdentityStore = Store(demo:true)
+  var profileRequestCount = 0
+  gatedIdentityStore.protection.lastDecision = SafetyDecision(.countryUnknown)
+  var identityGateBlocked = false
+  do { _ = try await gatedIdentityStore.checkedCLIIdentity("fixture-token",fetch:{_ in profileRequestCount += 1; return proofIdentity}) }
+  catch { identityGateBlocked = true }
+  require(identityGateBlocked && profileRequestCount == 0,"an unknown route after authorization prevents sending the authenticated identity request")
+  gatedIdentityStore.protection.lastDecision = SafetyDecision(.allowed,expected:"SG",observed:"SG")
+  _ = try await gatedIdentityStore.checkedCLIIdentity("fixture-token",fetch:{_ in profileRequestCount += 1; return proofIdentity})
+  require(profileRequestCount == 1,"a successful fresh route check allows exactly the requested identity fetch")
   let passiveStore = Store(demo: true), passiveTime = Date()
   passiveStore.lastRefresh = passiveTime
   for _ in 0..<3 { passiveStore.panelWillOpen() }

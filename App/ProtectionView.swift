@@ -14,11 +14,7 @@ struct TerminalProtectionCard: View {
     @State private var helpHover = false
     @State private var takeoverHover = false
     @State private var settingsHover = false
-    /// The report does not record the proxy mode, so remember the mode the check ran with; the picker
-    /// is disabled while checking, so the value read on completion is the one that was used.
-    @State private var checkedMode: ProxyMode?
-    /// The result block folds on its own, independent of the settings section. Every finished round
-    /// (pass, fail or invalid input) re-expands it; after that only the user folds it.
+    /// Manual checks re-expand the result block; operation reports preserve the user's fold state.
     @State private var resultsExpanded = true
     @State private var resultsHover = false
     /// Shared by the open column and the panel beneath it, so the two read as one region.
@@ -85,7 +81,7 @@ struct TerminalProtectionCard: View {
         let observation = controller.lastCheckReport?.observation
         let proxy: NetworkItem
         if let observation {
-            if checkedMode == .auto {
+            if controller.lastCheckReport?.proxyMode == .auto {
                 // Auto mode has no separate proxy probe; it is the TUN result, so don't count it twice.
                 proxy = NetworkItem(title: t("protection.proxy"), value: t("protection.autoProxy"), status: .notRun,
                                     help: t("protection.autoProxyHelp"))
@@ -148,25 +144,32 @@ struct TerminalProtectionCard: View {
         if let message = report.validationMessage {
             return (t("protection.invalidInput", arguments: ["message": generated(message)]), .warn, "exclamationmark.triangle.fill")
         }
-        guard report.observation != nil else { return (t("protection.incomplete"), .sub, "questionmark.circle") }
+        if report.observation == nil {
+            if report.passed { return (t("protection.incomplete"), .sub, "questionmark.circle") }
+            return (failureText(report.decision), .bad, "xmark.circle.fill")
+        }
         if report.passed {
             return (t("protection.passedTarget", arguments: ["country": report.targetCountry ?? ""]), .good, "checkmark.circle.fill")
         }
         return (failureText(report.decision), .bad, "xmark.circle.fill")
     }
 
+    private var isOperationReport: Bool { controller.lastCheckReport?.origin == .operation }
+
     /// The inputs changed after the last round, so its result no longer describes them.
     private var resultStale: Bool {
         guard let report = controller.lastCheckReport, report.validationMessage == nil,
               let target = report.targetCountry else { return false }
         let draft = controller.country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        return draft != target || (checkedMode != nil && checkedMode != controller.mode)
+        let modeChanged = report.proxyMode.map { $0 != controller.mode } ?? false
+        return draft != target || modeChanged
     }
 
-    /// The headline used both expanded and folded. A stale pass must never read as a fresh one,
-    /// so a stale result loses its verdict colour and icon in either state.
+    /// Stale completed network results lose their verdict colour; early gate failures keep their actual reason.
     private var displayVerdict: (text: String, color: Color, icon: String) {
-        if resultStale { return (t("protection.stale"), .warn, "arrow.triangle.2.circlepath") }
+        if resultStale, controller.lastCheckReport?.observation != nil {
+            return (t("protection.stale"), .warn, "arrow.triangle.2.circlepath")
+        }
         return verdict
     }
 
@@ -174,9 +177,20 @@ struct TerminalProtectionCard: View {
     private var reportContextNote: String? {
         guard let report = controller.lastCheckReport, report.validationMessage == nil,
               let target = report.targetCountry else { return nil }
-        if resultStale { return t("protection.staleNote", arguments: ["country": target]) }
-        if controller.hasUnsavedChanges { return t("protection.unsavedCheck") }
+        if resultStale {
+            return t(isOperationReport ? "protection.operationStaleNote" : "protection.staleNote",
+                     arguments: ["country": target])
+        }
+        if !isOperationReport, controller.hasUnsavedChanges { return t("protection.unsavedCheck") }
         return nil
+    }
+
+    private var reportOriginHelp: String? {
+        guard let report = controller.lastCheckReport else { return nil }
+        switch report.origin {
+        case .manualInput: return t("protection.manualInputOrigin")
+        case .operation: return t("protection.operationOrigin")
+        }
     }
 
     private func networkCell(_ item: NetworkItem) -> some View {
@@ -230,7 +244,9 @@ struct TerminalProtectionCard: View {
         }
         .buttonStyle(.plain)
         .onHover { resultsHover = $0 }
-        .help(t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults"))
+        .help(reportOriginHelp.map {
+            $0 + "\n" + t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults")
+        } ?? t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults"))
         .accessibilityLabel(checking ? t("protection.checkingAccessibility") : t("protection.resultsAccessibility", arguments: ["result": result.text]))
         .accessibilityHint(t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults"))
     }
@@ -256,9 +272,13 @@ struct TerminalProtectionCard: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(t("protection.diagnosticOnly"))
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            if isOperationReport {
+                                Spacer(minLength: 0)
+                            } else {
+                                Text(t("protection.diagnosticOnly"))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                             Link("IP / WebRTC ↗", destination: URL(string: "https://ip.net.coffee/claude/")!)
                                 .foregroundColor(.claude)
                                 .help(t("protection.webCheckHelp"))
@@ -630,8 +650,9 @@ struct TerminalProtectionCard: View {
         .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onChange(of: controller.lastCheckReport?.checkedAt) { _ in
-            checkedMode = controller.mode
-            resultsExpanded = true
+            if controller.lastCheckReport?.origin == .manualInput {
+                resultsExpanded = true
+            }
         }
         .confirmationDialog(t("protection.takeoverTitle"), isPresented: $confirmProtectCurrentDesktop,
                             titleVisibility: .visible) {

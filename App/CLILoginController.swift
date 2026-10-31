@@ -11,6 +11,15 @@ import SwitcherCore
         guard config.allowsSubscriptionMutation else { throw SafetyError(config.explanation ?? "CLI 认证配置未确认。") }
     }
 
+    /// Authorization can take time. Recheck the route immediately before any
+    /// authenticated identity request, rather than reusing the pre-dialog result.
+    func checkedCLIIdentity(_ token: String,
+                            fetch: (String) async throws -> CLIIdentity = { CLIIdentity.profile(try await getJSON("profile", $0)) }) async throws -> CLIIdentity {
+        let decision = await protection.preflight(target: .cli)
+        guard decision.allowed else { throw SafetyError(decision.message) }
+        return try await fetch(token)
+    }
+
     private func profileDescriptor(_ name: String, allowInteraction: Bool = true) async throws -> CLIProfileIdentity {
         guard ProfileTransaction.validName(name), let index = profiles.firstIndex(where: { $0.name == name }) else { throw err("桌面档案不存在或名称无效，未修改登录。") }
         let directory = profileDir(name)
@@ -24,10 +33,10 @@ import SwitcherCore
            localAccount == nil || localAccount == snapshot.identity.accountID {
             return CLIProfileIdentity(name: name, identity: snapshot.identity)
         }
-        let response: [String: Any]
-        do { response = try await getJSON("profile", access) }
+        let identity: CLIIdentity
+        do { identity = try await checkedCLIIdentity(access) }
+        catch let failure as SafetyError { throw failure }
         catch { throw err("桌面档案“\(name)”的保存身份未能确认；未移动目录，请先在原客户端确认登录。") }
-        let identity = CLIIdentity.profile(response)
         guard identity.isComplete, localAccount == nil || localAccount == identity.accountID else {
             throw err("桌面保存身份与档案标识不一致，未修改登录；请先在原客户端确认该档案。")
         }
@@ -86,9 +95,13 @@ import SwitcherCore
         catch { throw CLIPreparationFailure(error.localizedDescription) }
         try await prepareTargetCLIRecovery(target: context.0, io: io)
         let restoration = try await CLILinkedSwitch.run(transaction: transaction, target: context.0, profiles: context.1, requiresTargetLogin: true,
-            remote: { CLIIdentity.profile(try await getJSON("profile", $0)) },
+            remote: { try await self.checkedCLIIdentity($0) },
             quit: {
                 guard try confirmedCurrentProfile() == source else { throw err("桌面档案已被外部切换，未移动目录。") }
+                // Keychain authorization/backup can outlast the initial route check.
+                // Stop here before closing the old desktop if its route is now unknown.
+                let decision = await self.protection.preflight()
+                guard decision.allowed else { throw SafetyError(decision.message) }
                 self.busy = "正在退出 Claude…"
                 return await quitClaude()
             }, move: {
@@ -101,10 +114,20 @@ import SwitcherCore
             })
         reloadList()
         await refreshCLI(verify: false)
-        if restoration == .needsLogin {
-            cliStatus = .needsLogin; cliStatusDetail = "目标没有保存的 CLI 登录；桌面可登录，CLI 需完成首次登录。"
+        presentCLIRestoration(restoration, target: target, identity: context.0.identity)
+    }
+
+    /// The transaction already verified identity and read back the restored login.
+    /// Publish that completed result without another credential read or password prompt.
+    func presentCLIRestoration(_ restoration: CLIRestoration, target: String, identity: CLIIdentity?) {
+        guard current == target, cliProfile == target,
+              let identity, cliObservedIdentity?.samePrincipal(as: identity) == true else { return }
+        if restoration == .verifiedLogin {
+            cliStatus = .matched; cliStatusCheckedAt = Date(); cliStandaloneVerified = false
+            cliStatusDetail = "仅核验默认保存登录；未检测终端 shell 环境和各项目设置，不代表已运行的 CLI 任务。"
         } else if restoration == .storedLogin {
-            cliStatus = .unverified; cliStatusDetail = "已回读确认保存登录，访问凭据需由 CLI 刷新后再核验。"
+            cliStatus = .unverified; cliStatusCheckedAt = nil
+            cliStatusDetail = "已回读确认保存登录，访问凭据需由 CLI 刷新后再核验。"
         }
     }
 
@@ -116,11 +139,7 @@ import SwitcherCore
                 guard decision.allowed else { throw SafetyError(decision.message) }
                 self.busy = "正在恢复 CLI 登录…"
                 return try await native.recover(login, expected: identity)
-            }, remote: { token in
-                let decision = await self.protection.preflight(target: .cli)
-                guard decision.allowed else { throw SafetyError(decision.message) }
-                return CLIIdentity.profile(try await getJSON("profile", token))
-            })
+            }, remote: { token in try await self.checkedCLIIdentity(token) })
         } catch let failure as CLIRecoveryPersistenceFailure { throw failure }
         catch { throw CLIPreparationFailure(error.localizedDescription) }
     }
@@ -135,12 +154,22 @@ import SwitcherCore
         defer { cliStatusRefreshing = false }
         let result = await operation()
         guard current == profileAtStart, cliStatusGeneration == generationAtStart else { invalidateCLIStatus(); return }
+        let sameIdentity = result.identity.map { cliObservedIdentity?.samePrincipal(as: $0) == true } ?? false
+        let preserveCompleted = sameIdentity && result.profile == cliProfile
+            && (result.metadataOnly && (cliStatus == .reported || cliStatus == .matched && result.profile == current)
+                || result.status == .reported && cliStatus == .matched && result.profile == current)
+        cliObservedIdentity = result.identity
+        if preserveCompleted {
+            cliProfile = result.profile; cliEmail = result.email
+            return // Retain the original verification time; metadata is not a new check.
+        }
         cliProfile = result.profile; cliEmail = result.email; cliStatusDetail = result.detail
         cliStatus = result.status; cliStandaloneVerified = result.standaloneVerified; cliStatusCheckedAt = result.metadataOnly ? nil : Date()
     }
 
     func invalidateCLIStatus() {
         cliStatusGeneration += 1
+        cliObservedIdentity = nil
         cliProfile = nil; cliEmail = nil; cliStatusDetail = nil
         cliStatus = .unverified; cliStandaloneVerified = false; cliStatusCheckedAt = nil
     }
@@ -154,10 +183,8 @@ import SwitcherCore
     /// Network verification is still gated. Only its final result is published to the UI.
     func refreshCLI(verify: Bool = false, allowInteraction: Bool = false) async {
         guard !isDemo else { return }
-        // Keep an explicitly requested local report with its original timestamp.
-        // Profile/mode changes invalidate it; periodic refresh must not replace it
-        // with weaker saved metadata or silently start another auth command.
-        if !verify && cliStatus == .reported { return }
+        // Metadata observations retain stronger completed results only while the
+        // account and organization still match; external login changes invalidate them.
         await updateCLIStatus { await evaluateCLIStatus(verify: verify, allowInteraction: allowInteraction) }
     }
 
@@ -181,12 +208,19 @@ import SwitcherCore
             let document = try io.readIdentityDocument()
             let metadata = try CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
             result.email = metadata?.email
+            result.identity = metadata
             let matches = profiles.filter { snapshot in
                 guard let identity = snapshot.snapshot?.identity, let metadata else { return false }
                 return identity.samePrincipal(as: metadata)
             }
             result.profile = matches.count == 1 ? matches.first?.name : nil
-            guard verify else { result.detail = nil; result.metadataOnly = true; return result }
+            guard verify else {
+                result.detail = nil; result.metadataOnly = true
+                if protection.desktopScope == .subscription, let metadata, metadata.isComplete,
+                   let desktop = profiles.first(where: { $0.name == current })?.snapshot?.identity,
+                   desktop.isComplete, !metadata.samePrincipal(as: desktop) { result.status = .different }
+                return result
+            }
             let gate = await protection.preflight(target: .cli)
             guard gate.allowed else { result.detail = gate.message; return result }
             let live = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
@@ -197,7 +231,7 @@ import SwitcherCore
                 result.status = .refreshNeeded
                 result.detail = "保存凭据待 CLI 刷新；不代表终端已退出登录。"; return result
             }
-            let actual = CLIIdentity.profile(try await getJSON("profile", access))
+            let actual = try await checkedCLIIdentity(access)
             guard try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument()) == live else {
                 throw SafetyError("CLI 登录在核验期间变化；请重新检查，未修改登录。")
             }
@@ -237,7 +271,11 @@ import SwitcherCore
             let report = try await CLIStatusReader.read(home: home)
             var result = CLIStatusPresentation.localReport(report, expectedDirectory: home.appendingPathComponent(".claude"), configuration: configuration)
             if result.defaultSubscription {
-                let matches = profiles.filter { $0.snapshot?.identity.samePrincipal(as: report.identity) == true }
+                let document = try? Data(contentsOf: claudeJSON)
+                let metadata = try? CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
+                let identity = report.savedRecord(matching: metadata) ?? report.identity
+                result.presentation.identity = identity
+                let matches = profiles.filter { $0.snapshot?.identity.samePrincipal(as: identity) == true }
                 result.presentation.profile = matches.count == 1 ? matches.first?.name : nil
             }
             return result
@@ -282,13 +320,14 @@ import SwitcherCore
             let context = try await cliContext(target: target, io: io)
             try await prepareTargetCLIRecovery(target: context.0, io: io)
             let plan = try await transaction.prepare(target: context.0, profiles: context.1, requiresTargetLogin: true,
-                remote: { CLIIdentity.profile(try await getJSON("profile", $0)) })
+                remote: { try await self.checkedCLIIdentity($0) })
             try transaction.persistOutgoing(plan)
             guard try confirmedCurrentProfile() == target, DesktopModeInspector.read(support: support) == .subscription else {
                 throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。")
             }
-            _ = try transaction.apply(plan)
-            await refreshCLI(verify: true)
+            let restoration = try transaction.apply(plan)
+            await refreshCLI(verify: false)
+            presentCLIRestoration(restoration, target: target, identity: context.0.identity)
             busy = nil
             await refresh(allowInteraction: true)
         } catch { banner = error.localizedDescription; await refreshCLI(verify: false) }

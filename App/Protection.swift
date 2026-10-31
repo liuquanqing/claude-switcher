@@ -2,12 +2,16 @@ import Foundation
 import SwiftUI
 import SwitcherCore
 
+enum NetworkCheckOrigin { case manualInput, operation }
+
 struct ManualNetworkCheck {
     let checkedAt: Date
     let targetCountry: String?
     let observation: NetworkObservation?
     let decision: SafetyDecision
     let validationMessage: String?
+    var origin: NetworkCheckOrigin = .manualInput
+    var proxyMode: ProxyMode? = nil
     var passed: Bool { decision.allowed }
 }
 
@@ -254,16 +258,26 @@ final class ProtectionController: ObservableObject {
         let checkedAt = Date()
         lastCheckedAt = checkedAt
         lastCheckReport = ManualNetworkCheck(checkedAt: checkedAt, targetCountry: config.expectedCountry,
-                                            observation: observation, decision: decision, validationMessage: nil)
+                                            observation: observation, decision: decision, validationMessage: nil, proxyMode: config.proxyMode)
     }
     func preflight(target: ProtectedTarget = .desktop) async -> SafetyDecision {
-        if demo {
-            if target == .desktop && desktopScope != .subscription { return SafetyDecision(.unsupportedMode) }
-            if target == .subscriptionUsage && desktopScope == .unknown { return SafetyDecision(.unsupportedMode) }
-            return lastDecision
-        }
+        var checkedConfig: SafetyConfig?
+        var checkedNetwork: NetworkObservation?
         func finish(_ decision: SafetyDecision) -> SafetyDecision {
-            lastDecision = decision; status = decision.message; return decision
+            lastDecision = decision; status = decision.message
+            let date = Date()
+            lastCheckedAt = date; lastCheckSummary = decision.message
+            lastCheckReport = ManualNetworkCheck(checkedAt: date, targetCountry: checkedConfig?.expectedCountry,
+                observation: checkedNetwork, decision: decision, validationMessage: nil,
+                origin: .operation, proxyMode: checkedConfig?.proxyMode)
+            return decision
+        }
+        if demo {
+            checkedConfig = SafetyConfig(enabled: enabled, expectedCountry: activeCountry ?? country, proxyMode: activeProxyMode ?? mode)
+            if target == .desktop && desktopScope != .subscription { return finish(SafetyDecision(.unsupportedMode)) }
+            if target == .subscriptionUsage && desktopScope == .unknown { return finish(SafetyDecision(.unsupportedMode)) }
+            checkedNetwork = demoNetwork
+            return finish(lastDecision)
         }
         guard !working else { return SafetyDecision(.guardUnavailable) }
         guard let config = try? files.loadConfig() else {
@@ -272,6 +286,7 @@ final class ProtectionController: ObservableObject {
             applySaved(nil)
             return finish(SafetyDecision(exists || registered ? .invalidConfig : .disabled))
         }
+        checkedConfig = config
         applySaved(config); enabled = config.enabled; refreshScope()
         guard config.enabled else { return finish(SafetyDecision(.disabled)) }
         if target == .desktop && desktopScope != .subscription { return finish(SafetyDecision(.unsupportedMode)) }
@@ -279,6 +294,7 @@ final class ProtectionController: ObservableObject {
         guard await worker.registered() else { guardOnline = false; return finish(SafetyDecision(.guardUnavailable)) }
         guardOnline = files.loadReceipt()?.isFresh(for: config) == true
         let network = await observeNetwork(config.proxyMode)
+        checkedNetwork = network
         guard (try? files.loadConfig()) == config else { applySaved(nil); return finish(SafetyDecision(.invalidConfig)) }
         refreshScope()
         let registered = await worker.registered(), receipt = files.loadReceipt()

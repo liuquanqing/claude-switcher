@@ -237,6 +237,20 @@ import XCTest
         XCTAssertEqual(try CLIJSON.object(io.credentials!)["mcpOAuth"] as? [String: String], ["changed": "keep-new"])
         XCTAssertEqual(io.marker, "A")
     }
+    func testRouteRecheckAfterBackupCanStopBeforeQuitAndMove() async throws {
+        let (io, transaction) = try fixture(); let original = try transaction.readOwned()
+        do {
+            _ = try await CLILinkedSwitch.run(transaction: transaction, target: profiles[1], profiles: profiles,
+                remote: remote, quit: { throw SafetyError("fixture route became unknown after authorization") },
+                move: { io.events.append("move"); return {} })
+            XCTFail("route recheck must stop before quit and commit")
+        } catch {
+            XCTAssertEqual(try transaction.readOwned(), original)
+            XCTAssertEqual(io.marker, "A")
+            XCTAssertFalse(io.events.contains("move"))
+            XCTAssertNotNil(io.backups["A"])
+        }
+    }
     func testReadbackFailureTriggersDesktopUndo() async throws {
         let (io, transaction) = try fixture(); var first = true
         io.identityWriter = { data in if first { first = false; return }; io.document = data }

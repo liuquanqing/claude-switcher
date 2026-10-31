@@ -179,6 +179,7 @@ final class Store: ObservableObject {
     @Published var cliStandaloneVerified = false
     @Published var cliStatusRefreshing = false
     @Published var cliStatusCheckedAt: Date?
+    var cliObservedIdentity: CLIIdentity?
     var cliStatusGeneration = 0
     var cliScopeObservation: AnyCancellable?
     @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?
@@ -337,6 +338,7 @@ final class Store: ObservableObject {
         reloadList()
         protection.refreshScope()
         protection.refreshStatus()
+        Task { await refreshCLI(verify: false) }
     }
 
 
@@ -375,6 +377,7 @@ final class Store: ObservableObject {
         defer { refreshing = false }
         reloadList()
         protection.refreshScope()
+        await refreshCLI(verify: false)
         usageNotice = nil
         for index in profiles.indices {
             profiles[index].usageState = profiles[index].snapshot == nil ? .notRequested : .cached
@@ -395,7 +398,16 @@ final class Store: ObservableObject {
                                                               manual: allowInteraction)
             applyOfficialUsage(sample)
         } catch { usageNotice = error.localizedDescription }
+        if allowInteraction { await refreshCLI(verify: false) }
         onChange?()
+    }
+
+    /// Explicit footer action; it observes state, never switches or enables protection.
+    func refreshAllStatuses() async {
+        guard busy == nil, !refreshing, !cliStatusRefreshing else { return }
+        await verifyDefaultCLI()
+        protection.refreshStatus()
+        await refresh(allowInteraction: true)
     }
 
     /// UUID/organization matching, never display email alone, selects the card.

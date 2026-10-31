@@ -381,8 +381,6 @@ struct TerminalStrip: View {
     /// desktop; API / unknown desktops have no subscription account to sync to.
     private var canSync: Bool { store.cliStatus == .different && protection.desktopScope == .subscription }
 
-    private var checkHelp: String { t(checking ? "cli.checkingHelp" : "cli.checkHelp") }
-
     /// Green needs a real comparison against a subscription desktop. A `matched` seen under another
     /// scope is stale (the backend invalidates on scope change) and is never shown as a match.
     private var matched: Bool { store.cliStatus == .matched && protection.desktopScope == .subscription }
@@ -452,7 +450,7 @@ struct TerminalStrip: View {
         }
     }
 
-    /// The only inline action row is the sync remedy. The check is a compact icon on the title row.
+    /// The only inline action row is the sync remedy; the status button opens the existing detail popover.
     private var showsActions: Bool { canSync }
 
     var body: some View {
@@ -467,42 +465,30 @@ struct TerminalStrip: View {
                     HStack(spacing: 6) {
                         Text(t("cli.title")).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
                             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                        Text(status).font(.system(size: 10, weight: .medium))
-                            .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
-                        Spacer(minLength: 4)
-                        HStack(spacing: 2) {
-                            // Single check entry. Same frame idle and busy, so the row never shifts.
-                            Button { Task { await store.verifyDefaultCLI() } } label: {
-                                ZStack {
-                                    Image(systemName: "arrow.clockwise").font(.system(size: 10.5, weight: .semibold))
-                                        .opacity(checking ? 0 : 1)
-                                    if checking { ProgressView().controlSize(.mini) }
-                                }
-                                .foregroundColor(.sub).frame(width: 22, height: 22).contentShape(Rectangle())
+                        Button { showHelp.toggle() } label: {
+                            HStack(spacing: 4) {
+                                Text(status).font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
+                                Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
                             }
-                            .buttonStyle(.plain)
-                            .disabled(controlsLocked || checking)
-                            .opacity(controlsLocked && !checking ? 0.45 : 1)
-                            .help(checkHelp)
-                            .accessibilityLabel(t(checking ? "cli.checkingNow" : "cli.checkNow"))
-                            Button { showHelp.toggle() } label: {
-                                Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
-                                    .frame(width: 22, height: 22).contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .help(t("cli.statusHelp"))
-                            .accessibilityLabel(t("cli.statusAccessibility"))
-                            .popover(isPresented: $showHelp, arrowEdge: .bottom) {
-                                VStack(alignment: .leading, spacing: 6) {
-                                    Text(detail).font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                    Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
-                                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                                    Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
-                                }
-                                .frame(width: 260, alignment: .leading).padding(12)
-                            }
+                            .frame(height: 22)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+                        .help(t("cli.statusHelp"))
+                        .accessibilityLabel("\(t("cli.statusAccessibility")): \(status)")
+                        .accessibilityHint(t("cli.statusHelp"))
+                        .popover(isPresented: $showHelp, arrowEdge: .bottom) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(detail).font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
+                                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                                Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
+                            }
+                            .frame(width: 260, alignment: .leading).padding(12)
+                        }
+                        Spacer(minLength: 4)
                     }
                     .frame(height: 22)
                     Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
@@ -1110,7 +1096,7 @@ struct Panel: View {
                     FooterButton(icon: "doc.on.doc", help: t("footer.import")) { CopyWindow.show(store) }
                 }
                 FooterButton(icon: "arrow.clockwise", help: t("footer.refresh")) {
-                    Task { await store.refresh(allowInteraction: true) }
+                    Task { await store.refreshAllStatuses() }
                 }
                 FooterButton(icon: store.openAtLogin ? "sunrise.fill" : "sunrise",
                              help: t(store.openAtLogin ? "footer.loginEnabled" : "footer.loginDisabled")) {
