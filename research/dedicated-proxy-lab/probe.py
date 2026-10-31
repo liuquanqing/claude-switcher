@@ -397,7 +397,8 @@ def main():
                 worker.stdin.write(json.dumps(message) + "\n")
                 worker.stdin.flush()
                 reply = json.loads(worker.stdout.readline())
-                row = dict(case=name, expected=expected, result=reply, family=4 if message.get('host') == HOSTS[0] else 6)
+                host = message.get('host') or message.get('command', {}).get('host')
+                row = dict(case=name, expected=expected, result=reply, family=4 if host == HOSTS[0] else 6)
                 kernel_cases.append(row)
                 if reply.get('ok') != expected or reply.get('unexpectedBytes'):
                     raise AssertionError(row)
