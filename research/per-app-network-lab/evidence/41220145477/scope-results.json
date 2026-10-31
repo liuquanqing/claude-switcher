@@ -1,0 +1,337 @@
+{
+  "layer": "macOS-PF-same-UID-scope-negative-control",
+  "os": "15.7.9",
+  "arch": "x86_64",
+  "cases": [
+    {
+      "stage": "baseline",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 4,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 6,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 4,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 6,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 4,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "baseline",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 6,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "user-rule",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "user-rule",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 4,
+      "protocol": "udp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "user-rule",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "user-rule",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 6,
+      "protocol": "udp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "VULNERABILITY-user-rule",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "VULNERABILITY-user-rule",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 4,
+      "protocol": "udp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "VULNERABILITY-user-rule",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "VULNERABILITY-user-rule",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 6,
+      "protocol": "udp",
+      "ack": false,
+      "reachedSink": false,
+      "expected": false
+    },
+    {
+      "stage": "user-rule",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "user-rule",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 4,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "user-rule",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "user-rule",
+      "role": "unrelated-other-user",
+      "uid": 65534,
+      "family": 6,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 4,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "fictional-Claude",
+      "uid": 501,
+      "family": 6,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 4,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 4,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 6,
+      "protocol": "tcp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    },
+    {
+      "stage": "recovery",
+      "role": "unrelated-same-user",
+      "uid": 501,
+      "family": 6,
+      "protocol": "udp",
+      "ack": true,
+      "reachedSink": true,
+      "expected": true
+    }
+  ],
+  "observations": 32,
+  "experimentCompleted": true,
+  "error": null,
+  "cleanup": true,
+  "selectivityRequirementPassed": false,
+  "productionReady": false,
+  "realClaudeOrCLI": false,
+  "sourceSHA256": "5391b13e63a4bbf04eba4b10f611453a041e7d272deaba4655826d033de0703e",
+  "existingFlowRevocation": "NOT_RUN",
+  "actualNetworkExtension": "NOT_RUN"
+}

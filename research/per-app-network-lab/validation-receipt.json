@@ -1,0 +1,44 @@
+{
+  "checkedOnSingapore": "2026-11-01",
+  "sourceCommit": "170698e007972ab40ae7bf3bab42438937f7ff88",
+  "runURL": "https://github.com/liuquanqing/claude-switcher/actions/runs/41220145477",
+  "workflowConclusion": "success",
+  "platform": {
+    "os": "15.7.9",
+    "arch": "x86_64"
+  },
+  "policyFixtureChecks": 54,
+  "kernelLoopbackObservations": 32,
+  "ownFictionalAuditIdentityChecks": 12,
+  "expectedCollateralDamageControls": 4,
+  "experimentCompleted": true,
+  "kernelCleanup": true,
+  "appSelectiveBlockingRequirement": "NOT_PASSED",
+  "productionIntegration": "HOLD",
+  "sourceSHA256": {
+    "requirements.json": "e01874378069592ab48f0785cb24bc0884ca3b8df7316acef54befad81535967",
+    "self_identity_probe.swift": "deb65079dbe143f5aef5511fc389d0bb26adc2f6203e3615ea7be270a07dbf81",
+    "AuditTokenBridge.swift": "8cb9ef682a528414f39e896eee4448084d36e4a6f5d25f44161ce41c4557c3af",
+    "policy_checks.swift": "bbd429429482376f47683b1ab98a4b5b220c7510096f0cc4ec1c6dc29191a195",
+    "self_audit_token.c": "48d9dbd05cc7bb7219ed123c19adbbb2238cfa3ddc03158ad113066f212f9c2e",
+    "SelectivePolicy.swift": "9f764d477c9cad0908fff5582a698a3a59ebc3a89900dd8331a150bfd4b5a342",
+    "macos_scope_probe.py": "5391b13e63a4bbf04eba4b10f611453a041e7d272deaba4655826d033de0703e"
+  },
+  "artifactSHA256": {
+    "scope-results.json": "6359210d70dd5460058933a94bd5062006e49556cf97102874c63750a861f829",
+    "identity-protected-cli.json": "25a436c4e936cd3bef2d16254b989063c560ee2e444d6b4108bf5b49166a9d92",
+    "policy-results.json": "630955d1f1d2606728814a57762455b55468a72d234d61d4bfa2d1e2b7a7859c",
+    "identity-unrelated-app.json": "4797c6bf518ea85c7cedf1068dc10ea72ae427d6a8f1b1a33d14c25ac3613813"
+  },
+  "notRun": [
+    "activated network filter",
+    "actual NEFilterFlow attribution",
+    "real Claude or CLI network coverage in this new experiment",
+    "existing flow revocation on this candidate",
+    "filter SIGSTOP/SIGKILL behavior",
+    "third-party proxy coexistence",
+    "system DNS/helper coverage",
+    "sleep/wake/reboot"
+  ],
+  "personalNetworkGuardAccountsSessionsTouched": false
+}
