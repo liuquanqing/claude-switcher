@@ -35,7 +35,15 @@ lab = Path(__file__).resolve().parent
 digest = "c84c94912405eb852753fc3b51d79ad816d94c6b3b5aec4db4daf2eb8f357597"
 url = "https://github.com/objective-see/LuLu/releases/download/v4.5.5/LuLu_4.5.5.dmg"
 def command(*args):
-    return subprocess.run(args, check=True, text=True, capture_output=True, timeout=120)
+    try:
+        return subprocess.run(args, check=True, text=True, capture_output=True, timeout=120)
+    except subprocess.CalledProcessError as failure:
+        # Inputs are official public URLs, source files and temporary fixtures.
+        # Retain preparation errors rather than losing compiler diagnostics.
+        (output / "command-error.json").write_text(json.dumps({
+            "arguments": args, "status": failure.returncode,
+            "stdout": failure.stdout, "stderr": failure.stderr}, indent=2) + "\n")
+        raise
 
 
 mounted = False
@@ -86,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix="cs-lulu-readonly-", dir=os.environ["RUN
         manifest_path = root / "manifest.json"
         manifest_path.write_text(json.dumps(manifest))
         checker = root / "signature-gate"
-        command("swiftc", str(lab / "signature_gate.swift"), "-o", str(checker))
+        command("swiftc", "-parse-as-library", str(lab / "signature_gate.swift"), "-o", str(checker))
         signature = json.loads(command(str(checker), str(manifest_path)).stdout)
         (output / "signature-results.json").write_text(json.dumps(signature, indent=2) + "\n")
     except BaseException as failure:
@@ -104,7 +112,7 @@ result = {"layer": "disposable-mac-official-binary-static-signature-gate", "sour
           "os": platform.mac_ver()[0], "arch": platform.machine(),
           "experimentCompleted": error is None and cleanup and signature is not None,
           "error": error, "cleanup": cleanup,
-          "automaticIntegration": "NOT_ACCEPTED_THROUGH_OFFICIAL_XPC_GATE",
+          "automaticIntegration": "STATIC_REQUIREMENT_REJECTED_EXTERNAL_CLIENT" if signature is not None else "NOT_RUN",
           "existingFlowRevocation": "NOT_RUN", "selectiveClaudeRuntime": "NOT_RUN",
           "installed": False, "appOrExtensionLaunched": False, "networkOrGuardConfigModified": False,
           "productionIntegration": "HOLD"}
