@@ -1,0 +1,20 @@
+{
+  "layer": "official-blank-Desktop-CONNECT-handshake-only",
+  "artifact": {
+    "version": "1.0.2768",
+    "SHA256Package": "895d1c4ee97fdb7a04585d00838eea85c5430140d8d0ef3e4a3b752fe59c6a8b",
+    "signatureVerified": true,
+    "latestVersionClaim": false,
+    "installed": false
+  },
+  "cases": [],
+  "experimentCompleted": false,
+  "error": "AssertionError('Desktop condition timed out')",
+  "cleanup": true,
+  "fullTLSHandshake": "NOT_RUN",
+  "authenticatedDesktopStreams": "NOT_RUN",
+  "existingUnwrappedDesktopCovered": false,
+  "personalNetworkOrGuardModified": false,
+  "productionIntegration": "HOLD",
+  "failureLogTail": "sandbox initialization failed: Operation not permitted\nFailed to initialize sandbox.[1031/174334.148267:WARNING:third_party/crashpad/crashpad/util/process/process_memory_mac.cc:94] mach_vm_read(0x7ff7b1f20000, 0x2000): (os/kern) invalid address (1)\nsandbox initialization failed: Operation not permitted\nFailed to initialize sandbox.[1031/174335.169759:WARNING:third_party/crashpad/crashpad/util/process/process_memory_mac.cc:94] mach_vm_read(0x7ff7b4bbd000, 0x2000): (os/kern) invalid address (1)\n"
+}

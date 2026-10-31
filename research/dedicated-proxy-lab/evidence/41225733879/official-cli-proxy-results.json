@@ -1,0 +1,47 @@
+{
+  "layer": "official-blank-CLI-TLS-through-confined-CONNECT-fixture",
+  "artifact": {
+    "version": "2.1.314",
+    "SHA256": "404779a308a358ecec8b25c8bccf0ce79a94cf261d12cb74065518d189c174f8",
+    "officialManifestMatched": true
+  },
+  "cases": [
+    {
+      "case": "official-CLI-both-families-live-TLS-SSE",
+      "passed": true,
+      "processesAlive": [
+        true,
+        true
+      ]
+    },
+    {
+      "case": "official-CLI-existing-SSE-revoked",
+      "passed": true,
+      "cutoff": 764.978473097,
+      "processesAlive": [
+        true,
+        true
+      ],
+      "testerKilledClient": false
+    },
+    {
+      "case": "official-CLI-new-TLS-attempts-rejected-both-families",
+      "passed": true
+    },
+    {
+      "case": "official-CLI-fresh-validation-recovery",
+      "passed": true
+    }
+  ],
+  "experimentCompleted": true,
+  "error": null,
+  "cleanup": true,
+  "fixtureOnlyCredentials": true,
+  "realSubscriptionAuthentication": "NOT_RUN",
+  "desktopCompatibility": "NOT_RUN",
+  "preexistingUnwrappedProcessesCovered": false,
+  "systemTrustStoreModified": false,
+  "networkOrGuardConfigModified": false,
+  "productionIntegration": "HOLD",
+  "failureLogTails": []
+}

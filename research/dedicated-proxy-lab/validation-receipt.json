@@ -1,0 +1,45 @@
+{
+  "checkedOnSingapore": "2026-11-01",
+  "reviewer": "Codex author-side review",
+  "externalReviewModelsInvoked": false,
+  "sourceCommit": "3f6348581dd5dfcc189f33398dda95158bd72cdd",
+  "runURL": "https://github.com/liuquanqing/claude-switcher/actions/runs/41225733879",
+  "workflowConclusion": "failure",
+  "fixtureTransportObservations": 178,
+  "expectedDirectBypassControls": 40,
+  "kernelConfinedFixtureChecks": 24,
+  "officialCLIStagesPassed": 4,
+  "officialCLIArtifact": {
+    "version": "2.1.314",
+    "SHA256": "404779a308a358ecec8b25c8bccf0ce79a94cf261d12cb74065518d189c174f8",
+    "officialManifestMatched": true
+  },
+  "desktopArtifact": {
+    "version": "1.0.2768",
+    "SHA256Package": "895d1c4ee97fdb7a04585d00838eea85c5430140d8d0ef3e4a3b752fe59c6a8b",
+    "signatureVerified": true,
+    "latestVersionClaim": false,
+    "installed": false
+  },
+  "desktopLauncherCompatibility": "FAILED: nested sandbox initialization",
+  "desktopStreamRevocation": "NOT_RUN: positive connection was not established",
+  "proxyAloneBlocksDirect": false,
+  "arbitraryPreexistingProcessesCovered": false,
+  "cleanup": true,
+  "personalNetworkGuardAccountsSessionsTouched": false,
+  "productionIntegration": "HOLD",
+  "sourceSHA256": {
+    "research/dedicated-proxy-lab/gateway.py": "9f5f84ea15dfbbb1bca11fdf4c6bd0948fad2461bcd2a9304fb41b643da3ca2a",
+    "research/dedicated-proxy-lab/socket_worker.py": "6ed5b4f2a7dd37bb742bd314c64cd0226386d1d35440db8c86d499a5b2745b77",
+    "research/dedicated-proxy-lab/official_cli_probe.py": "b09b28067d7fa658c8903274eb4c4ab8fe828341c43ef83aabf65e7eb7a3a174",
+    "research/dedicated-proxy-lab/probe.py": "f323ad56fe204a179bd083c348ba2c4a230f675bab60f795bbc0844495f01a72",
+    "research/dedicated-proxy-lab/desktop_probe.py": "079db3d6a2a739c9a3863dbe54381babc42b351db403cd45ec66847c44a29f64",
+    ".github/workflows/dedicated-proxy-lab.yml": "d17ef6cad46d95e236b256eca4e1aba50e7e80d7d762fb76e646917ccd74fe56"
+  },
+  "artifactSHA256": {
+    "official-cli-proxy-results.json": "ed1b3503c24fcda5945b2fa4fbc84f8d7ec5b9c88926ffcfc4100df5235e9a90",
+    "dedicated-proxy-results.json": "cacdeaec67e6b2361a08de0a434def32e27c41020d249d82344195db4071c56f",
+    "workflow-summary.json": "a726a0566a3202565f3dd34c537298354aa6afa3712a6e77eda9b2dbf9f98dc5",
+    "desktop-proxy-results.json": "9880f33be8eade0d6f3533a3f7141c4313bc83c369be2744ad8fe3731e3de2db"
+  }
+}
