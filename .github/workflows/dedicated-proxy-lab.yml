@@ -7,7 +7,7 @@ permissions:
 jobs:
   dedicated-proxy-fixtures:
     runs-on: macos-15-intel
-    timeout-minutes: 8
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -22,6 +22,11 @@ jobs:
           CS_PROXY_LAB: loopback-only
           CS_OFFICIAL_PROXY_RESULT: ${{ runner.temp }}/official-cli-proxy-results.json
         run: python3 research/dedicated-proxy-lab/official_cli_probe.py
+      - name: Pinned blank Desktop, CONNECT handshake only
+        env:
+          CS_PROXY_LAB: loopback-only
+          CS_DESKTOP_PROXY_RESULT: ${{ runner.temp }}/desktop-proxy-results.json
+        run: python3 research/dedicated-proxy-lab/desktop_probe.py
       - name: Preserve evidence (expected bypass means integration HOLD)
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -30,4 +35,5 @@ jobs:
           path: |
             ${{ runner.temp }}/dedicated-proxy-results.json
             ${{ runner.temp }}/official-cli-proxy-results.json
+            ${{ runner.temp }}/desktop-proxy-results.json
           retention-days: 14
