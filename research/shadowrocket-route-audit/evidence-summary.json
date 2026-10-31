@@ -33,8 +33,10 @@
   "appReceiptOrAppleIDRead": false,
   "appCopiedOrUploaded": false,
   "hostNetworkGuardOrSessionsModified": false,
-  "ShadowrocketRuntimeIsolation": "NOT_RUN: no confirmed licensed isolated test environment",
+  "ShadowrocketRuntimeIsolation": "NOT_RUN: user confirmed no independent test environment",
   "enforceRoutesIsProvenKillSwitch": false,
   "includeAllNetworksPlatformDropBehavior": "DOCUMENTED_BY_APPLE_NOT_SHADOWROCKET_RUNTIME_TEST",
-  "productionIntegration": "HOLD"
+  "productionIntegration": "HOLD",
+  "isolationEnvironmentUserConfirmed": "unavailable",
+  "userSelectedScope": "documentation verification and isolated test plan only"
 }
