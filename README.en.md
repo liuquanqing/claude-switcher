@@ -14,9 +14,9 @@ Accounts, usage, sessions and network checks meet in one place.
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.3/ClaudeSwitcher-1.3.3-arm64.dmg)
+[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/ClaudeSwitcher-1.3.4-arm64.dmg)
 
-**1.3.3** · Apple Silicon · macOS 13+
+**1.3.4** · Apple Silicon · macOS 13+
 
 [Download](#download) · [Features](#features) · [Quick start](#quick-start) · [Scope](#scope) · [中文](README.md)
 
@@ -81,13 +81,13 @@ All account details in these screenshots are fictional. See [bilingual protectio
 
 ## Download
 
-Version 1.3.3 shows completed switch checks, requests current-account usage, and brings manual status refresh into one footer action. See [release notes](docs/releases/1.3.3.md).
+Version 1.3.4 fixes empty account and usage cards on a fresh installation by establishing the desktop identity before matching official CLI usage. See [release notes](docs/releases/1.3.4.md).
 
-**[Download Claude Switcher 1.3.3 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.3/ClaudeSwitcher-1.3.3-arm64.dmg)**
+**[Download Claude Switcher 1.3.4 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/ClaudeSwitcher-1.3.4-arm64.dmg)**
 
 For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher.app` to Applications.
 
-[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.3) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.3/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
+[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.4) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
 
 The build uses an ad-hoc local signature and is not notarized by Apple. See [the installation guide](docs/INSTALL.md).
 

@@ -27,8 +27,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleExecutable</key><string>ClaudeSwitcher</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleShortVersionString</key><string>1.3.3</string>
-<key>CFBundleVersion</key><string>20261031.16.0</string>
+<key>CFBundleShortVersionString</key><string>1.3.4</string>
+<key>CFBundleVersion</key><string>20261101.17.0</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 </dict></plist>

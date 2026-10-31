@@ -14,9 +14,9 @@
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.3/ClaudeSwitcher-1.3.3-arm64.dmg)
+[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/ClaudeSwitcher-1.3.4-arm64.dmg)
 
-**1.3.3** · Apple Silicon · macOS 13+
+**1.3.4** · Apple Silicon · macOS 13+
 
 [下载](#下载) · [核心能力](#核心能力) · [快速开始](#快速开始) · [边界与验证](#边界与验证) · [English](README.en.md)
 
@@ -126,13 +126,13 @@ English
 
 ## 下载
 
-1.3.3 在切换时自动核验并补查额度，直接显示检查结果，统一底部刷新入口。详见[本版更新](docs/releases/1.3.3.md)。
+1.3.4 修复新电脑首次安装后账号与额度空白，先确认桌面身份，再匹配官方 CLI 用量。详见[本版更新](docs/releases/1.3.4.md)。
 
-**[下载 Claude Switcher 1.3.3 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.3/ClaudeSwitcher-1.3.3-arm64.dmg)**
+**[下载 Claude Switcher 1.3.4 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/ClaudeSwitcher-1.3.4-arm64.dmg)**
 
 适用于 **Apple Silicon（M1 及更新芯片）· macOS 13+**。打开 DMG，将 `Claude Switcher.app` 拖入“应用程序”。
 
-[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.3) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.3/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
+[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.4) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
 
 > 当前构建使用 ad-hoc 本地签名，未经过 Apple 公证。首次打开方式、升级与卸载步骤见 [安装说明](docs/INSTALL.md)。
 
