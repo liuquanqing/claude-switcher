@@ -31,9 +31,9 @@ func levelColor(_ left: Double?) -> Color {
 func left(_ w: Window?) -> Double? { w.map { max(0, 100 - $0.used) } }
 func pct(_ v: Double?) -> String { v.map { String(Int($0.rounded())) } ?? "--" }
 
-func countdown(_ d: Date?, language: String) -> String {
+func countdown(_ d: Date?, language: String, now: Date = Date()) -> String {
     guard let d else { return appText("format.resetUnknown", language: language) }
-    let s = Int(d.timeIntervalSinceNow)
+    let s = Int(d.timeIntervalSince(now))
     if s <= 0 { return appText("format.resetDue", language: language) }
     let h = s / 3600, m = (s % 3600) / 60
     if h > 0 {
@@ -44,17 +44,36 @@ func countdown(_ d: Date?, language: String) -> String {
     return appText("format.resetWithinMinute", language: language)
 }
 
-func weekdayTime(_ d: Date?, language: String) -> String {
-    guard let d else { return "--" }
+func weekdayTime(_ d: Date?, language: String, now: Date = Date()) -> String {
+    guard let d else { return appText("format.resetUnknown", language: language) }
+    if d.timeIntervalSince(now) <= 0 { return appText("format.resetDue", language: language) }
     let f = DateFormatter()
     f.locale = AppLocalization.locale(for: language)
+    f.timeZone = .current
     f.dateFormat = "E HH:mm"
     return f.string(from: d)
 }
 
-func ago(_ d: Date?, language: String) -> String {
+func weeklyReset(_ d: Date?, language: String, now: Date = Date()) -> String {
+    guard let d else { return appText("format.resetUnknown", language: language) }
+    if d.timeIntervalSince(now) <= 0 { return appText("format.resetDue", language: language) }
+    return appText("format.weeklyReset", language: language,
+                   arguments: ["date": weekdayTime(d, language: language, now: now)])
+}
+
+func fullDateTime(_ d: Date?, language: String) -> String {
+    guard let d else { return appText("format.timeUnknown", language: language) }
+    let f = DateFormatter()
+    f.locale = AppLocalization.locale(for: language)
+    f.timeZone = .current
+    f.dateStyle = .medium
+    f.timeStyle = .short
+    return f.string(from: d)
+}
+
+func ago(_ d: Date?, language: String, now: Date = Date()) -> String {
     guard let d else { return appText("format.notUpdated", language: language) }
-    let s = max(0, Int(-d.timeIntervalSinceNow))
+    let s = max(0, Int(now.timeIntervalSince(d)))
     if s < 60 { return appText("format.justNow", language: language) }
     if s < 3600 { return appText("format.minutesAgo", language: language, arguments: ["count": String(s / 60)]) }
     if s < 86400 { return appText("format.hoursAgo", language: language, arguments: ["count": String(s / 3600)]) }
@@ -545,6 +564,7 @@ struct UsageMetric: View {
     let title: String
     let value: Double?
     let reset: String
+    let resetHelp: String
     var prominent = false
 
     var body: some View {
@@ -558,6 +578,8 @@ struct UsageMetric: View {
             Bar(value: value, color: levelColor(value), height: 3)
             Text(reset).font(.system(size: 9)).foregroundColor(.sub.opacity(0.86))
                 .lineLimit(1).minimumScaleFactor(0.82)
+                .help(resetHelp)
+                .accessibilityHint(resetHelp)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -603,8 +625,11 @@ struct ProfileCard: View {
         }
     }
 
-    @ViewBuilder private func usageFooter(_ snapshot: Snapshot) -> some View {
-        let age = ago(snapshot.fetchedAt, language: language)
+    @ViewBuilder private func usageFooter(_ snapshot: Snapshot, now: Date) -> some View {
+        let age = ago(snapshot.fetchedAt, language: language, now: now)
+        let resetReached = [snapshot.session?.resetsAt, snapshot.weekly?.resetsAt]
+            .compactMap { $0 }
+            .contains { $0.timeIntervalSince(now) <= 0 }
         switch p.usageState {
         case .loading:
             HStack(spacing: 5) {
@@ -618,13 +643,17 @@ struct ProfileCard: View {
         case .blocked:
             Text(t("usage.blockedCached", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.blockedHelp"))
-        case .loaded where p.live:
-            // Fresh from the latest round: the footer's round time already says when; stay quiet.
+        case .loaded where p.live && !resetReached:
             EmptyView()
+        case .loaded where resetReached:
+            Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+                .help(t("usage.resetDueCachedHelp"))
         case .loaded:
             Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+                .help(t("usage.cacheTimeHelp"))
         case .notRequested, .cached:
             Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+                .help(t("usage.cacheTimeHelp"))
         }
     }
 
@@ -676,18 +705,30 @@ struct ProfileCard: View {
             }
 
             if p.signedIn, let snapshot = s {
-                HStack(alignment: .top, spacing: 12) {
-                    UsageMetric(title: t("usage.fiveHours"), value: left(snapshot.session),
-                                reset: countdown(snapshot.session?.resetsAt, language: language), prominent: true)
-                    Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 58)
-                    UsageMetric(title: t("usage.weekly"), value: left(snapshot.weekly),
-                                reset: snapshot.weekly?.resetsAt.map {
-                                    t("format.weeklyReset", arguments: ["date": weekdayTime($0, language: language)])
-                                } ?? t("format.resetUnknown"))
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    let sampled = fullDateTime(snapshot.fetchedAt, language: language)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .top, spacing: 12) {
+                            UsageMetric(title: t("usage.fiveHours"), value: left(snapshot.session),
+                                        reset: countdown(snapshot.session?.resetsAt, language: language, now: context.date),
+                                        resetHelp: t("usage.fiveHoursResetHelp", arguments: [
+                                            "reset": fullDateTime(snapshot.session?.resetsAt, language: language),
+                                            "sampled": sampled
+                                        ]), prominent: true)
+                            Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 58)
+                            UsageMetric(title: t("usage.weekly"), value: left(snapshot.weekly),
+                                        reset: weeklyReset(snapshot.weekly?.resetsAt, language: language, now: context.date),
+                                        resetHelp: t("usage.weeklyResetHelp", arguments: [
+                                            "reset": fullDateTime(snapshot.weekly?.resetsAt, language: language),
+                                            "sampled": sampled
+                                        ]))
+                        }
+                        Spacer(minLength: 0)
+                        usageFooter(snapshot, now: context.date).font(.system(size: 9.5))
+                            .frame(height: 12, alignment: .leading)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 }
-                Spacer(minLength: 0)
-                usageFooter(snapshot).font(.system(size: 9.5))
-                    .frame(height: 12, alignment: .leading)
             } else {
                 let ph = placeholder
                 Spacer(minLength: 0)
@@ -807,44 +848,80 @@ struct AddAccountEntry: View {
     }
 }
 
+private struct FooterIcon: View {
+    let icon: String
+    let hover: Bool
+
+    var body: some View {
+        Image(systemName: icon).font(.system(size: 13, weight: .medium))
+            .foregroundColor(hover ? .txt : .sub).frame(width: 28, height: 28)
+            .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
+    }
+}
+
 struct FooterButton: View {
-    let icon: String; let help: String; let action: () -> Void
+    let icon: String; let help: String
+    var clearHoverAfterAction = false
+    let action: () -> Void
     @State private var hover = false
     var body: some View {
-        Button(action: action) {
-            Image(systemName: icon).font(.system(size: 13, weight: .medium))
-                .foregroundColor(hover ? .txt : .sub).frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
+        Button {
+            action()
+            if clearHoverAfterAction { hover = false }
+        } label: {
+            FooterIcon(icon: icon, hover: hover)
         }.buttonStyle(.plain).help(help).onHover { hover = $0 }
     }
 }
 
-/// Footer language menu, styled like FooterButton. `.borderlessButton` menus on macOS tend to ignore the
-/// label's foregroundColor (drawing it brighter than neighbours), so this uses `.menuStyle(.button)` +
-/// `.buttonStyle(.plain)`, which renders our own label view; the Menu itself stays the native one.
+private final class LanguageMenuController: NSObject {
+    weak var anchor: NSView?
+    private var onSelect: ((String) -> Void)?
+
+    func show(selection: String, onSelect: @escaping (String) -> Void) {
+        guard let anchor else { return }
+        self.onSelect = onSelect
+        defer { self.onSelect = nil }
+        let menu = NSMenu()
+        for language in AppLocalization.supportedLanguages {
+            let item = NSMenuItem(title: language.selfName, action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = language.code
+            item.state = language.code == selection ? .on : .off
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: anchor.bounds.height + 4), in: anchor)
+    }
+
+    @objc private func selectLanguage(_ item: NSMenuItem) {
+        guard let code = item.representedObject as? String else { return }
+        onSelect?(code)
+    }
+}
+
+private struct LanguageMenuAnchor: NSViewRepresentable {
+    let controller: LanguageMenuController
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView(frame: .zero)
+        controller.anchor = view
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        controller.anchor = view
+    }
+}
+
 struct LanguageMenu: View {
     @Binding var selection: String
-    @State private var hover = false
+    @State private var controller = LanguageMenuController()
+
     var body: some View {
-        Menu {
-            Picker(selection: $selection) {
-                ForEach(AppLocalization.supportedLanguages) { language in
-                    Text(language.selfName).tag(language.code)
-                }
-            } label: {
-                EmptyView()
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-        } label: {
-            Image(systemName: "globe").font(.system(size: 13, weight: .medium))
-                .foregroundColor(hover ? .txt : .sub).frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
+        FooterButton(icon: "globe", help: "语言 / Language", clearHoverAfterAction: true) {
+            controller.show(selection: selection) { selection = $0 }
         }
-        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden)
-        .fixedSize().frame(width: 28, height: 28)
-        .onHover { hover = $0 }
-        .help("语言 / Language")
+        .background(LanguageMenuAnchor(controller: controller))
         .accessibilityLabel("语言 / Language")
     }
 }
@@ -868,21 +945,34 @@ struct Panel: View {
         return AppLocalization.message(message, language: language)
     }
 
-    /// What the last refresh round actually achieved. `lastRefresh` only moves when a round finishes
-    /// (blocked rounds don't move it), so per-card failures and blocks are surfaced instead of "just now".
-    private var refreshSummary: (text: String, color: Color, help: String) {
+    /// Show `lastRefresh` only for a round with a successful usage snapshot, not after failure-only or empty rounds.
+    private func refreshSummary(now: Date) -> (text: String, color: Color, help: String) {
+        if let notice = store.usageNotice {
+            let text = store.profiles.contains(where: { $0.usageState == .blocked })
+                ? t("refresh.blocked") : t("refresh.noNewData")
+            return (text, .warn, generated(notice))
+        }
         if store.profiles.contains(where: { $0.usageState == .blocked }) {
             return (t("refresh.blocked"), .warn, t("refresh.blockedHelp"))
         }
-        guard let last = store.lastRefresh else {
+        let failed = store.profiles.filter { $0.usageState == .failed }.count
+        let hasNewData = store.profiles.contains { $0.usageState == .loaded }
+        if failed > 0 {
+            if hasNewData, let last = store.lastRefresh {
+                let age = ago(last, language: language, now: now)
+                return (t("refresh.failureSummary", arguments: ["age": age, "count": String(failed)]), .warn,
+                        t("refresh.failureHelp", arguments: ["age": age]))
+            }
+            return (t("refresh.failureCached", arguments: ["count": String(failed)]), .warn,
+                    t("refresh.failureCachedHelp"))
+        }
+        guard hasNewData, let last = store.lastRefresh else {
+            if store.profiles.contains(where: { $0.snapshot != nil }) {
+                return (t("refresh.noNewData"), .sub, t("refresh.noNewDataHelp"))
+            }
             return (t("refresh.never"), .sub, t("refresh.neverHelp"))
         }
-        let age = ago(last, language: language)
-        let failed = store.profiles.filter { $0.usageState == .failed }.count
-        if failed > 0 {
-            return (t("refresh.failureSummary", arguments: ["age": age, "count": String(failed)]), .warn,
-                    t("refresh.failureHelp", arguments: ["age": age]))
-        }
+        let age = ago(last, language: language, now: now)
         return (t("refresh.summary", arguments: ["age": age]), .sub, t("refresh.summaryHelp"))
     }
 
@@ -984,8 +1074,8 @@ struct Panel: View {
                     Text(t("common.refreshing")).font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
                         .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
                 } else {
-                    TimelineView(.periodic(from: .now, by: 30)) { _ in
-                        let summary = refreshSummary
+                    TimelineView(.periodic(from: .now, by: 60)) { context in
+                        let summary = refreshSummary(now: context.date)
                         HStack(spacing: 5) {
                             Image(systemName: summary.color == .sub ? "clock" : "exclamationmark.triangle")
                                 .font(.system(size: 10))
@@ -993,7 +1083,8 @@ struct Panel: View {
                                 .lineLimit(1).minimumScaleFactor(0.85)
                         }
                         .foregroundColor(summary.color)
-                        .help(summary.help)
+                        .help(summary.help + "\n" + t("refresh.officialCLIHelp")
+                            + (protection.desktopScope == .api ? "\n" + t("api.subscriptionUsageHelp") : ""))
                         .accessibilityElement(children: .combine)
                         .layoutPriority(-1)
                     }
@@ -1003,7 +1094,7 @@ struct Panel: View {
                     FooterButton(icon: "doc.on.doc", help: t("footer.import")) { CopyWindow.show(store) }
                 }
                 FooterButton(icon: "arrow.clockwise", help: t("footer.refresh")) {
-                    Task { await store.refresh() }
+                    Task { await store.refresh(allowInteraction: true) }
                 }
                 FooterButton(icon: store.openAtLogin ? "sunrise.fill" : "sunrise",
                              help: t(store.openAtLogin ? "footer.loginEnabled" : "footer.loginDisabled")) {

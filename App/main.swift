@@ -140,24 +140,6 @@ func planName(_ org: [String: Any]?) -> String? {
     return type.isEmpty ? nil : type.capitalized
 }
 
-func fetchSnapshot(_ tok: String) async throws -> Snapshot {
-    async let u = getJSON("usage", tok)
-    async let p = getJSON("profile", tok)
-    let (usage, prof) = try await (u, p)
-    let identity = CLIIdentity.profile(prof)
-    let org = prof["organization"] as? [String: Any]
-    return Snapshot(email: identity.email,
-                    accountID: identity.accountID, organizationID: identity.organizationID,
-                    identityTokenDigest: desktopTokenDigest(tok),
-                    name: org?["name"] as? String,
-                    plan: planName(org),
-                    session: window(usage["five_hour"]),
-                    weekly: window(usage["seven_day"]),
-                    weeklyOpus: window(usage["seven_day_opus"]),
-                    extraEnabled: (usage["extra_usage"] as? [String: Any])?["is_enabled"] as? Bool,
-                    fetchedAt: Date())
-}
-
 func loadCache(_ name: String) -> Snapshot? {
     guard ProfileTransaction.validName(name) else { return nil }
     guard let d = try? Data(contentsOf: cacheDir.appendingPathComponent("\(name).json")) else { return nil }
@@ -188,6 +170,7 @@ final class Store: ObservableObject {
     @Published var busy: String?
     @Published var lastRefresh: Date?
     @Published var banner: String?
+    @Published var usageNotice: String?
     @Published var openAtLogin = false
     @Published var cliProfile: String?     // profile the terminal `claude` is logged in as
     @Published var cliEmail: String?
@@ -245,6 +228,15 @@ final class Store: ObservableObject {
             profiles[index].usageState = profiles[index].snapshot == nil ? .notRequested : .loaded
             profiles[index].snapshot?.accountID = "demo-account-" + profiles[index].name
             profiles[index].snapshot?.organizationID = "demo-org-" + profiles[index].name
+        }
+        if Bundle.main.object(forInfoDictionaryKey: "CSPreviewUsageExpired") as? Bool == true {
+            for index in profiles.indices where profiles[index].snapshot != nil {
+                profiles[index].snapshot?.fetchedAt = now.addingTimeInterval(-48 * 3600)
+                profiles[index].snapshot?.session?.resetsAt = now.addingTimeInterval(-24 * 3600)
+                profiles[index].snapshot?.weekly?.resetsAt = now.addingTimeInterval(-3600)
+                profiles[index].usageState = .cached
+            }
+            lastRefresh = nil
         }
         cliStatus = .matched
         cliStatusCheckedAt = now
@@ -361,53 +353,72 @@ final class Store: ObservableObject {
         onChange?()
     }
 
-    func refresh() async {
+    /// Accept only a result still bound to the profile observed when this round
+    /// started. Failed reads retain the original quota sample and update time.
+    func acceptSubscriptionUsageResult(_ result: Result<Snapshot, Error>?, for name: String,
+                                       contextUnchanged: Bool) {
+        guard let index = profiles.firstIndex(where: { $0.name == name }) else { return }
+        guard contextUnchanged else {
+            profiles[index].finishUsageRefresh(.failure(err("查询期间账号档案已变化，未采纳旧用量结果。")))
+            return
+        }
+        profiles[index].finishUsageRefresh(result)
+        if case .success(let snapshot)? = result {
+            if !isDemo { saveCache(name, snapshot) }
+            lastRefresh = snapshot.fetchedAt
+        }
+    }
+
+    func refresh(allowInteraction: Bool = false) async {
         guard !isDemo, !refreshing, busy == nil else { return }
         refreshing = true
         defer { refreshing = false }
         reloadList()
         protection.refreshScope()
-        if protection.desktopScope == .api {
-            banner = nil
-            for index in profiles.indices {
-                profiles[index].usageState = profiles[index].snapshot == nil ? .notRequested : .cached
-                profiles[index].error = nil
-            }
-            await refreshCLI(verify: false)
-            lastRefresh = Date(); onChange?(); return
+        usageNotice = nil
+        for index in profiles.indices {
+            profiles[index].usageState = profiles[index].snapshot == nil ? .notRequested : .cached
+            profiles[index].error = nil
         }
-        // Usage calls carry account tokens too; they must not bypass the region gate.
-        let decision = await protection.preflight()
-        guard decision.allowed else {
-            banner = decision.message
-            for index in profiles.indices { profiles[index].blockUsageRefresh(decision.message) }
-            // API Desktop is outside the subscription Desktop gate. The default CLI
-            // can still be verified through its own network/registration gate.
-            await refreshCLI(verify: decision.reason == .unsupportedMode); onChange?()
-            return
-        }
-        banner = nil
-        for index in profiles.indices { profiles[index].beginUsageRefresh() }
-        await withTaskGroup(of: (String, Result<Snapshot, Error>?).self) { g in
-            for p in profiles {
-                let dir = profileDir(p.name)
-                g.addTask {
-                    do {
-                        guard let tok = try await token(for: dir) else { return (p.name, nil) }
-                        return (p.name, .success(try await fetchSnapshot(tok)))
-                    } catch { return (p.name, .failure(error)) }
-                }
-            }
-            for await (name, res) in g {
-                guard let i = profiles.firstIndex(where: { $0.name == name }) else { continue }
-                profiles[i].finishUsageRefresh(res)
-                if case .success(let snapshot)? = res { saveCache(name, snapshot) }
-                if case .failure(let error)? = res, error.localizedDescription.contains("Keychain") { banner = error.localizedDescription }
+        // Automatic refresh reads only the official client's own cache. A manual
+        // /usage run is network-gated and never swaps another account into the CLI.
+        if allowInteraction {
+            let decision = await protection.preflight(target: .subscriptionUsage)
+            guard decision.allowed else {
+                usageNotice = decision.message
+                for index in profiles.indices { profiles[index].blockUsageRefresh(decision.message) }
+                onChange?(); return
             }
         }
-        await refreshCLI(verify: true)
-        lastRefresh = Date()
+        do {
+            let sample = try await OfficialCLIUsageReader.read(home: FileManager.default.homeDirectoryForCurrentUser,
+                                                              manual: allowInteraction)
+            applyOfficialUsage(sample)
+        } catch { usageNotice = error.localizedDescription }
         onChange?()
+    }
+
+    /// UUID/organization matching, never display email alone, selects the card.
+    /// Inactive or ambiguous identities remain honest historical caches.
+    func applyOfficialUsage(_ sample: OfficialCLIUsageCache?) {
+        guard let sample else {
+            usageNotice = "官方 CLI 尚无可读用量缓存，请在 Claude Code 中查看 /usage 后重试。"; return
+        }
+        let matches = profiles.indices.filter { index in
+            CLIReportedStatus.sameAccountRecord(profiles[index].snapshot?.identity, sample.identity) == true
+        }
+        guard matches.count == 1, let index = matches.first,
+              var snapshot = profiles[index].snapshot, snapshot.identity.samePrincipal(as: sample.identity) else {
+            usageNotice = "官方 CLI 账号未能唯一匹配保存档案，未改写任何账号额度。"; return
+        }
+        guard sample.fetchedAt >= snapshot.fetchedAt else {
+            usageNotice = "官方 CLI 缓存较旧，保留已保存的较新用量。"; return
+        }
+        snapshot.session = sample.session.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
+        snapshot.weekly = sample.weekly.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
+        snapshot.weeklyOpus = sample.weeklyOpus.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
+        snapshot.fetchedAt = sample.fetchedAt
+        acceptSubscriptionUsageResult(.success(snapshot), for: profiles[index].name, contextUnchanged: true)
     }
 
     func addProfile(_ raw: String) {
@@ -546,11 +557,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var previewContentHeight: CGFloat?
     var previewNote: NSTextField?
     var previewButton: NSButton?
+    private var titleModeObservation: AnyCancellable?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         MainActor.assumeIsolated {
             store = demoMode ? Store(demo: true) : Store()
             store.onChange = { [weak self] in self?.updateTitle() }
+            titleModeObservation = store.protection.$desktopScope.removeDuplicates().dropFirst()
+                .receive(on: RunLoop.main)
+                .sink { [weak self] _ in MainActor.assumeIsolated { self?.updateTitle() } }
             store.onLanguageChange = { [weak self] in self?.updateLanguage() }
             store.onShowAccounts = { [weak self] in self?.showPanel() }
             popover.behavior = .transient
@@ -687,12 +702,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @MainActor func updateTitle() {
         guard let b = item.button else { return }
-        let sl = left(store.active?.snapshot?.session)
+        let scope = store.protection.desktopScope
+        let sl = scope == .subscription ? left(store.active?.snapshot?.session) : nil
         let initial = store.current.prefix(1).uppercased()
-        b.title = sl.map { " \(initial) · \(pct($0))%" } ?? " \(initial)"
+        b.title = scope == .api ? " API" : sl.map { " \(initial) · \(pct($0))%" } ?? " \(initial)"
         b.image = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Claude Switcher")
         b.imagePosition = .imageLeading
-        b.toolTip = "Claude: \(store.current)"
+        b.toolTip = scope == .api ? "Claude: API" : "Claude: \(store.current)"
     }
 
     @objc func toggle() {

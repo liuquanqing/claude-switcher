@@ -21,6 +21,7 @@ struct DesktopOnlySwitchOffer: Equatable {
             guard current == offer.source else { banner = "当前档案已变化，请重新选择。"; return }
             current = offer.target
             cliStatus = .unverified
+            cliStatusDetail = nil; cliStatusCheckedAt = nil; cliStandaloneVerified = false
             banner = "仅切换了桌面；CLI 登录保持原样，可核验后同步到当前账号。"
             return
         }

@@ -101,6 +101,35 @@ final class ConfigurationScopeTests: FixtureTest {
         XCTAssertEqual(LaunchGate.evaluate(config: config, registered: true, receipt: receipt, network: network).reason, .unsupportedMode)
         XCTAssertTrue(LaunchGate.evaluate(config: config, registered: true, receipt: receipt, network: network, target: .cli).allowed)
     }
+    func testSubscriptionUsageCanReadInAPIModeWithoutAdoptingDesktop() {
+        let config = SafetyConfig(enabled: true)
+        let network = NetworkObservation(proxyConnected: true, tunOnline: true, country: "SG")
+        let receipt = GuardReceipt(config: config, decision: SafetyDecision(.allowed), desktopScope: .api)
+        XCTAssertTrue(LaunchGate.evaluate(config: config, registered: true, receipt: receipt,
+            network: network, target: .subscriptionUsage, desktopScope: .api).allowed)
+        XCTAssertEqual(LaunchGate.evaluate(config: config, registered: true, receipt: receipt,
+            network: network, target: .desktop, desktopScope: .api).reason, .unsupportedMode)
+        XCTAssertEqual(LaunchGate.evaluate(config: config, registered: true, receipt: receipt,
+            network: network, target: .subscriptionUsage, desktopScope: .unknown).reason, .unsupportedMode)
+    }
+    func testSubscriptionUsageRetainsEveryNetworkAndGuardGateInAPIMode() {
+        let config = SafetyConfig(enabled: true)
+        let receipt = GuardReceipt(config: config, decision: SafetyDecision(.allowed), desktopScope: .api)
+        for (network, reason) in [
+            (NetworkObservation(proxyConnected: false, tunOnline: true, country: "SG"), SafetyReason.proxyDisconnected),
+            (NetworkObservation(proxyConnected: true, tunOnline: false, country: "SG"), .tunMissing),
+            (NetworkObservation(proxyConnected: true, tunOnline: true, country: nil), .countryUnknown),
+            (NetworkObservation(proxyConnected: true, tunOnline: true, country: "JP"), .countryMismatch)
+        ] {
+            XCTAssertEqual(LaunchGate.evaluate(config: config, registered: true, receipt: receipt,
+                network: network, target: .subscriptionUsage, desktopScope: .api).reason, reason)
+        }
+        let good = NetworkObservation(proxyConnected: true, tunOnline: true, country: "SG")
+        XCTAssertEqual(LaunchGate.evaluate(config: config, registered: false, receipt: receipt,
+            network: good, target: .subscriptionUsage, desktopScope: .api).reason, .guardUnavailable)
+        XCTAssertEqual(LaunchGate.evaluate(config: config, registered: true, receipt: nil,
+            network: good, target: .subscriptionUsage, desktopScope: .api).reason, .staleReceipt)
+    }
     func testFailedTerminationCannotBeShownAsReadyToOpen() {
         let config = SafetyConfig(enabled: true)
         let receipt = GuardReceipt(config: config, decision: SafetyDecision(.countryUnknown), termination: "failed")

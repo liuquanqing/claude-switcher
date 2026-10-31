@@ -9,7 +9,7 @@ public enum DesktopProtectionScope: String, Codable, Sendable {
     case subscription, api, unknown
 }
 
-public enum ProtectedTarget: Sendable { case desktop, cli }
+public enum ProtectedTarget: Sendable { case desktop, cli, subscriptionUsage }
 
 public struct ManagedDesktopSession: Codable, Equatable, Sendable {
     public let pid: Int32

@@ -36,6 +36,7 @@ final class ProtectionController: ObservableObject {
     private var timer: Timer?
     private var refreshing = false
     private let worker: any GuardWorking
+    private let observeNetwork: (ProxyMode) async -> NetworkObservation
     let files: SafetyFiles
     let service: GuardService
     var hasUnsavedChanges: Bool {
@@ -46,12 +47,14 @@ final class ProtectionController: ObservableObject {
         return guardOnline ? "后台保护继续运行" : "保护状态待确认"
     }
 
-    init(demo: Bool = false, testFiles: SafetyFiles? = nil, worker: (any GuardWorking)? = nil) {
+    init(demo: Bool = false, testFiles: SafetyFiles? = nil, worker: (any GuardWorking)? = nil,
+         observeNetwork: ((ProxyMode) async -> NetworkObservation)? = nil) {
         self.demo = demo
         files = testFiles ?? SafetyFiles(directory: FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/ClaudeSwitcher"))
         service = GuardService(files: files, helper: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/ClaudeGuard"))
         self.worker = worker ?? GuardWorker(directory: files.directory, helper: service.helper)
+        self.observeNetwork = observeNetwork ?? { mode in await NetworkProbe().observe(mode: mode) }
         if demo {
             desktopScope = .subscription; desktopManaged = true; apiConfiguration = .subscription
             enabled = true; guardOnline = true; activeCountry = "SG"; activeProxyMode = .shadowrocket; status = "守卫在线 · 目标 SG · 退出界面后继续保护"
@@ -256,6 +259,7 @@ final class ProtectionController: ObservableObject {
     func preflight(target: ProtectedTarget = .desktop) async -> SafetyDecision {
         if demo {
             if target == .desktop && desktopScope != .subscription { return SafetyDecision(.unsupportedMode) }
+            if target == .subscriptionUsage && desktopScope == .unknown { return SafetyDecision(.unsupportedMode) }
             return lastDecision
         }
         func finish(_ decision: SafetyDecision) -> SafetyDecision {
@@ -271,9 +275,10 @@ final class ProtectionController: ObservableObject {
         applySaved(config); enabled = config.enabled; refreshScope()
         guard config.enabled else { return finish(SafetyDecision(.disabled)) }
         if target == .desktop && desktopScope != .subscription { return finish(SafetyDecision(.unsupportedMode)) }
+        if target == .subscriptionUsage && desktopScope == .unknown { return finish(SafetyDecision(.unsupportedMode)) }
         guard await worker.registered() else { guardOnline = false; return finish(SafetyDecision(.guardUnavailable)) }
         guardOnline = files.loadReceipt()?.isFresh(for: config) == true
-        let network = await NetworkProbe().observe(mode: config.proxyMode)
+        let network = await observeNetwork(config.proxyMode)
         guard (try? files.loadConfig()) == config else { applySaved(nil); return finish(SafetyDecision(.invalidConfig)) }
         refreshScope()
         let registered = await worker.registered(), receipt = files.loadReceipt()

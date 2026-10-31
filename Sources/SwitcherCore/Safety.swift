@@ -142,8 +142,9 @@ public enum LaunchGate {
         guard registered else { return SafetyDecision(.guardUnavailable) }
         guard receipt?.isFresh(for: config, now: now) == true else { return SafetyDecision(.staleReceipt) }
         guard receipt?.termination != "failed" else { return SafetyDecision(.terminationFailed) }
+        let scope = desktopScope ?? receipt?.desktopScope ?? .unknown
+        if target == .subscriptionUsage && scope == .unknown { return SafetyDecision(.unsupportedMode) }
         if target == .desktop {
-            let scope = desktopScope ?? receipt?.desktopScope ?? .unknown
             guard scope == .subscription, receipt?.desktopScope == scope else { return SafetyDecision(.unsupportedMode) }
         }
         return SafetyPolicy.evaluate(config, network)

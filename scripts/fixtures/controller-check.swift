@@ -91,6 +91,100 @@ actor FixtureGuardWorker: GuardWorking {
   require(try KeychainReadAccess.read(service: "fixture", perform: { _, _ in errSecItemNotFound }) == nil, "only missing item is absence")
   let root = FileManager.default.temporaryDirectory.appendingPathComponent("controller-fixture-" + UUID().uuidString)
   defer { try? FileManager.default.removeItem(at: root) }
+  // Renewal workspace checks: fictional credentials, in-memory keychain and fake executables only.
+  let recoveryIdentity = CLIIdentity(accountID: "recovery-account", organizationID: "recovery-org", email: "recovery@example.test")
+  func recoveryLogin(expired: Bool) throws -> CLIOwnedLogin {
+   CLIOwnedLogin(oauth: try CLIJSON.encode(["accessToken":expired ? "fixture-old" : "fixture-new", "refreshToken":"fixture-refresh", "expiresAt":Date().addingTimeInterval(expired ? -60 : 3600).timeIntervalSince1970*1000]),
+                metadata:try CLIJSON.encode(["accountUuid":recoveryIdentity.accountID!,"organizationUuid":recoveryIdentity.organizationID!,"emailAddress":recoveryIdentity.email!]))
+  }
+  let recoverySeed = try recoveryLogin(expired:true), recoveryNew = try recoveryLogin(expired:false)
+  let recoveryRoot = root.appendingPathComponent("recovery-workspaces")
+  var scopedSecrets: [String:Data] = [:], renewalRuns = 0, recoveryDirectory: URL?
+  let recoveryAdapter = OfficialCLIRecovery(root:recoveryRoot,readSecret:{scopedSecrets[$0]},deleteSecret:{scopedSecrets.removeValue(forKey:$0)},run:{ directory in
+   renewalRuns += 1; recoveryDirectory = directory
+   let staged = try CLIOwnedLogin(credentials:CLIPrivateFile.read(directory.appendingPathComponent(".credentials.json")),identityDocument:CLIPrivateFile.read(directory.appendingPathComponent(".claude.json")))
+   require(staged == recoverySeed,"native recovery receives only its target fixture, not a default login")
+   scopedSecrets[OfficialCLIRecovery.service(for:directory)] = try CLIJSON.replacing(nil,key:"claudeAiOauth",with:recoveryNew.oauth)
+  })
+  let recovered = try await recoveryAdapter.recover(recoverySeed,expected:recoveryIdentity)
+  require(recovered.login == recoveryNew && renewalRuns == 1,"scoped native keychain rotation takes precedence over the old seed file")
+  require(FileManager.default.fileExists(atPath:recoveryDirectory!.path),"native recovery remains durable until the caller verifies and saves it")
+  let resumedRecovery = try await recoveryAdapter.recover(recoverySeed,expected:recoveryIdentity)
+  require(resumedRecovery.login == recoveryNew && renewalRuns == 1,"retry resumes retained rotation without overwriting it or renewing twice")
+  try resumedRecovery.finish()
+  require(scopedSecrets.isEmpty && !FileManager.default.fileExists(atPath:recoveryDirectory!.path),"successful verified commit can remove only its scoped recovery material")
+  let retainedRoot = root.appendingPathComponent("recovery-interrupted")
+  var failedRuns = 0
+  let interrupted = OfficialCLIRecovery(root:retainedRoot,readSecret:{_ in nil},deleteSecret:{_ in},run:{ directory in
+   failedRuns += 1
+   try CLIPrivateFile.write(CLIJSON.replacing(nil,key:"claudeAiOauth",with:recoveryNew.oauth),to:directory.appendingPathComponent(".credentials.json"))
+   throw SafetyError("fixture exit after rotation")
+  })
+  var interruptedRejected = false
+  do { _ = try await interrupted.recover(recoverySeed,expected:recoveryIdentity) } catch { interruptedRejected = true }
+  require(interruptedRejected,"native nonzero exit does not report a completed renewal")
+  let retainedRotation = try await interrupted.recover(recoverySeed,expected:recoveryIdentity)
+  require(retainedRotation.login == recoveryNew && failedRuns == 1,"a failed native command retains its changed credential for verification on retry")
+  try retainedRotation.finish()
+  let unchanged = OfficialCLIRecovery(root:root.appendingPathComponent("recovery-noop"),readSecret:{_ in nil},deleteSecret:{_ in},run:{_ in})
+  let noOpRecovery = try await unchanged.recover(recoverySeed,expected:recoveryIdentity)
+  require(noOpRecovery.login.usableAccessToken(now:Date()) == nil,"native exit zero with an unchanged expired credential is not fresh proof")
+  let env = OfficialCLIRecovery.childEnvironment(home:root,directory:retainedRoot,inherited:["ANTHROPIC_API_KEY":"fixture", "ANTHROPIC_AUTH_TOKEN":"fixture", "CLAUDE_CONFIG_DIR":"/fixture/other", "CLAUDE_ENV_FILE":"/fixture/env", "HTTPS_PROXY":"http://fixture-proxy:8080", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC":"1"])
+  require(env["ANTHROPIC_API_KEY"] == nil && env["ANTHROPIC_AUTH_TOKEN"] == nil && env["CLAUDE_ENV_FILE"] == nil && env["CLAUDE_CONFIG_DIR"] == retainedRoot.path,
+          "recovery child rejects ambient API and project credentials and pins its isolated directory")
+  require(env["HTTPS_PROXY"] == "http://fixture-proxy:8080" && env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1","recovery preserves explicit routing and user no-network preference")
+  let fakeNativeHome = root.appendingPathComponent("recovery-native-home")
+  let fakeNative = fakeNativeHome.appendingPathComponent(".local/bin/claude")
+  try FileManager.default.createDirectory(at:fakeNative.deletingLastPathComponent(),withIntermediateDirectories:true)
+  try "#!/bin/sh\n[ \"$1\" = -p ] && [ \"$2\" = /usage ] || exit 5\n[ -n \"$CLAUDE_CONFIG_DIR\" ] && [ \"$PWD\" -ef \"$CLAUDE_CONFIG_DIR\" ] || exit 6\n[ -z \"$ANTHROPIC_API_KEY$CLAUDE_ENV_FILE\" ] || exit 7\nprintf fixture > \"$CLAUDE_CONFIG_DIR/native-invoked\"\n".write(to:fakeNative,atomically:true,encoding:.utf8)
+  try FileManager.default.setAttributes([.posixPermissions:0o700],ofItemAtPath:fakeNative.path)
+  try FileManager.default.createDirectory(at:retainedRoot,withIntermediateDirectories:true)
+  try await OfficialCLIRecovery.runOfficial(home:fakeNativeHome,directory:retainedRoot,inherited:["PATH":"/usr/bin:/bin","ANTHROPIC_API_KEY":"fixture","CLAUDE_ENV_FILE":"/fixture/env"])
+  require(FileManager.default.fileExists(atPath:retainedRoot.appendingPathComponent("native-invoked").path),"the native runner executes only the selected fake CLI in the pinned preparation directory")
+  let partialDirectory = try FileManager.default.contentsOfDirectory(at:root.appendingPathComponent("recovery-noop"),includingPropertiesForKeys:nil).first!
+  try FileManager.default.removeItem(at:partialDirectory.appendingPathComponent("switcher-recovery.json"))
+  try FileManager.default.removeItem(at:partialDirectory.appendingPathComponent(".claude.json"))
+  let partialResumed = try await unchanged.recover(recoverySeed,expected:recoveryIdentity)
+  require(partialResumed.login == recoverySeed,"interrupted seed initialization completes only unchanged missing fields")
+  try CLIPrivateFile.write(CLIJSON.replacing(nil,key:"claudeAiOauth",with:recoveryNew.oauth),to:partialDirectory.appendingPathComponent(".credentials.json"))
+  try FileManager.default.removeItem(at:partialDirectory.appendingPathComponent("switcher-recovery.json"))
+  var unknownRotationRejected = false
+  do { _ = try await unchanged.recover(recoverySeed,expected:recoveryIdentity) } catch { unknownRotationRejected = true }
+  require(unknownRotationRejected,"an unreceipted changed credential is retained instead of overwritten by its old seed")
+  var cleanupDirectories: [URL] = [], cleanupSecrets: [String:Data] = [:]
+  let cleanupAdapter = OfficialCLIRecovery(root:root.appendingPathComponent("recovery-cleanup-pending"),readSecret:{cleanupSecrets[$0]},deleteSecret:{_ in throw SafetyError("fixture delete denied")},run:{ directory in
+   cleanupDirectories.append(directory)
+   cleanupSecrets[OfficialCLIRecovery.service(for:directory)] = try CLIJSON.replacing(nil,key:"claudeAiOauth",with:recoveryNew.oauth)
+  })
+  let cleanupPending = try await cleanupAdapter.recover(recoverySeed,expected:recoveryIdentity)
+  do { try cleanupPending.finish() } catch {}
+  let retainedFile = try CLIOwnedLogin(credentials:CLIPrivateFile.read(cleanupDirectories[0].appendingPathComponent(".credentials.json")),identityDocument:CLIPrivateFile.read(cleanupDirectories[0].appendingPathComponent(".claude.json")))
+  require(retainedFile == recoveryNew,"cleanup writes the renewed file before deleting any scoped keychain record")
+  let laterSeed = CLIOwnedLogin(oauth:try CLIJSON.encode(["accessToken":"later-expired-fixture","refreshToken":"later-refresh-fixture","expiresAt":Date().addingTimeInterval(-60).timeIntervalSince1970*1000]),metadata:recoverySeed.metadata)
+  _ = try await cleanupAdapter.recover(laterSeed,expected:recoveryIdentity)
+  require(cleanupDirectories.count == 2 && cleanupDirectories[0] != cleanupDirectories[1] && FileManager.default.fileExists(atPath:cleanupDirectories[0].path),"a new backup generation can recover without deleting or being blocked by previous cleanup-pending material")
+  let privateAttrs = try FileManager.default.attributesOfItem(atPath:cleanupDirectories[1].appendingPathComponent(".credentials.json").path)
+  let excludedValues = try cleanupDirectories[1].resourceValues(forKeys:[.isExcludedFromBackupKey])
+  require((privateAttrs[.posixPermissions] as? NSNumber)?.intValue == 0o600 && excludedValues.isExcludedFromBackup == true,"recovery credentials are private and the directory is excluded from automatic backups")
+  try "#!/bin/sh\ntrap '' TERM\nwhile :; do :; done\n".write(to:fakeNative,atomically:true,encoding:.utf8)
+  var timedOutNatively = false
+  do { try await OfficialCLIRecovery.runOfficial(home:fakeNativeHome,directory:retainedRoot,inherited:["PATH":"/usr/bin:/bin"],timeoutSeconds:0.05,terminationGrace:0.05) }
+  catch { timedOutNatively = error is CLIRecoveryTimedOut }
+  require(timedOutNatively,"a stuck fixture CLI is bounded and reports timeout uncertainty rather than a successful recovery")
+
+  try "#!/bin/sh\nexit 0\n".write(to:fakeNative,atomically:true,encoding:.utf8)
+  for _ in 0..<8 {
+   try await OfficialCLIRecovery.runOfficial(home:fakeNativeHome,directory:retainedRoot,inherited:["PATH":"/usr/bin:/bin"],timeoutSeconds:1,terminationGrace:0.1)
+  }
+  require(true,"repeated fast native exits complete through callbacks without a task-thread waitUntilExit hang")
+  var metadataOnly = false
+  let fixtureExists = try KeychainReadAccess.contains(service:"fixture",account:"fixture",perform:{ query,_ in
+   let q = query as NSDictionary
+   metadataOnly = q[kSecReturnData] == nil && (q[kSecReturnAttributes] as? Bool) == true && (q[kSecUseAuthenticationContext] as? LAContext)?.interactionNotAllowed == true
+   return errSecSuccess
+  })
+  require(fixtureExists && metadataOnly,"backup existence checks do not decrypt credentials or request interactive authorization")
+
   let reportHome = root.appendingPathComponent("official-cli-fixture")
   let reportBin = reportHome.appendingPathComponent(".local/bin/claude")
   try FileManager.default.createDirectory(at: reportBin.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -149,6 +243,24 @@ actor FixtureGuardWorker: GuardWorking {
    apiController.refreshScope()
    require(apiController.desktopScope == .api && apiController.apiConfiguration == expected, "local refresh identifies changed API manager without saved guard config or credential reads")
   }
+  let apiUsageFiles = SafetyFiles(directory: apiRoot.appendingPathComponent("usage-state"))
+  try apiUsageFiles.save(config, to: apiUsageFiles.configURL)
+  try apiUsageFiles.save(GuardReceipt(config: config, decision: SafetyDecision(.allowed), desktopScope: .api), to: apiUsageFiles.receiptURL)
+  var usageProbeCount = 0
+  let apiUsageController = ProtectionController(testFiles: apiUsageFiles, worker: FixtureGuardWorker(files: apiUsageFiles), observeNetwork: { _ in
+   usageProbeCount += 1
+   return NetworkObservation(proxyConnected: true, tunOnline: true, country: "SG")
+  })
+  let apiUsageGate = await apiUsageController.preflight(target: .subscriptionUsage)
+  require(apiUsageGate.allowed && usageProbeCount == 1 && apiUsageController.desktopScope == .api,
+          "API subscription usage uses an injected live-network gate without probing real network or adopting a desktop")
+  require((await apiUsageController.preflight(target: .desktop)).reason == .unsupportedMode && usageProbeCount == 1,
+          "allowing saved usage reads never opens the API desktop through the subscription launch gate")
+  let apiUsageBlocked = ProtectionController(testFiles: apiUsageFiles, worker: FixtureGuardWorker(files: apiUsageFiles), observeNetwork: { _ in
+   NetworkObservation(proxyConnected: true, tunOnline: true, country: "JP")
+  })
+  require((await apiUsageBlocked.preflight(target: .subscriptionUsage)).reason == .countryMismatch,
+          "API usage reads remain blocked on a wrong-country mock observation")
 
   let demo = ProtectionController(demo: true)
   require(!demo.hasUnsavedChanges, "saved demo settings begin clean")
@@ -178,7 +290,7 @@ actor FixtureGuardWorker: GuardWorking {
   store.desktopOnlyOffer = DesktopOnlySwitchOffer(source: "Personal", target: "Business", reason: "fixture legacy login")
   await store.confirmDesktopOnlySwitch()
   require(store.current == "Business" && store.cliProfile == retainedCLI && store.cliEmail == retainedEmail, "explicit desktop-only exception leaves CLI unchanged")
-  require(store.cliStatus == .unverified && store.desktopOnlyOffer == nil, "desktop-only choice requires fresh verification, not a demo-only success")
+  require(store.cliStatus == .unverified && store.desktopOnlyOffer == nil && store.cliStatusDetail == nil && store.cliStatusCheckedAt == nil, "desktop-only choice requires fresh verification and clears stale demo match details")
   await store.verifyDefaultCLI()
   require(store.cliStatus == .different && store.cliProfile == retainedCLI, "explicit verify reveals mismatch without changing saved login")
   store.desktopOnlyOffer = DesktopOnlySwitchOffer(source: "Personal", target: "Side Project", reason: "stale fixture")
@@ -409,7 +521,95 @@ actor FixtureGuardWorker: GuardWorking {
   usageProfile.beginUsageRefresh(); usageProfile.finishUsageRefresh(nil)
   require(!usageProfile.signedIn && usageProfile.usageState == .notRequested, "confirmed absence of login terminates loading")
   let languageStore = Store(demo: true)
+  let usageClock = Date(timeIntervalSince1970: 1_700_000_000)
+  let futureReset = usageClock.addingTimeInterval(3660)
+  require(countdown(futureReset, language: "zh", now: usageClock)
+          != countdown(futureReset, language: "zh", now: usageClock.addingTimeInterval(60)),
+          "a minute display tick changes a future reset countdown without fetching another usage sample")
+  require(ago(usageClock.addingTimeInterval(-119), language: "en", now: usageClock)
+          != ago(usageClock.addingTimeInterval(-119), language: "en", now: usageClock.addingTimeInterval(60)),
+          "cache age advances on the display clock independently of data refresh")
+  for language in ["zh", "en"] {
+   let pendingReset = appText("format.resetDue", language: language)
+   require(countdown(usageClock.addingTimeInterval(-1), language: language, now: usageClock) == pendingReset
+           && weeklyReset(usageClock.addingTimeInterval(-1), language: language, now: usageClock) == pendingReset
+           && weekdayTime(usageClock.addingTimeInterval(-1), language: language, now: usageClock) == pendingReset,
+           "expired five-hour and weekly deadlines do not masquerade as future reset dates")
+  }
+  require(countdown(nil, language: "zh", now: usageClock) == appText("format.resetUnknown", language: "zh"),
+          "a missing server reset time is not invented by the display clock")
+  let apiCacheStore = Store(demo: true)
+  let originalUsageRead = Date(timeIntervalSince1970: 1_700_000_000)
+  apiCacheStore.lastRefresh = originalUsageRead
+  let usageSnapshotEncoder = JSONEncoder()
+  usageSnapshotEncoder.outputFormatting = [.sortedKeys]
+  let originalUsageSnapshots = try apiCacheStore.profiles.map { try usageSnapshotEncoder.encode($0.snapshot) }
+  let originalUsageIdentity = apiCacheStore.current
+  let usageName = apiCacheStore.profiles[0].name
+  apiCacheStore.acceptSubscriptionUsageResult(.failure(SafetyError("fixture usage failure")), for: usageName, contextUnchanged: true)
+  require(apiCacheStore.lastRefresh == originalUsageRead, "a failed subscription usage query never fabricates a data refresh timestamp")
+  require(try apiCacheStore.profiles.map { try usageSnapshotEncoder.encode($0.snapshot) } == originalUsageSnapshots,
+          "failed queries preserve usage percentages and server reset timestamps")
+  require(apiCacheStore.profiles[0].usageState == .failed && apiCacheStore.current == originalUsageIdentity,
+          "failed usage reads retain the original account identity and an explicit failure state")
+  var updatedUsage = apiCacheStore.profiles[0].snapshot!
+  updatedUsage.fetchedAt = originalUsageRead.addingTimeInterval(3600)
+  apiCacheStore.acceptSubscriptionUsageResult(.success(updatedUsage), for: usageName, contextUnchanged: true)
+  require(apiCacheStore.lastRefresh == updatedUsage.fetchedAt && apiCacheStore.profiles[0].usageState == .loaded,
+          "successful subscription usage reads advance the data timestamp regardless of desktop billing mode")
+  var unrelatedUsage = updatedUsage
+  unrelatedUsage.fetchedAt = updatedUsage.fetchedAt.addingTimeInterval(3600)
+  apiCacheStore.acceptSubscriptionUsageResult(.success(unrelatedUsage), for: usageName, contextUnchanged: false)
+  require(apiCacheStore.lastRefresh == updatedUsage.fetchedAt && apiCacheStore.profiles[0].snapshot?.fetchedAt == updatedUsage.fetchedAt,
+          "a profile change during the query rejects the old response without replacing cache or update time")
   let languageController = SessionTransferController(store: languageStore, testEnvironment: selectionFixture.0)
+  let officialHome = root.appendingPathComponent("official-usage-home")
+  let officialCommand = officialHome.appendingPathComponent(".local/bin/claude")
+  try FileManager.default.createDirectory(at: officialCommand.deletingLastPathComponent(), withIntermediateDirectories: true)
+  let nativeSampleDate = Date(timeIntervalSince1970: 1_700_000_000)
+  func nativeUsageDocument(_ account: String, cached: Bool) throws -> Data {
+   var value: [String: Any] = ["oauthAccount": ["accountUuid": account, "organizationUuid": "demo-org-Personal", "emailAddress": "fixture@example.test"]]
+   if cached {
+    value["cachedUsageUtilization"] = ["accountUuid": account, "fetchedAtMs": nativeSampleDate.timeIntervalSince1970 * 1000,
+       "utilization": ["five_hour": ["utilization": 31, "resets_at": NSNull()], "seven_day": ["utilization": 42, "resets_at": NSNull()]]]
+   }
+   return try CLIJSON.encode(value)
+  }
+  let nativeDocument = officialHome.appendingPathComponent(".claude.json")
+  try nativeUsageDocument("demo-account-Personal", cached: false).write(to: nativeDocument)
+  let nativeReply = String(decoding: try nativeUsageDocument("demo-account-Personal", cached: true), as: UTF8.self)
+  let nativeProgram = "#!/bin/sh\n[ \"$1\" = -p ] && [ \"$2\" = /usage ] || exit 4\n[ -z \"$ANTHROPIC_API_KEY$ANTHROPIC_BASE_URL\" ] || exit 5\nprintf 'run\\n' >> \"$HOME/usage-calls\"\ncat > \"$HOME/.claude.json\" <<'FIXTURE_NATIVE_USAGE'\n" + nativeReply + "\nFIXTURE_NATIVE_USAGE\n"
+  try nativeProgram.write(to: officialCommand, atomically: true, encoding: .utf8)
+  try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: officialCommand.path)
+  require(try await OfficialCLIUsageReader.read(home: officialHome, manual: false, now: nativeSampleDate, environment: [:]) == nil
+          && !FileManager.default.fileExists(atPath: officialHome.appendingPathComponent("usage-calls").path),
+          "automatic usage reads only native cache and never start a CLI or authentication prompt")
+  let officialSample = try await OfficialCLIUsageReader.read(home: officialHome, manual: true, now: nativeSampleDate,
+      environment: ["PATH": "/usr/bin:/bin", "ANTHROPIC_API_KEY": "fixture-not-for-this-helper", "ANTHROPIC_BASE_URL": "http://fixture.invalid"])
+  require(officialSample?.identity.accountID == "demo-account-Personal" && officialSample?.session?.used == 31,
+          "manual usage uses only the fake native CLI and clears unrelated provider credentials from its child environment")
+  _ = try await OfficialCLIUsageReader.read(home: officialHome, manual: true, now: nativeSampleDate.addingTimeInterval(5), environment: [:])
+  let nativeCalls = try String(contentsOf: officialHome.appendingPathComponent("usage-calls"), encoding: .utf8)
+  require(nativeCalls == "run\n", "a recent native sample prevents redundant manual CLI queries")
+  let oldSample = try await OfficialCLIUsageReader.read(home: officialHome, manual: true, now: nativeSampleDate.addingTimeInterval(61), environment: ["PATH": "/usr/bin:/bin"])
+  require(oldSample?.fetchedAt == nativeSampleDate, "command completion never turns an unchanged native cache into a fresh sample")
+  let mappedStore = Store(demo: true)
+  mappedStore.profiles[0].snapshot?.fetchedAt = nativeSampleDate.addingTimeInterval(-60)
+  let otherSampleBefore = try usageSnapshotEncoder.encode(mappedStore.profiles[1].snapshot)
+  mappedStore.applyOfficialUsage(officialSample)
+  require(mappedStore.profiles[0].snapshot?.session?.used == 31 && mappedStore.lastRefresh == nativeSampleDate,
+          "official usage updates only the uniquely UUID-and-organization-matched saved profile")
+  let otherSampleAfter = try usageSnapshotEncoder.encode(mappedStore.profiles[1].snapshot)
+  require(mappedStore.profiles[1].snapshot?.session?.used == 86 && otherSampleAfter == otherSampleBefore,
+          "inactive saved accounts are not switched or queried for a quota refresh")
+  let latestSnapshot = try usageSnapshotEncoder.encode(mappedStore.profiles[0].snapshot)
+  var ambiguous = mappedStore.profiles[0]
+  ambiguous = Profile(name: "Another organization", snapshot: ambiguous.snapshot, signedIn: true)
+  mappedStore.profiles.append(ambiguous)
+  mappedStore.applyOfficialUsage(officialSample)
+  let afterAmbiguousSample = try usageSnapshotEncoder.encode(mappedStore.profiles[0].snapshot)
+  require(mappedStore.usageNotice != nil && afterAmbiguousSample == latestSnapshot,
+          "ambiguous account mappings never overwrite a card using email or a guessed profile")
   require(languageStore.appLanguage == "zh" && languageController.language == "zh", "demo language is isolated and starts in Chinese")
   let languageProfile = languageStore.current
   let languageAccounts = languageStore.profiles.map(\.name)

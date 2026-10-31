@@ -8,6 +8,7 @@ import SwitcherCore
     private let readSecret: (String, String) throws -> Data?
     private let writeSecret: (String, String, Data?) throws -> Void
     private let credentials: CLIStoredCredentialRouter
+    private let backupPresence: (String, String) throws -> Bool
     init(identity: URL = claudeJSON, marker: URL = cliCurrentFile, allowInteraction: Bool = true,
          credentialFile: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/.credentials.json"),
          secretReader: ((String, String) throws -> Data?)? = nil,
@@ -15,6 +16,9 @@ import SwitcherCore
         identityURL = identity; markerURL = marker
         let reader = secretReader ?? { service, account in try readKeychain(service: service, account: account, allowInteraction: allowInteraction).map(CLIJSON.encode) }
         let writer = secretWriter ?? Self.writeNativeSecret
+        backupPresence = secretReader == nil
+            ? { service, account in try KeychainReadAccess.contains(service: service, account: account) }
+            : { service, account in try reader(service, account) != nil }
         readSecret = reader; writeSecret = writer
         let account = NSUserName()
         credentials = CLIStoredCredentialRouter(readPrimary: { try reader(cliService, account) },
@@ -52,6 +56,7 @@ import SwitcherCore
     func readIdentityDocument() throws -> Data? { try readFile(identityURL) }
     func writeIdentityDocument(_ data: Data?) throws { try writeFile(data, path: identityURL) }
     func readBackup(_ profile: String) throws -> Data? { try keychain(switcherService, "cli-" + profile) }
+    func containsBackup(_ profile: String) throws -> Bool { try backupPresence(switcherService, "cli-" + profile) }
     func writeBackup(_ profile: String, data: Data) throws {
         try writeSecret(switcherService, "cli-" + profile, data)
     }

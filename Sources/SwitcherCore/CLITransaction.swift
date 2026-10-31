@@ -234,12 +234,12 @@ public struct PreparedCLISwitch {
 }
 
 @MainActor public enum CLILinkedSwitch {
-    public static func run(transaction: CLITransaction, target: CLIProfileIdentity, profiles: [CLIProfileIdentity],
+    public static func run(transaction: CLITransaction, target: CLIProfileIdentity, profiles: [CLIProfileIdentity], requiresTargetLogin: Bool = false,
                            remote: (String) async throws -> CLIIdentity, quit: () async throws -> Bool,
                            move: () throws -> (() throws -> Void)) async throws -> CLIRestoration {
         let plan: PreparedCLISwitch
         do {
-            plan = try await transaction.prepare(target: target, profiles: profiles, remote: remote)
+            plan = try await transaction.prepare(target: target, profiles: profiles, requiresTargetLogin: requiresTargetLogin, remote: remote)
         } catch { throw CLIPreparationFailure(error.localizedDescription) }
         // A partial backup write/readback failure needs inspection, not a continue option.
         try transaction.persistOutgoing(plan)

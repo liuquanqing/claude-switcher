@@ -14,6 +14,7 @@ enum KeychainReadAccess {
             kSecMatchLimit as String: kSecMatchLimitOne,
             kSecUseAuthenticationContext as String: context]
         if let account { query[kSecAttrAccount as String] = account }
+        if !allowInteraction { query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUIFail }
         var result: CFTypeRef?
         let status = perform(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
@@ -24,5 +25,21 @@ enum KeychainReadAccess {
             throw err("登录存储暂不可读（状态 \(status)）；未视为退出登录。")
         }
         return data
+    }
+
+    /// An existence check must not decrypt a login backup or solicit permission.
+    static func contains(service: String, account: String,
+                         perform: (CFDictionary, UnsafeMutablePointer<CFTypeRef?>) -> OSStatus = { SecItemCopyMatching($0, $1) }) throws -> Bool {
+        let context = LAContext(); context.interactionNotAllowed = true
+        let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service, kSecAttrAccount as String: account,
+            kSecReturnAttributes as String: true, kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationContext as String: context,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUIFail]
+        var result: CFTypeRef?
+        let status = perform(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return false }
+        guard status == errSecSuccess else { throw err("CLI 备份存在性无法确认，未读取或修改登录。") }
+        return true
     }
 }

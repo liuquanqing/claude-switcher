@@ -54,7 +54,7 @@ import SwitcherCore
         }
         let live = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
         let metadata = try live.identity
-        let targetHasBackup = try io.readBackup(target) != nil
+        let targetHasBackup = try io.containsBackup(target)
         var descriptors = profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
         let needingIdentity = profiles.filter { profile in
             profile.name == originalCurrent || (targetHasBackup && profile.name == target)
@@ -84,7 +84,8 @@ import SwitcherCore
         let context: (CLIProfileIdentity, [CLIProfileIdentity])
         do { context = try await cliContext(target: target, io: io) }
         catch { throw CLIPreparationFailure(error.localizedDescription) }
-        let restoration = try await CLILinkedSwitch.run(transaction: transaction, target: context.0, profiles: context.1,
+        try await prepareTargetCLIRecovery(target: context.0, io: io)
+        let restoration = try await CLILinkedSwitch.run(transaction: transaction, target: context.0, profiles: context.1, requiresTargetLogin: true,
             remote: { CLIIdentity.profile(try await getJSON("profile", $0)) },
             quit: {
                 guard try confirmedCurrentProfile() == source else { throw err("桌面档案已被外部切换，未移动目录。") }
@@ -105,6 +106,23 @@ import SwitcherCore
         } else if restoration == .storedLogin {
             cliStatus = .unverified; cliStatusDetail = "已回读确认保存登录，访问凭据需由 CLI 刷新后再核验。"
         }
+    }
+
+    private func prepareTargetCLIRecovery(target: CLIProfileIdentity, io: NativeCLIStorage) async throws {
+        let native = OfficialCLIRecovery.native(home: FileManager.default.homeDirectoryForCurrentUser)
+        do {
+            _ = try await CLIBackupRecovery.prepare(target: target, io: io, renew: { login, identity in
+                let decision = await self.protection.preflight(target: .cli)
+                guard decision.allowed else { throw SafetyError(decision.message) }
+                self.busy = "正在恢复 CLI 登录…"
+                return try await native.recover(login, expected: identity)
+            }, remote: { token in
+                let decision = await self.protection.preflight(target: .cli)
+                guard decision.allowed else { throw SafetyError(decision.message) }
+                return CLIIdentity.profile(try await getJSON("profile", token))
+            })
+        } catch let failure as CLIRecoveryPersistenceFailure { throw failure }
+        catch { throw CLIPreparationFailure(error.localizedDescription) }
     }
 
     /// Complete a display-only refresh without replacing known results with a transient state.
@@ -262,6 +280,7 @@ import SwitcherCore
             }
             let io = NativeCLIStorage(), transaction = CLITransaction(io: io)
             let context = try await cliContext(target: target, io: io)
+            try await prepareTargetCLIRecovery(target: context.0, io: io)
             let plan = try await transaction.prepare(target: context.0, profiles: context.1, requiresTargetLogin: true,
                 remote: { CLIIdentity.profile(try await getJSON("profile", $0)) })
             try transaction.persistOutgoing(plan)
