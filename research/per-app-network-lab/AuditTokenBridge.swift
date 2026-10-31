@@ -4,6 +4,8 @@ import Security
 
 // Compile-only proof of supported macOS API availability. No filter entrypoint,
 // manager, installation, preference mutation, socket or network request.
+// A valid code signature/identifier is metadata, not proof of trusted publisher
+// or protected-app enrollment. This probe deliberately supplies no classifier.
 struct FlowCodeIdentity {
     let identifier: String
     let team: String?

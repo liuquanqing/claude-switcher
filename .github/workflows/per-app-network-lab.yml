@@ -14,6 +14,7 @@ jobs:
           persist-credentials: false
       - name: Compile and test fictional policy only
         run: |
+          python3 research/per-app-network-lab/check_environment_guards.py > "$RUNNER_TEMP/environment-guard-results.json"
           swiftc research/per-app-network-lab/SelectivePolicy.swift research/per-app-network-lab/policy_checks.swift -o "$RUNNER_TEMP/policy-checks"
           "$RUNNER_TEMP/policy-checks" > "$RUNNER_TEMP/policy-results.json"
           swiftc -swift-version 5 -target x86_64-apple-macos13.0 -parse-as-library -emit-module -module-name AppScopeProbe research/per-app-network-lab/AuditTokenBridge.swift -o "$RUNNER_TEMP/AppScopeProbe.swiftmodule"
@@ -38,4 +39,5 @@ jobs:
             ${{ runner.temp }}/scope-results.json
             ${{ runner.temp }}/policy-results.json
             ${{ runner.temp }}/identity-*.json
+            ${{ runner.temp }}/environment-guard-results.json
           retention-days: 14

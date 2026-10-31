@@ -1,7 +1,8 @@
 """Disposable GitHub Mac ONLY: test PF selectivity with same-user applications.
 
-Expected negative control: PF user rules cannot distinguish two executables
-running as the same login user. Passing this experiment does NOT pass protection.
+Expected negative control: PF user rules cannot distinguish two processes
+running as the same login user. Both fixtures use the same Python executable;
+this is not real app identification. Passing does NOT pass protection.
 Every target is loopback; no proxy, credentials, Claude installation or real user
 profile is accessed. Production integration remains HOLD.
 """
@@ -21,12 +22,19 @@ from pathlib import Path
 
 
 def require_disposable():
-    assert sys.platform == "darwin" and os.geteuid() == 0
-    assert os.environ.get("GITHUB_ACTIONS") == "true"
-    assert os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted"
-    assert os.environ.get("GITHUB_REPOSITORY") == "liuquanqing/claude-switcher"
-    assert os.environ.get("CS_APP_SCOPE_LAB") == "ephemeral-loopback-only"
-    assert os.environ.get("RUNNER_TEMP")
+    # These are execution guards, not test assertions: -O must never remove them.
+    if not __debug__:
+        raise SystemExit("Optimized Python is forbidden; evidence assertions must remain enabled")
+    checks = [
+        sys.platform == "darwin" and os.geteuid() == 0,
+        os.environ.get("GITHUB_ACTIONS") == "true",
+        os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted",
+        os.environ.get("GITHUB_REPOSITORY") == "liuquanqing/claude-switcher",
+        os.environ.get("CS_APP_SCOPE_LAB") == "ephemeral-loopback-only",
+        bool(os.environ.get("RUNNER_TEMP")),
+    ]
+    if not all(checks):
+        raise SystemExit("Refusing execution outside the explicit disposable hosted Mac experiment")
 
 
 require_disposable()
@@ -51,7 +59,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--client":
     print(json.dumps({"uid": os.getuid(), "ack": ack}))
     sys.exit(0)
 
-SEEN = set()
+SEEN = {}
 LOCK = threading.Lock()
 CASES = []
 
@@ -60,7 +68,7 @@ class TCP(socketserver.StreamRequestHandler):
     def handle(self):
         while data := self.rfile.readline():
             with LOCK:
-                SEEN.add(data.strip().decode())
+                SEEN[data.strip().decode()] = time.monotonic()
             try:
                 self.wfile.write(data)
                 self.wfile.flush()
@@ -72,7 +80,7 @@ class UDP(socketserver.BaseRequestHandler):
     def handle(self):
         data, sock = self.request
         with LOCK:
-            SEEN.add(data.strip().decode())
+            SEEN[data.strip().decode()] = time.monotonic()
         sock.sendto(data, self.client_address)
 
 
@@ -108,7 +116,7 @@ def measure(stage, role, uid, expected):
             with LOCK:
                 reached = token in SEEN
             record = dict(stage=stage, role=role, uid=uid, family=family, protocol=protocol,
-                          ack=client["ack"], reachedSink=reached, expected=expected)
+                          token=token, ack=client["ack"], reachedSink=reached, expected=expected)
             CASES.append(record)
             assert client["uid"] == uid and client["ack"] == expected and reached == expected, record
 
@@ -152,6 +160,13 @@ def main():
             pf("-a", "cs_app_scope_lab", "-F", "rules")
             measure("recovery", "fictional-Claude", user, True)
             measure("recovery", "unrelated-same-user", user, True)
+            # Retain the receiver log and check negative probes again after the
+            # recovery controls, so late delivery cannot silently become PASS.
+            with LOCK:
+                for case in CASES:
+                    case["receivedAtMonotonic"] = SEEN.get(case["token"])
+                    case["reachedSinkAtFinalRead"] = case["token"] in SEEN
+                    assert case["reachedSinkAtFinalRead"] == case["expected"], case
         except BaseException as exception:
             error = repr(exception)
         finally:
@@ -167,6 +182,8 @@ def main():
                   experimentCompleted=error is None and cleanup, error=error, cleanup=cleanup,
                   selectivityRequirementPassed=False, productionReady=False,
                   realClaudeOrCLI=False, sourceSHA256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                  fixtureExecutable="same Python interpreter, different processes",
+                  receiverObservation="bounded experiment window, not a proof of indefinite non-delivery",
                   existingFlowRevocation="NOT_RUN", actualNetworkExtension="NOT_RUN")
     Path(os.environ["CS_SCOPE_RESULT"]).write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result, indent=2), flush=True)
