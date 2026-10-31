@@ -289,6 +289,8 @@ import SwitcherCore
             }
             _ = try transaction.apply(plan)
             await refreshCLI(verify: true)
+            busy = nil
+            await refresh(allowInteraction: true)
         } catch { banner = error.localizedDescription; await refreshCLI(verify: false) }
     }
 }

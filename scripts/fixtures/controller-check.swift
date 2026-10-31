@@ -593,6 +593,16 @@ actor FixtureGuardWorker: GuardWorking {
   require(nativeCalls == "run\n", "a recent native sample prevents redundant manual CLI queries")
   let oldSample = try await OfficialCLIUsageReader.read(home: officialHome, manual: true, now: nativeSampleDate.addingTimeInterval(61), environment: ["PATH": "/usr/bin:/bin"])
   require(oldSample?.fetchedAt == nativeSampleDate, "command completion never turns an unchanged native cache into a fresh sample")
+  var previousAccountCache = try CLIJSON.object(nativeUsageDocument("demo-account-Personal", cached: true))
+  var wrongCache = previousAccountCache["cachedUsageUtilization"] as! [String: Any]
+  wrongCache["accountUuid"] = "demo-account-previous"
+  previousAccountCache["cachedUsageUtilization"] = wrongCache
+  try CLIJSON.encode(previousAccountCache).write(to: nativeDocument)
+  let beforeSwitchRefreshCalls = try String(contentsOf: officialHome.appendingPathComponent("usage-calls"), encoding: .utf8)
+  let switchedUsage = try await OfficialCLIUsageReader.read(home: officialHome, manual: true, now: nativeSampleDate.addingTimeInterval(62), environment: ["PATH": "/usr/bin:/bin"])
+  let afterSwitchRefreshCalls = try String(contentsOf: officialHome.appendingPathComponent("usage-calls"), encoding: .utf8)
+  require(switchedUsage?.identity.accountID == "demo-account-Personal" && afterSwitchRefreshCalls == beforeSwitchRefreshCalls + "run\n",
+          "an explicit post-switch refresh bypasses another account's cached quota and asks the native CLI once")
   let mappedStore = Store(demo: true)
   mappedStore.profiles[0].snapshot?.fetchedAt = nativeSampleDate.addingTimeInterval(-60)
   let otherSampleBefore = try usageSnapshotEncoder.encode(mappedStore.profiles[1].snapshot)

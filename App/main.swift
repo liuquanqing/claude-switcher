@@ -482,7 +482,9 @@ final class Store: ObservableObject {
             }, launch: { try await launchProtectedDesktop(files: self.protection.files); self.protection.refreshStatus() })
             reloadList()
             busy = nil
-            await refresh()
+            // The native cache can still belong to the account we just left.
+            // An explicit successful switch requests one gated native update.
+            await refresh(allowInteraction: true)
         } catch {
             banner = error.localizedDescription
             if error is CLIPreparationFailure {
