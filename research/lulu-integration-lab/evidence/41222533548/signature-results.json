@@ -1,0 +1,24 @@
+{
+  "actualXPCConnection": "NOT_RUN",
+  "cases": [
+    {
+      "label": "official-LuLu-app",
+      "matched": true,
+      "status": 0
+    },
+    {
+      "label": "ordinary-switcher-fixture",
+      "matched": false,
+      "status": -67050
+    },
+    {
+      "label": "same-ID-different-signer-fixture",
+      "matched": false,
+      "status": -67050
+    }
+  ],
+  "layer": "static-Security-requirement-on-official-binary-and-fixtures",
+  "networkFilterActivation": "NOT_RUN",
+  "passed": true,
+  "productionReady": false
+}

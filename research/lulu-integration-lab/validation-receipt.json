@@ -1,0 +1,39 @@
+{
+  "checkedOnSingapore": "2026-11-01",
+  "reviewer": "Codex author-side review in this chat",
+  "ClaudeOrKimiInvoked": false,
+  "experimentSourceCommit": "188d9030d5c9a93d5c90541c421e96c32af8cb94",
+  "upstreamSourceCommit": "6ad78b988c179ffce08668533671bc0dedef19a8",
+  "upstreamTag": "v4.5.5",
+  "runURL": "https://github.com/liuquanqing/claude-switcher/actions/runs/41222533548",
+  "workflowConclusion": "success",
+  "officialDMGSHA256": "c84c94912405eb852753fc3b51d79ad816d94c6b3b5aec4db4daf2eb8f357597",
+  "officialBinarySignatureVerified": true,
+  "staticSignatureRequirementCases": 3,
+  "expectedResults": [
+    true,
+    false,
+    false
+  ],
+  "runtimeXPC": "NOT_RUN",
+  "filterActivation": "NOT_RUN",
+  "existingFlowRevocation": "NOT_RUN",
+  "selectiveClaudeNetworkCoverage": "NOT_RUN",
+  "automaticExternalXPCControl": "BLOCKED_BY_NECESSARY_SIGNATURE_CONDITION",
+  "productionIntegration": "HOLD",
+  "cleanup": true,
+  "sourceSHA256": {
+    "research/lulu-integration-lab/run_disposable.py": "def6aa03d5c266509a3d3af7cec9903202092453b70c21f649479d550235c3da",
+    "research/lulu-integration-lab/inspect_source.py": "83a8c68a5a0f19c3fb7b6ece3199e03885cbdcea34da94effbfe24a078af1857",
+    "research/lulu-integration-lab/signature_gate.swift": "1e903f92fd1fb5baeb6bb874eb2a01c6347a229555c7f6e0855996aee206b4c8",
+    ".github/workflows/lulu-integration-lab.yml": "49af782811a62b77103b2812d2986a0eaaf138738200bec0248a86c583ffd377"
+  },
+  "artifactSHA256": {
+    "source-inventory.json": "0db0eeba5d9c34a31d518014042063c5ffaefef866b29488eb48c7122f901718",
+    "signature-results.json": "c385f5530a8fe5c894e20db2f3f1d00ca7ab77831a3ec48bbc0c8972641acdf9",
+    "validation-results.json": "dfec9b068b68687887238a69214f8bd8012a8dad9295df572ede67304b878574",
+    "workflow-summary.json": "175de217076cdfd1991566b0b626f1697defe4b3f08a974813cbf53c8b583719"
+  },
+  "personalNetworkGuardAccountsSessionsTouched": false,
+  "failedPreparationRun": "https://github.com/liuquanqing/claude-switcher/actions/runs/41222260588"
+}

@@ -1,0 +1,217 @@
+{
+  "evidenceClass": "STATIC_SOURCE_INVENTORY",
+  "repository": "https://github.com/objective-see/LuLu",
+  "tag": "v4.5.5",
+  "sourceCommit": "6ad78b988c179ffce08668533671bc0dedef19a8",
+  "sourceLicense": "GPL-3.0",
+  "sourceSHA256": {
+    "App/main.m": "831e8073488ce1ca284901772d1e1a4d36f301fdaff8233ab93ce71a92f26953",
+    "Extension/FilterDataProvider.m": "40d464bb5dcd31df19627676c9b854df1ba1c9119a10770d6e0aa10a432141b0",
+    "Extension/FilterDataProvider.h": "4d4e62cea342069b6a9d3f20be283819bb163d52622f12850ad2593288118215",
+    "Extension/XPCListener.m": "6f812e98dd48be89c8b09152118b3036fa1184a27de74357688c494153b8c363",
+    "Extension/XPCDaemon.m": "f80b521ec88b3fe7eb42957f9394a891d191794cef0cfa83687e67b0777c2bd5",
+    "Extension/Profiles.m": "13410244eaa4c2d743202c3f013ca8f1f2b5e2721b4694dd072b823250e5766d",
+    "Extension/Preferences.m": "4f529a946b76d9b5332986fd20fa9d8b5172e7c83d6d61703b7fd3182a6aab19",
+    "Extension/Rules.m": "449431be75dd1c42ac8cc183303bfad055e5b6a9f779a07e4355f169a9fba9e2",
+    "Extension/Process.m": "4ddc7f7c22bc5f1473c55a13350341b00a1fda868f39ed0cf873b76bf1c4eaf9",
+    "Shared/consts.h": "e952a674ca93ded97e00e804b5f68df0ffcb81255007c8e164d133234650199b"
+  },
+  "xpcRequirement": "anchor apple generic and identifier \"com.objective-see.lulu.app\" and certificate leaf [subject.CN] = \"Developer ID Application: Objective-See, LLC (VBG97UB4TA)\"",
+  "cliArgumentBranches": [
+    {
+      "line": 46,
+      "text": "if(YES == [NSProcessInfo.processInfo.arguments containsObject:@\"-install\"])"
+    },
+    {
+      "line": 78,
+      "text": "else if(YES == [NSProcessInfo.processInfo.arguments containsObject:@\"-upgrade\"])"
+    },
+    {
+      "line": 110,
+      "text": "if(YES == [NSProcessInfo.processInfo.arguments containsObject:@\"-uninstall\"])"
+    },
+    {
+      "line": 143,
+      "text": "if(YES == [NSProcessInfo.processInfo.arguments containsObject:@\"-quit\"])"
+    }
+  ],
+  "clientSignatureGate": [
+    {
+      "line": 70,
+      "text": "NSString* requirement = nil;"
+    },
+    {
+      "line": 85,
+      "text": "requirement = [NSString stringWithFormat:@\"anchor apple generic and identifier \\\"%@\\\" and certificate leaf [subject.CN] = \\\"%@\\\" and info [CFBundleShortVersionString] >= \\\"2.0.0\\\"\", APP_ID, SIGNING_AUTH];"
+    },
+    {
+      "line": 138,
+      "text": "NSString* requirement = nil;"
+    },
+    {
+      "line": 190,
+      "text": "!(CS_RUNTIME & csFlags) )"
+    },
+    {
+      "line": 200,
+      "text": "os_log_debug(logHandle, \"client code signing flags, ok (includes 'CS_RUNTIME')\");"
+    },
+    {
+      "line": 203,
+      "text": "requirement = [NSString stringWithFormat:@\"anchor apple generic and identifier \\\"%@\\\" and certificate leaf [subject.CN] = \\\"%@\\\"\", APP_ID, SIGNING_AUTH];"
+    },
+    {
+      "line": 216,
+      "text": "if(errSecSuccess != (status = SecTaskValidateForRequirement(taskRef, (__bridge CFStringRef)(requirement))))"
+    }
+  ],
+  "explicitExistingFlowUpdateMatches": {},
+  "dataCallbackMatches": {},
+  "newFlowVerdicts": [
+    {
+      "line": 186,
+      "text": "[self resumeFlowsForKey:nil verdict:[NEFilterNewFlowVerdict allowVerdict]];"
+    },
+    {
+      "line": 208,
+      "text": "-(NEFilterNewFlowVerdict *)handleNewFlow:(NEFilterFlow *)flow {"
+    },
+    {
+      "line": 223,
+      "text": "verdict = [NEFilterNewFlowVerdict allowVerdict];"
+    },
+    {
+      "line": 267,
+      "text": "verdict = [NEFilterNewFlowVerdict allowVerdict];"
+    },
+    {
+      "line": 273,
+      "text": "verdict = [NEFilterNewFlowVerdict dropVerdict];"
+    },
+    {
+      "line": 312,
+      "text": "if(YES == held) return [self handleNewFlow:flow];"
+    },
+    {
+      "line": 318,
+      "text": "verdict = [NEFilterNewFlowVerdict allowVerdict];"
+    },
+    {
+      "line": 1118,
+      "text": "? [NEFilterNewFlowVerdict dropVerdict]"
+    },
+    {
+      "line": 1119,
+      "text": ": [NEFilterNewFlowVerdict allowVerdict];"
+    },
+    {
+      "line": 1166,
+      "text": "[self resumeFlowsForKey:key verdict:[NEFilterNewFlowVerdict allowVerdict]];"
+    },
+    {
+      "line": 1248,
+      "text": "? [NEFilterNewFlowVerdict dropVerdict]"
+    },
+    {
+      "line": 1249,
+      "text": ": [NEFilterNewFlowVerdict allowVerdict];"
+    },
+    {
+      "line": 1357,
+      "text": "[self resumeFlow:held withVerdict:(YES == [self isDelegated:held]) ? [NEFilterNewFlowVerdict allowVerdict] : [NEFilterNewFlowVerdict dropVerdict]];"
+    }
+  ],
+  "pausedFlowTracking": [
+    {
+      "line": 186,
+      "text": "[self resumeFlowsForKey:nil verdict:[NEFilterNewFlowVerdict allowVerdict]];"
+    },
+    {
+      "line": 293,
+      "text": "[self addRelatedFlow:process.key flow:socketFlow];"
+    },
+    {
+      "line": 297,
+      "text": "// note: it's not been paused yet (no verdict returned), so can't go thru 'processRelatedFlow:' (which resumes)"
+    },
+    {
+      "line": 1086,
+      "text": "[self addRelatedFlow:key flow:flow];"
+    },
+    {
+      "line": 1144,
+      "text": "[strongSelf processRelatedFlow:alert[KEY_KEY]];"
+    },
+    {
+      "line": 1156,
+      "text": "// note: safe to run alongside the XPC invalidation handler's cleanup, as 'resumeFlowsForKey:' drops the key under the lock"
+    },
+    {
+      "line": 1166,
+      "text": "[self resumeFlowsForKey:key verdict:[NEFilterNewFlowVerdict allowVerdict]];"
+    },
+    {
+      "line": 1175,
+      "text": "-(void)addRelatedFlow:(NSString*)key flow:(NEFilterSocketFlow*)flow"
+    },
+    {
+      "line": 1201,
+      "text": "-(void)processRelatedFlow:(NSString*)key"
+    },
+    {
+      "line": 1235,
+      "text": "[self addRelatedFlow:key flow:flow];"
+    },
+    {
+      "line": 1262,
+      "text": "-(void)resumeFlowsForKey:(NSString*)key verdict:(NEFilterNewFlowVerdict*)verdict"
+    }
+  ],
+  "profileChange": [
+    {
+      "line": 368,
+      "text": "-(void)setProfile:(NSString*)name reply:(void (^)(BOOL))reply"
+    },
+    {
+      "line": 407,
+      "text": "[profiles set:newProfilePath];"
+    },
+    {
+      "line": 410,
+      "text": "[rules load];"
+    },
+    {
+      "line": 417,
+      "text": "[preferences load];"
+    }
+  ],
+  "processTreeBoundary": [
+    {
+      "line": 729,
+      "text": "//tree ('process + kids') rules"
+    },
+    {
+      "line": 798,
+      "text": "//add any tree ('process + kids') rules"
+    },
+    {
+      "line": 800,
+      "text": "// note: ancestors are matched (simply) by path, so no signing validation of the ancestor"
+    },
+    {
+      "line": 801,
+      "text": "//       and ancestry is from the ppid/responsible-pid walk, so breaks if an intermediate parent has exited"
+    },
+    {
+      "line": 836,
+      "text": "os_log_debug(logHandle, \"found tree ('process + kids') rule via ancestor %{public}@\", ancestor);"
+    },
+    {
+      "line": 864,
+      "text": "//add tree ('process + kids') rules next"
+    }
+  ],
+  "actualFilterRuntime": "NOT_RUN",
+  "productionReady": false,
+  "interpretation": "No explicit update match is source evidence only, not a packet-capture proof or full API audit."
+}
