@@ -105,6 +105,7 @@ import SwitcherCore
             if outcome == .verificationPending || outcome == .backupPending {
                 currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
             } else if outcome == .renewed || outcome == .contextChanged || outcome == .needsLogin || outcome == .notNeeded { currentCLIBackupPending = nil }
+            else if after == before && !pending { currentCLIBackupPending = nil }
             if outcome == .contextChanged {
                 clearCurrentCLIRecoveryNotice();currentCLIRecoveryOutcome = nil;invalidateCLIStatus()
             } else if try context(), after.map({ (try? $0.identity?.samePrincipal(as: identity)) == true
@@ -168,7 +169,7 @@ import SwitcherCore
             message = "当前官方 CLI 版本或恢复命令不受支持，请先更新 Claude Code。"
         case .contextChanged:
             invalidateCLIStatus(); return
-        case .notNeeded: return
+        case .notNeeded: clearCurrentCLIRecoveryNotice(); return
         }
         cliStandaloneVerified = false
         cliStatusDetail = message; cliStatusCheckedAt = now

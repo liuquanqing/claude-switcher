@@ -134,6 +134,13 @@ import SwitcherCore
     io.denyCredentialRead=false
     let finishedReadback=await blockedReadback.recoverCurrentCLI(manual:true,io:io,context:{true},gate:{true},native:{preconditionFailure("renewal already saved")},verify:{_ in identity},now:fixtureNow)
     require(finishedReadback == .renewed && blockedReadback.currentCLIBackupPending==nil,"explicit authorization can finish validation and backup without another native renewal")
+    let unsupportedStore=Store(demo:true);var nativeChecks=0
+    let unsupportedResult=await unsupportedStore.recoverCurrentCLI(manual:true,requestNativeCheck:true,io:io,context:{true},gate:{true},native:{nativeChecks += 1;return .unsupported},verify:{_ in identity},now:fixtureNow)
+    require(unsupportedResult == .unsupported && unsupportedStore.currentCLIBackupPending==nil,
+            "an unsupported native command with unchanged credentials cannot become a pending successful renewal")
+    let supportedAgain=await unsupportedStore.recoverCurrentCLI(manual:true,requestNativeCheck:true,io:io,context:{true},gate:{true},native:{nativeChecks += 1;return .completed},verify:{_ in identity},now:fixtureNow)
+    require(supportedAgain == .notNeeded && nativeChecks==2 && unsupportedStore.banner==nil,
+            "a later explicit retry rechecks the native command and clears its obsolete unsupported notice")
     var wrote=false
     try KeychainWriteAccess.backup(service:switcherService,account:"fixture",data:Data("fake".utf8),allowInteraction:false,update:{query,_ in
         let q=query as NSDictionary
