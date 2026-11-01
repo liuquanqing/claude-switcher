@@ -204,6 +204,17 @@ final class Store: ObservableObject {
     var usageRefreshPolicy = UsageRefreshPolicy()
     var automaticRefreshInProgress = false
     var panelIsVisible: () -> Bool = { false }
+    var currentCLIRecoveryRunning = false
+    var currentCLIRecoveryDidRunNative = false
+    var currentCLIRecoveryOutcome: CLICurrentRecoveryOutcome?
+    var currentCLIRecoveryMessage: String?
+    var currentCLIBackupPending: CLIProfileIdentity?
+    var currentCLIRenewalPolicy = CLIRenewalPolicy()
+    var currentCLIInspectionAt: Date?
+    var currentCLIObservedLogin: (name: String, identity: CLIIdentity, version: String)?
+    // Native CLI authorization is an opt-in capability; diagnostics and fake
+    // tests never change the user's installed-app preference.
+    var allowBackgroundCLIRenewal = false
 
     /// Fake accounts for README screenshots — touches no files, keychain or network.
     init(demo: Bool) {
@@ -316,6 +327,7 @@ final class Store: ObservableObject {
         protection = ProtectionController()
         observeCLIStatusScope()
         appLanguage = Self.loadApplicationLanguage(from: .standard)
+        allowBackgroundCLIRenewal = UserDefaults.standard.bool(forKey: "allowBackgroundCLIRenewal")
         openAtLogin = SMAppService.mainApp.status == .enabled
         try? fm.createDirectory(at: parkDir, withIntermediateDirectories: true)
         if !fm.fileExists(atPath: currentFile.path) {
@@ -361,7 +373,7 @@ final class Store: ObservableObject {
     func reloadList() {
         guard !isDemo else { return }
         let observedProfile = currentProfile()
-        if current != observedProfile { current = observedProfile; invalidateCLIStatus() }
+        if current != observedProfile { current = observedProfile; resetCurrentCLIRecoveryObservation(); invalidateCLIStatus() }
         claudeRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
         profiles = allProfileNames().map { n in
             if let existing = profiles.first(where: { $0.name == n }) { return existing }
@@ -418,9 +430,18 @@ final class Store: ObservableObject {
         onChange?()
     }
 
-    /// Explicit footer action; it observes state, never switches or enables protection.
+    /// Explicit footer action may ask the official CLI to recover its own login;
+    /// it never switches accounts or enables protection.
     func refreshAllStatuses() async {
         guard busy == nil, !refreshing, !cliStatusRefreshing else { return }
+        if isDemo { await verifyDefaultCLI(); return }
+        let recovery = await recoverCurrentCLI(manual: true, requestNativeCheck: true)
+        if recovery != .notNeeded && recovery != .contextChanged || currentCLIRecoveryDidRunNative {
+            if recovery == .notNeeded { await verifyDefaultCLI() }
+            protection.refreshStatus()
+            await refresh(allowInteraction: false)
+            return
+        }
         await verifyDefaultCLI()
         protection.refreshStatus()
         await refresh(allowInteraction: true)
@@ -521,8 +542,8 @@ final class Store: ObservableObject {
             reloadList()
             busy = nil
             // The native cache can still belong to the account we just left.
-            // An explicit successful switch requests one gated native update.
-            await refresh(allowInteraction: true)
+            // Recovery and usage share a single native run when renewal is due.
+            await refreshAfterLinkedCLIOperation()
         } catch {
             banner = error.localizedDescription
             if error is CLIPreparationFailure {

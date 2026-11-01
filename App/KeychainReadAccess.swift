@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import LocalAuthentication
+import SwitcherCore
 
 /// Background reads fail without showing SecurityAgent. Only an explicit login action
 /// may request UI; a denied request is never interpreted as a missing login.
@@ -18,8 +19,8 @@ enum KeychainReadAccess {
         var result: CFTypeRef?
         let status = perform(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
-        if status == errSecInteractionNotAllowed {
-            throw err("登录读取需要授权；自动刷新已跳过，可主动核验登录。")
+        if [errSecInteractionNotAllowed,errSecAuthFailed,errSecUserCanceled].contains(status) {
+            throw CLIInteractionRequired()
         }
         guard status == errSecSuccess, let data = result as? Data else {
             throw err("登录存储暂不可读（状态 \(status)）；未视为退出登录。")

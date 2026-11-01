@@ -20,7 +20,7 @@ public struct AuthenticationConfiguration: Equatable, Sendable {
     }
     public static func inspect(environment: [String: String], documents: [Data],
                                fallbackPresent: Bool = false, unreadable: Bool = false) -> Self {
-        let keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
+        let keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_REFRESH_TOKEN",
                     "ANTHROPIC_BASE_URL", "ANTHROPIC_PROFILE"]
         let switches = ["CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"]
         func enabled(_ value: Any?) -> Bool { ["1", "true", "yes"].contains(String(describing: value ?? "").lowercased()) }

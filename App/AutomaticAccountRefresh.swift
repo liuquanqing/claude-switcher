@@ -31,6 +31,7 @@ struct LocalAccountObservation: Equatable {
             // An external login can change in place, without the .current marker moving.
             // Keep the disk's historical sample; stop presenting it as the new active identity.
             profiles[index].snapshot = nil; profiles[index].usageState = .notRequested
+            resetCurrentCLIRecoveryObservation()
             invalidateCLIStatus()
         }
         return changed
@@ -57,6 +58,7 @@ struct LocalAccountObservation: Equatable {
         automaticRefreshInProgress = true
         defer { automaticRefreshInProgress = false }
         let changed = await observeAccountMetadata()
+        await recoverCurrentCLI()
         let name = current
         let snapshot = active?.snapshot
         let resetDates = [snapshot?.session?.resetsAt, snapshot?.weekly?.resetsAt].compactMap { $0 }

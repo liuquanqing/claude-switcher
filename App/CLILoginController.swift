@@ -168,6 +168,9 @@ import SwitcherCore
         let sameIdentity = result.identity.map { cliObservedIdentity?.samePrincipal(as: $0) == true } ?? false
         let sameProfile = result.profile == cliProfile
             || (cliProfile == nil && cliStatus == .reported && result.profile == current)
+        if sameIdentity && sameProfile && result.metadataOnly && result.status != .different && cliRecoveryNeedsAttention {
+            return // Metadata alone cannot erase an explicit recovery failure.
+        }
         let preserveCompleted = sameIdentity && sameProfile && result.status != .different
             && (result.metadataOnly && (cliStatus == .reported || cliStatus == .matched && result.profile == current)
                 || result.status == .reported && cliStatus == .matched && result.profile == current)
@@ -342,7 +345,7 @@ import SwitcherCore
             await refreshCLI(verify: false)
             presentCLIRestoration(restoration, target: target, identity: context.0.identity)
             busy = nil
-            await refresh(allowInteraction: true)
+            await refreshAfterLinkedCLIOperation()
         } catch { banner = error.localizedDescription; await refreshCLI(verify: false) }
     }
 }
