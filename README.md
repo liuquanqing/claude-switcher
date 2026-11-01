@@ -14,9 +14,9 @@
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/ClaudeSwitcher-1.3.4-arm64.dmg)
+[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.5/ClaudeSwitcher-1.3.5-arm64.dmg)
 
-**1.3.4** · Apple Silicon · macOS 13+
+**1.3.5** · Apple Silicon · macOS 13+
 
 [下载](#下载) · [核心能力](#核心能力) · [快速开始](#快速开始) · [边界与验证](#边界与验证) · [English](README.en.md)
 
@@ -35,7 +35,7 @@
 
 它关注三件事：
 
-- **少打断**：额度和重置时间直接呈现，打开面板只读取本地状态。
+- **少打断**：额度与账号状态按需自动更新，日常查看无需反复手动检查。
 - **保持一致**：桌面账号切换后，默认保存的 Claude Code CLI 登录也能继续同步。
 - **有依据**：启动与切号前检查代理、TUN、目标地区和 CLI 备份；无法确认时停在原地。
 
@@ -126,13 +126,13 @@ English
 
 ## 下载
 
-1.3.4 修复新电脑首次安装后账号与额度空白，先确认桌面身份，再匹配官方 CLI 用量。详见[本版更新](docs/releases/1.3.4.md)。
+1.3.5 增加当前订阅额度的静默自动更新，并及时观察本地账号变化。详见[本版更新](docs/releases/1.3.5.md)。
 
-**[下载 Claude Switcher 1.3.4 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/ClaudeSwitcher-1.3.4-arm64.dmg)**
+**[下载 Claude Switcher 1.3.5 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.5/ClaudeSwitcher-1.3.5-arm64.dmg)**
 
 适用于 **Apple Silicon（M1 及更新芯片）· macOS 13+**。打开 DMG，将 `Claude Switcher.app` 拖入“应用程序”。
 
-[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.4) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.4/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
+[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.5/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
 
 > 当前构建使用 ad-hoc 本地签名，未经过 Apple 公证。首次打开方式、升级与卸载步骤见 [安装说明](docs/INSTALL.md)。
 
