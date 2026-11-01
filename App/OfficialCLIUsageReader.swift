@@ -3,7 +3,8 @@ import SwitcherCore
 
 enum OfficialCLIUsageReader {
     /// Automatic reads inspect only the native JSON cache. Only a manual request
-    /// starts one unmodified CLI; this app never reads an OAuth token for quota.
+    /// starts one unmodified CLI. This adapter does not read OAuth credentials.
+    /// The separate automatic adapter uses only noninteractive, already-authorized reads.
     static func read(home: URL, manual: Bool, now: Date = Date(),
                      environment inherited: [String: String] = ProcessInfo.processInfo.environment) async throws -> OfficialCLIUsageCache? {
         try await Task.detached(priority: .utility) {

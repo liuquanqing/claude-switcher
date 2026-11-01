@@ -12,7 +12,7 @@ import SwitcherCore
 // Active profile lives at ~/Library/Application Support/Claude (a real dir).
 // Inactive profiles are parked at ~/Library/Application Support/Claude-Profiles/<name>.
 // Switching = quit Claude, rename dirs (instant, same volume), relaunch.
-// Usage comes from each profile's own OAuth token (decrypted from its config.json).
+// Current subscription usage refreshes silently; inactive profiles retain dated samples.
 
 let bundleID = "com.anthropic.claudefordesktop"
 let fm = FileManager.default
@@ -197,8 +197,13 @@ final class Store: ObservableObject {
     let protection: ProtectionController
     let isDemo: Bool
     var sessionMigrationEnabled: Bool { true }
-    @Published private(set) var refreshing = false
+    @Published var refreshing = false
     private var desktopObservation: DesktopLifecycleObservation?
+    private var accountRefreshTimer: Timer?
+    var localAccountObservation: LocalAccountObservation?
+    var usageRefreshPolicy = UsageRefreshPolicy()
+    var automaticRefreshInProgress = false
+    var panelIsVisible: () -> Bool = { false }
 
     /// Fake accounts for README screenshots — touches no files, keychain or network.
     init(demo: Bool) {
@@ -322,23 +327,34 @@ final class Store: ObservableObject {
         reloadList()
         desktopObservation = DesktopLifecycleObservation(center: NSWorkspace.shared.notificationCenter) { [weak self] note in
             MainActor.assumeIsolated {
+                if note.name == NSWorkspace.didWakeNotification {
+                    Task { @MainActor in await self?.automaticRefresh(trigger: .wake) }
+                    return
+                }
                 guard let application = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                       application.bundleIdentifier == bundleID else { return }
                 self?.reloadList(); self?.protection.refreshStatus()
+                Task { @MainActor in await self?.automaticRefresh() }
             }
         }
-        Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { _ in Task { @MainActor in await self.refresh() } }
-        Task { await refresh() }
+        // One lightweight local observation per tick; the policy separately gates network requests.
+        accountRefreshTimer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.automaticRefresh() }
+        }
+        RunLoop.main.add(accountRefreshTimer!, forMode: .common)
+        Task { await automaticRefresh() }
     }
+
+    deinit { accountRefreshTimer?.invalidate() }
 
     var active: Profile? { profiles.first { $0.name == current } }
 
-    /// Opening a panel updates local facts only; startup, the timer and explicit refresh do the I/O round.
+    /// Keep completed status visible. Opening catches up stale data without prompting.
     func panelWillOpen() {
         reloadList()
         protection.refreshScope()
         protection.refreshStatus()
-        Task { await refreshCLI(verify: false) }
+        Task { await automaticRefresh(trigger: .panel) }
     }
 
 
@@ -376,6 +392,7 @@ final class Store: ObservableObject {
         guard !isDemo, !refreshing, busy == nil else { return }
         refreshing = true
         defer { refreshing = false }
+        if allowInteraction { usageRefreshPolicy.began(profile: current, now: Date()) }
         reloadList()
         protection.refreshScope()
         await refreshCLI(verify: false)
@@ -591,6 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .sink { [weak self] _ in MainActor.assumeIsolated { self?.updateTitle() } }
             store.onLanguageChange = { [weak self] in self?.updateLanguage() }
             store.onShowAccounts = { [weak self] in self?.showPanel() }
+            store.panelIsVisible = { [weak self] in self?.popover.isShown == true }
             popover.behavior = .transient
             popover.animates = true
             popover.appearance = NSAppearance(named: .darkAqua)

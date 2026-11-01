@@ -901,6 +901,130 @@ actor FixtureGuardWorker: GuardWorking {
   gatedIdentityStore.protection.lastDecision = SafetyDecision(.allowed,expected:"SG",observed:"SG")
   _ = try await gatedIdentityStore.checkedCLIIdentity("fixture-token",fetch:{_ in profileRequestCount += 1; return proofIdentity})
   require(profileRequestCount == 1,"a successful fresh route check allows exactly the requested identity fetch")
+  // Quiet refresh fixtures never call the native credential, route or HTTP adapters.
+  let quietUsageStore = Store(demo: true)
+  let quietIdentity = quietUsageStore.active!.snapshot!.identity
+  let quietContext = QuietUsageContext(profile: "Personal", identity: quietIdentity, access: "fixture-access", scope: .subscription)
+  let quietSample = Data(#"{"five_hour":{"utilization":22,"resets_at":"2026-11-02T00:00:00Z"},"seven_day":{"utilization":44,"resets_at":null}}"#.utf8)
+  let quietSampleTime = Date(timeIntervalSince1970: 1_800_000_000)
+  let quietOther = try usageSnapshotEncoder.encode(quietUsageStore.profiles[1].snapshot)
+  let quietGuard = quietUsageStore.protection.lastDecision
+  var quietReads = 0, quietFetches = 0
+  try await quietUsageStore.refreshQuietUsage(context: { quietReads += 1; return quietContext }, gate: { true }, fetch: { access in
+   require(access == "fixture-access", "only the fixture's bound access token reaches the quota adapter")
+   quietFetches += 1; return quietSample
+  }, now: { quietSampleTime })
+  require(quietReads == 3 && quietFetches == 1 && quietUsageStore.active?.snapshot?.session?.used == 22
+          && quietUsageStore.lastRefresh == quietSampleTime, "quiet quota refresh binds identity before and after route/HTTP work and commits the real sample time")
+  require(try usageSnapshotEncoder.encode(quietUsageStore.profiles[1].snapshot) == quietOther
+          && quietUsageStore.protection.lastDecision == quietGuard, "quiet usage does not update inactive accounts or change guard configuration")
+  let quietAccepted = try usageSnapshotEncoder.encode(quietUsageStore.active?.snapshot)
+  var quietDenied = false
+  do {
+   try await quietUsageStore.refreshQuietUsage(context: { quietContext }, gate: { false }, fetch: { _ in quietFetches += 1; return quietSample })
+  } catch { quietDenied = true }
+  let afterQuietDenied = try usageSnapshotEncoder.encode(quietUsageStore.active?.snapshot)
+  require(quietDenied && quietFetches == 1 && afterQuietDenied == quietAccepted,
+          "unknown or denied route sends no authenticated usage request and retains old quota")
+  var quietLoginChanged = false
+  quietReads = 0
+  do {
+   try await quietUsageStore.refreshQuietUsage(context: {
+    quietReads += 1
+    return QuietUsageContext(profile: "Personal", identity: quietIdentity,
+                             access: quietReads == 1 ? "fixture-access" : "fixture-rotated", scope: .subscription)
+   }, gate: { true }, fetch: { _ in quietFetches += 1; return quietSample })
+  } catch { quietLoginChanged = true }
+  require(quietLoginChanged && quietFetches == 1, "credential rotation during route checking prevents the old token being sent")
+  var quietSwitched = false
+  do {
+   try await quietUsageStore.refreshQuietUsage(context: { quietContext }, gate: { true }, fetch: { _ in
+    quietUsageStore.current = "Business"; return quietSample
+   })
+  } catch { quietSwitched = true }
+  let afterQuietSwitch = try usageSnapshotEncoder.encode(quietUsageStore.profiles[0].snapshot)
+  require(quietSwitched && afterQuietSwitch == quietAccepted
+          && quietUsageStore.lastRefresh == quietSampleTime, "switching during quota HTTP never commits the previous account's result")
+  quietUsageStore.current = "Personal"
+  var malformedQuietRejected = false
+  do {
+   try await quietUsageStore.refreshQuietUsage(context: { quietContext }, gate: { true }, fetch: { _ in Data("{}".utf8) })
+  } catch { malformedQuietRejected = true }
+  require(malformedQuietRejected && quietUsageStore.lastRefresh == quietSampleTime, "malformed quota leaves the last successful timestamp intact")
+  var quietRateLimited = false
+  do {
+   try await quietUsageStore.refreshQuietUsage(context: { quietContext }, gate: { true }, fetch: { _ in
+    throw UsageHTTPFailure(code: 429, retryAfter: quietSampleTime.addingTimeInterval(1800))
+   })
+  } catch let error as UsageHTTPFailure { quietRateLimited = error.retryAfter == quietSampleTime.addingTimeInterval(1800) }
+  let afterQuietLimit = try usageSnapshotEncoder.encode(quietUsageStore.active?.snapshot)
+  require(quietRateLimited && afterQuietLimit == quietAccepted,
+          "rate-limit deadline reaches the scheduler without resetting quotas or sample age")
+  var realQuietRejected = false
+  do { try await quietUsageStore.refreshQuietUsage() } catch { realQuietRejected = true }
+  require(realQuietRejected, "demo mode refuses a quiet refresh without fully fictional adapters")
+  let responseURL = URL(string: "https://fixture.invalid/usage")!
+  var parsedLimit = false
+  do {
+   try QuietUsageHTTP.validate(HTTPURLResponse(url: responseURL, statusCode: 429, httpVersion: nil, headerFields: ["Retry-After":"1800"])!, now: quietSampleTime)
+  } catch let failure as UsageHTTPFailure { parsedLimit = failure.code == 429 && failure.retryAfter == quietSampleTime.addingTimeInterval(1800) }
+  require(parsedLimit, "the HTTP adapter propagates real rate-limit status and Retry-After")
+  var fallbackLimit = false
+  do {
+   try QuietUsageHTTP.validate(HTTPURLResponse(url: responseURL, statusCode: 429, httpVersion: nil, headerFields: nil)!, now: quietSampleTime)
+  } catch let failure as UsageHTTPFailure { fallbackLimit = failure.retryAfter == quietSampleTime.addingTimeInterval(900) }
+  require(fallbackLimit, "a 429 without Retry-After backs off for fifteen minutes")
+  for status in [301, 401, 403, 500] {
+   var failed = false
+   do { try QuietUsageHTTP.validate(HTTPURLResponse(url: responseURL, statusCode: status, httpVersion: nil, headerFields: nil)!) }
+   catch { failed = true }
+   require(failed, "non-success usage HTTP responses never become quota data")
+  }
+  require(UsageHTTPFailure.retryDate("120", now: quietSampleTime) == quietSampleTime.addingTimeInterval(120), "numeric Retry-After uses the server delay")
+  require(UsageHTTPFailure.retryDate("Sun, 01 Nov 2026 00:00:00 GMT", now: quietSampleTime) != nil
+          && UsageHTTPFailure.retryDate("NaN", now: quietSampleTime) == nil, "HTTP-date Retry-After is parsed and invalid delays are rejected")
+  let observedRoot = root.appendingPathComponent("local-account-observation")
+  try FileManager.default.createDirectory(at: observedRoot, withIntermediateDirectories: true)
+  let observedDesktop = observedRoot.appendingPathComponent("desktop.json"), observedCLI = observedRoot.appendingPathComponent("cli.json")
+  try Data(#"{"lastKnownAccountUuid":"fictional-desktop","oauth:tokenCacheV2":"fictional-cipher","theme":"dark"}"#.utf8).write(to: observedDesktop)
+  try Data(#"{"oauthAccount":{"accountUuid":"fictional-cli","organizationUuid":"fictional-org"},"cachedUsageUtilization":{"fetchedAtMs":1}}"#.utf8).write(to: observedCLI)
+  let observationBefore = LocalAccountObservation.read(desktop: observedDesktop, cli: observedCLI, profile: "Personal", scope: .subscription)
+  try Data(#"{"oauthAccount":{"accountUuid":"fictional-cli","organizationUuid":"fictional-org"},"cachedUsageUtilization":{"fetchedAtMs":2}}"#.utf8).write(to: observedCLI)
+  require(observationBefore == LocalAccountObservation.read(desktop: observedDesktop, cli: observedCLI, profile: "Personal", scope: .subscription),
+          "quota-cache writes alone do not trigger identity-change network requests")
+  try Data(#"{"lastKnownAccountUuid":"fictional-other","oauth:tokenCacheV2":"fictional-cipher","theme":"light"}"#.utf8).write(to: observedDesktop)
+  require(observationBefore != LocalAccountObservation.read(desktop: observedDesktop, cli: observedCLI, profile: "Personal", scope: .subscription),
+          "a desktop login changed in place is detected without relying on the profile marker")
+  let externalLoginStore = Store(demo: true)
+  let ownIdentity = externalLoginStore.active!.snapshot!.identity
+  let unchangedLocal = LocalAccountObservation(desktopAccountID: ownIdentity.accountID, fingerprint: "fixture-original")
+  require(!externalLoginStore.applyLocalAccountObservation(unchangedLocal) && externalLoginStore.active?.snapshot != nil,
+          "the first identical local observation retains known account details")
+  let externalChange = LocalAccountObservation(desktopAccountID: "fixture-external-login", fingerprint: "fixture-changed")
+  require(externalLoginStore.applyLocalAccountObservation(externalChange) && externalLoginStore.active?.snapshot == nil
+          && externalLoginStore.cliStatus == .unverified, "external desktop login changes immediately invalidate the old current identity and CLI match")
+  require(externalLoginStore.profiles[1].snapshot?.weekly?.used == 74, "external current-account detection leaves other accounts' historical data intact")
+  let afterFetchStore = Store(demo: true)
+  let afterFetchIdentity = afterFetchStore.active!.snapshot!.identity
+  var contextCount = 0, postFetchChangeRejected = false
+  do {
+   try await afterFetchStore.refreshQuietUsage(context: {
+    contextCount += 1
+    return QuietUsageContext(profile: "Personal", identity: afterFetchIdentity,
+                             access: contextCount < 3 ? "fixture-original-token" : "fixture-new-token", scope: .subscription)
+   }, gate: { true }, fetch: { _ in quietSample })
+  } catch { postFetchChangeRejected = true }
+  require(postFetchChangeRejected && afterFetchStore.active?.snapshot?.session?.used == 28,
+          "credential rotation while HTTP is in flight rejects the completed old response")
+  let wakeCenter = NotificationCenter()
+  let wakeEvents = NSLock()
+  final class WakeCount: @unchecked Sendable { var value = 0 }
+  let wakeCount = WakeCount()
+  let wakeObserver = DesktopLifecycleObservation(center: wakeCenter) { note in
+   if note.name == NSWorkspace.didWakeNotification { wakeEvents.lock(); wakeCount.value += 1; wakeEvents.unlock() }
+  }
+  wakeCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
+  withExtendedLifetime(wakeObserver) { require(wakeCount.value == 1, "system wake reaches the same coalesced account refresh path") }
   let passiveStore = Store(demo: true), passiveTime = Date()
   passiveStore.lastRefresh = passiveTime
   for _ in 0..<3 { passiveStore.panelWillOpen() }
