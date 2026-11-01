@@ -62,6 +62,9 @@ struct QuietUsageContext: Equatable {
     func quietUsageContext() async throws -> QuietUsageContext {
         let name = current
         let scope = protection.desktopScope
+        guard try confirmedCurrentProfile() == name, DesktopModeInspector.read(support: support) == scope else {
+            throw SafetyError("账号已变化，未查询额度。")
+        }
         let identity: CLIIdentity
         let access: String
         switch scope {
@@ -84,7 +87,8 @@ struct QuietUsageContext: Equatable {
             identity = confirmed; access = value
         case .unknown: throw SafetyError("当前模式尚未确认，未查询额度。")
         }
-        guard current == name, protection.desktopScope == scope,
+        guard current == name, try confirmedCurrentProfile() == name,
+              protection.desktopScope == scope, DesktopModeInspector.read(support: support) == scope,
               profiles.first(where: { $0.name == name })?.snapshot?.identity.samePrincipal(as: identity) == true else {
             throw SafetyError("当前订阅身份未匹配，未改写额度。")
         }
