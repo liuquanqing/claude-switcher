@@ -635,7 +635,7 @@ struct ProfileCard: View {
             Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.resetDueCachedHelp"))
         case .loaded:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.cacheTimeHelp"))
         case .notRequested, .cached:
             Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
