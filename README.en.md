@@ -14,9 +14,9 @@ Accounts, usage, sessions and network checks meet in one place.
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.2/ClaudeSwitcher-1.3.6-rc.2-arm64-developer-id-preview.dmg)
+[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.3/ClaudeSwitcher-1.3.6-rc.3-arm64-developer-id-preview.dmg)
 
-**1.3.6 RC2 · Preview** · Apple Silicon · macOS 13+
+**1.3.6 RC3 · Preview** · Apple Silicon · macOS 13+
 
 [Download](#download) · [Features](#features) · [Quick start](#quick-start) · [Scope](#scope) · [中文](README.md)
 
@@ -62,7 +62,7 @@ Known failures, unknown states and unresolved conflicts stop the operation befor
 
 ## Screens
 
-Use the globe in the footer to switch the entire app between Chinese and English. Account names, session content, and paths stay as they are.
+Open Settings in the footer to switch the entire app between Chinese and English. Account names, session content, and paths stay as they are.
 
 <table>
 <tr>
@@ -81,13 +81,13 @@ All account details in these screenshots are fictional. See [bilingual protectio
 
 ## Download
 
-Version 1.3.6 RC2 connects current-login recovery, verification, backup and quota catch-up, with update checks and verified downloads. See [release notes](docs/releases/1.3.6-rc.2.md).
+Version 1.3.6 RC3 refines the footer and per-account cache labels, alongside current-login recovery and verified update downloads. See [release notes](docs/releases/1.3.6-rc.3.md).
 
-**[Download Claude Switcher 1.3.6 RC2 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.2/ClaudeSwitcher-1.3.6-rc.2-arm64-developer-id-preview.dmg)**
+**[Download Claude Switcher 1.3.6 RC3 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.3/ClaudeSwitcher-1.3.6-rc.3-arm64-developer-id-preview.dmg)**
 
 For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher.app` to Applications.
 
-[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.2) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.2/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
+[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.3) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.3/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
 
 This prerelease is Developer ID signed and notarized by Apple. Normal first-open and Keychain prompts may still apply. [Stable 1.3.5](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5) remains available; see each release for signing status and [the installation guide](docs/INSTALL.md).
 
