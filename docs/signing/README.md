@@ -30,7 +30,9 @@ xcrun notarytool store-credentials claude-switcher-personal-notary \
 ## 分阶段执行
 
 先完成本地提交，保证工作区干净。脚本只接受此 clone 的 `dist/` 输出目录；已有输出不覆盖。
-默认输出为 `dist/developer-id/1.3.6-rc.1/`。它不会启动应用、CLI、守卫或注册后台服务。
+当前默认输出为 `dist/developer-id/1.3.6-rc.1-r2/`，`r2` 仅为打包修订号。
+此前缺少显式预览渠道的 `dist/developer-id/1.3.6-rc.1/` 保留为旧证据，不得继续签署或安装。
+脚本不会启动应用、CLI、守卫或注册后台服务。
 
 ```sh
 python3 scripts/developer-id-release.py prepare
@@ -46,7 +48,10 @@ python3 scripts/developer-id-release.py check-dmg --profile claude-switcher-pers
 
 `prepare` 构建完整三组件，制作独立 `Claude Switcher 签名预览.app`，完成版本设置与 strip。
 对外标识 `1.3.6-rc.1`；Apple 数字版本字段为 `1.3.6` / `20261102.1.0`。
-Bundle ID 继续使用 `dev.claudeswitcher.candidate`，不添加预览偏好键。
+Bundle ID 继续使用 `dev.claudeswitcher.candidate`。`CSReleaseChannel=preview`、
+`CSReleaseVersion=1.3.6-rc.1` 明确标注分发渠道；系统名称和显示名称均为 `Claude Switcher 预览`。
+不使用 Demo 假数据专用的 `CSPreview*` 偏好键。准备、签名前及后续验证都会核对渠道字段，
+不能仅凭目录名判断它是预览版。
 此时签名是 `NOT_RUN`，预览不能作为可安装交付。
 
 `sign` 先签两个助手与主 Mach-O，再签外层 bundle，不使用 `--deep` 代替逐组件签名。

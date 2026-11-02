@@ -15,6 +15,50 @@ spec.loader.exec_module(release)
 
 
 class SigningChecks(unittest.TestCase):
+    def test_prepared_metadata_identifies_preview_without_demo_or_identity_change(self):
+        info = release.prepare_preview_metadata({"CFBundleIdentifier": release.BUNDLE_ID})
+        self.assertEqual(info["CFBundleIdentifier"], "dev.claudeswitcher.candidate")
+        self.assertEqual(info["CFBundleShortVersionString"], "1.3.6")
+        self.assertEqual(info["CSReleaseChannel"], "preview")
+        self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.1")
+        self.assertIn("预览", info["CFBundleDisplayName"])
+        self.assertIn("预览", info["CFBundleName"])
+        self.assertFalse(any(k.startswith("CSPreview") for k in info))
+        self.assertNotIn("Demo", info["CFBundleDisplayName"])
+
+    def test_preparation_rejects_demo_preferences_and_changed_bundle_id(self):
+        for info in ({"CFBundleIdentifier": release.BUNDLE_ID, "CSPreviewMode": True},
+                     {"CFBundleIdentifier": "fictional.other.app"}):
+            with self.subTest(info=info), self.assertRaises(ValueError):
+                release.prepare_preview_metadata(info)
+
+    def test_channel_gate_rejects_missing_markers_wrong_version_and_ordinary_display_name(self):
+        valid = release.prepare_preview_metadata({"CFBundleIdentifier": release.BUNDLE_ID})
+        for key, value in (("CSReleaseChannel", None), ("CSReleaseChannel", "stable"),
+                           ("CSReleaseVersion", None), ("CSReleaseVersion", "1.3.6"),
+                           ("CFBundleShortVersionString", "1.3.6-rc.1"),
+                           ("CFBundleName", "Claude Switcher"),
+                           ("CFBundleDisplayName", "Claude Switcher"),
+                           ("CSPreviewMode", False)):
+            info = dict(valid)
+            if value is None:
+                info.pop(key)
+            else:
+                info[key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(ValueError):
+                release.verify_preview_metadata(info)
+
+    def test_metadata_gate_runs_before_any_signature_check(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            app = Path(temporary)
+            (app / "Contents").mkdir()
+            import plistlib
+            (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": release.BUNDLE_ID}))
+            with patch.object(release, "run") as run:
+                with self.assertRaisesRegex(ValueError, "Preview channel must be explicit"):
+                    release.verify_app(app, "FAKE123456", app)
+                run.assert_not_called()
+
     def test_inventory_requires_all_three_components(self):
         with tempfile.TemporaryDirectory() as temporary:
             app = Path(temporary)

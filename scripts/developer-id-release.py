@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RELEASE = "1.3.6-rc.1"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
 APP_NAME = "Claude Switcher 签名预览.app"
+DISPLAY_NAME = "Claude Switcher 预览"
 BINARIES = (
     "Contents/Helpers/ClaudeGuard",
     "Contents/Helpers/ClaudeSessionTransfer",
@@ -45,6 +46,26 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def verify_preview_metadata(info):
+    require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
+    require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
+    require(info.get("CSReleaseChannel") == "preview", "Preview channel must be explicit")
+    require(info.get("CSReleaseVersion") == RELEASE, "Preview release version mismatch")
+    require(info.get("CFBundleShortVersionString") == "1.3.6", "Apple numeric version mismatch")
+    require(info.get("CFBundleName") == DISPLAY_NAME and info.get("CFBundleDisplayName") == DISPLAY_NAME,
+            "System display names must explicitly identify the preview")
+
+
+def prepare_preview_metadata(info):
+    require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
+    require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
+    result = dict(info, CFBundleShortVersionString="1.3.6", CFBundleVersion="20261102.1.0",
+                  CFBundleName=DISPLAY_NAME, CFBundleDisplayName=DISPLAY_NAME,
+                  CSReleaseChannel="preview", CSReleaseVersion=RELEASE)
+    verify_preview_metadata(result)
+    return result
+
+
 def inventory(app):
     found = set()
     for p in app.rglob("*"):
@@ -68,6 +89,7 @@ def verify_code(path, team, runtime=True):
 
 
 def verify_app(app, team, evidence):
+    verify_preview_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
     inventory(app)
     for rel in BINARIES:
         (evidence / (Path(rel).name + "-signature.txt")).write_text(verify_code(app / rel, team))
@@ -100,7 +122,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("prepare", "sign", "submit-app", "check-app",
                                           "package", "submit-dmg", "check-dmg"))
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / RELEASE)
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / (RELEASE + "-r2"))
     parser.add_argument("--identity", help="Exact 40-character SHA-1 of a local Developer ID identity")
     parser.add_argument("--team-id", help="Personal Team ID; never select a company team")
     parser.add_argument("--profile", help="Existing local notarytool Keychain profile name; no secrets")
@@ -119,15 +141,12 @@ def main():
         evidence.mkdir()
         run("ditto", "--norsrc", "--noextattr", ROOT / "build/Claude Switcher.app", app)
         info_path = app / "Contents/Info.plist"
-        info = plistlib.loads(info_path.read_bytes())
-        require(info["CFBundleIdentifier"] == BUNDLE_ID, "Bundle ID changed")
-        require(not any(k.startswith("CSPreview") for k in info), "Unexpected preview preferences")
-        info.update(CFBundleShortVersionString="1.3.6", CFBundleVersion="20261102.1.0")
+        info = prepare_preview_metadata(plistlib.loads(info_path.read_bytes()))
         info_path.write_bytes(plistlib.dumps(info))
         inventory(app)
         for rel in BINARIES:
             run("strip", "-S", app / rel)
-        state = dict(release=RELEASE, version="1.3.6", build=info["CFBundleVersion"],
+        state = dict(release=RELEASE, releaseChannel="preview", version="1.3.6", build=info["CFBundleVersion"],
                      sourceCommit=source, architecture=run("uname", "-m").strip(),
                      bundleIdentifier=BUNDLE_ID, appPath=str(app), signing="NOT_RUN",
                      notarization={"app": {"status": "NOT_RUN"}, "dmg": {"status": "NOT_RUN"}},
@@ -141,7 +160,10 @@ def main():
                 "Source HEAD differs from prepared package; resume from its original commit")
         require(not run("git", "status", "--porcelain").strip(), "Source has uncommitted changes")
         require(state["bundleIdentifier"] == BUNDLE_ID, "Manifest Bundle ID changed")
+        require(state["release"] == RELEASE and state.get("releaseChannel") == "preview",
+                "Manifest preview channel/version mismatch; prepare a new output")
         require(state["appPath"] == str(app), "Output directory was moved")
+        verify_preview_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
         phase = args.phase
         if phase == "sign":
             require(state["phase"] == "prepared", "Sign only a newly prepared app")
