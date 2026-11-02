@@ -95,9 +95,11 @@ class SigningChecks(unittest.TestCase):
             with patch.object(release, "ROOT", root), patch.object(release, "pinned_team", return_value="FAKE123456"), \
                  patch.object(release, "run", side_effect=fake_run), patch.object(sys, "argv", ["release", "prepare"]):
                 release.main()
-            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.3/RELEASE-MANIFEST.json").read_text())
+            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.3-r2/RELEASE-MANIFEST.json").read_text())
             self.assertEqual(manifest["release"], "1.3.6-rc.3")
             self.assertEqual(manifest["candidateCommit"], "32d0b6891c396b8f46995bd52522abfbd59b7bb9")
+            self.assertEqual(Path(manifest["appPath"]).name, "Claude Switcher Preview.app")
+            self.assertEqual(release.DR_BASELINE_APP_NAME, "Claude Switcher 签名预览.app")
             self.assertEqual(manifest["signing"], "NOT_RUN")
             self.assertEqual(manifest["phase"], "prepared")
             self.assertFalse(manifest["distributionReady"])

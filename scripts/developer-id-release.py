@@ -14,8 +14,9 @@ RELEASE = "1.3.6-rc.3"
 BUILD = "20261103.3.0"
 CANDIDATE_COMMIT = "32d0b6891c396b8f46995bd52522abfbd59b7bb9"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.2-r2"
+DR_BASELINE_APP_NAME = "Claude Switcher 签名预览.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
-APP_NAME = "Claude Switcher 签名预览.app"
+APP_NAME = "Claude Switcher Preview.app"
 DISPLAY_NAME = "Claude Switcher 预览"
 BINARIES = (
     "Contents/Helpers/ClaudeGuard",
@@ -145,7 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("prepare", "sign", "submit-app", "check-app",
                                           "package", "submit-dmg", "check-dmg"))
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / RELEASE)
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / (RELEASE + "-r2"))
     parser.add_argument("--identity", help="Exact 40-character SHA-1 of a local Developer ID identity")
     parser.add_argument("--team-id", help="Personal Team ID; never select a company team")
     parser.add_argument("--profile", help="Existing local notarytool Keychain profile name; no secrets")
@@ -209,7 +210,7 @@ def main():
             verify_app(app, args.team_id, evidence)
             state.update(identitySHA1=args.identity.upper(), teamID=args.team_id,
                          signing="Developer ID Application; Hardened Runtime; secure timestamp", phase="signed")
-            comparison = compare_designated_requirements(DR_BASELINE_DIRECTORY / APP_NAME, app)
+            comparison = compare_designated_requirements(DR_BASELINE_DIRECTORY / DR_BASELINE_APP_NAME, app)
             comparison.update(baselineRelease="1.3.6-rc.2", baselineBuild="20261102.2.1",
                               candidateRelease=RELEASE, candidateBuild=BUILD)
             save(evidence / "gui-designated-requirement-comparison.json", comparison)

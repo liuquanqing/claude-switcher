@@ -18,7 +18,9 @@ Bundle ID 继续 `dev.claudeswitcher.candidate`，公开 Team 从真实的
 使用现有个人 Developer ID 给 GUI、两个助手和整个 bundle 签名，所有 Mach-O 均启用
 Hardened Runtime、安全时间戳。最后 ZIP 和 DMG 内完整应用都需验签、验票及 Gatekeeper。
 
-默认目录 `dist/developer-id/1.3.6-rc.3/`，独立记录 `_qa/signing-delivery-rc3.json`。
+公开包顶层名称为 `Claude Switcher Preview.app`，显示名仍 `Claude Switcher 预览`。
+默认目录 `dist/developer-id/1.3.6-rc.3-r2/`，独立记录 `_qa/signing-delivery-rc3.json`。
+命名调整前的 `dist/developer-id/1.3.6-rc.3/` 仅为未签名准备证据，不能用于交付。
 DR 基线是 RC2 build `20261102.2.1` 的已公证 bundle，位于
 `dist/developer-id/1.3.6-rc.2-r2/Claude Switcher 签名预览.app`。
 签名后逐字比较 GUI designated requirement 并记录。相同不代表真实钥匙串授权已继承，
