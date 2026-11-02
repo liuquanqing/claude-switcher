@@ -12,5 +12,18 @@
   "installedApplicationsChanged": false,
   "guardStoppedOrChanged": false,
   "networkFaultTest": "NOT_RUN",
-  "formalRelease": "NOT_RUN"
+  "formalRelease": "NOT_RUN",
+  "codeCommit": "8be140b925528e6f93521173d385d787c3442533",
+  "cloudCI": {
+    "conclusion": "success",
+    "head_sha": "8be140b925528e6f93521173d385d787c3442533",
+    "html_url": "https://github.com/liuquanqing/claude-switcher/actions/runs/41452017113",
+    "id": 41452017113,
+    "status": "completed"
+  },
+  "signingPreparation": {
+    "sourceCommit": "d0379882259b9fde4ff8c34284247bdea2737a87",
+    "pipelineChecks": 15,
+    "status": "OFFLINE_PREPARED; waiting for unlock and parent continuation; not signed/not installable"
+  }
 }
