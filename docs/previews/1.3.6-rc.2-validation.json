@@ -6,19 +6,19 @@
   "localBuild": "PASS; ad-hoc development bundle only",
   "frontendAuthor": "Kimi Code CLI 2.3.0, default model configuration; exact model version not confirmed",
   "existingNotarizedRC1PackageVerification": "PASS; read-only mount and unmount, no app launch",
-  "nativeQA": "PASS targeted forced-demo menu/language/demo-login-toggle/update-window-close/Esc/reopen/quit; no actual login item or authentication",
+  "nativeQA": "PASS targeted forced-demo menu/language/demo-login-toggle/update-window-close/Esc/reopen/quit; build 2.1 native Chinese color and age-only footer spot-check; real authentication NOT_RUN",
   "realAuthentication": "NOT_RUN",
   "realKeychainGrantPersistence": "NOT_RUN",
   "installedApplicationsChanged": false,
   "guardStoppedOrChanged": false,
   "networkFaultTest": "NOT_RUN",
   "formalRelease": "NOT_RUN",
-  "codeCommit": "8be140b925528e6f93521173d385d787c3442533",
+  "codeCommit": "f54b1a703c20fc686fb617aa566f92b810bada06",
   "cloudCI": {
     "conclusion": "success",
-    "head_sha": "8be140b925528e6f93521173d385d787c3442533",
-    "html_url": "https://github.com/liuquanqing/claude-switcher/actions/runs/41452017113",
-    "id": 41452017113,
+    "head_sha": "f54b1a703c20fc686fb617aa566f92b810bada06",
+    "html_url": "https://github.com/liuquanqing/claude-switcher/actions/runs/41463477582",
+    "id": 41463477582,
     "status": "completed"
   },
   "signingPreparation": {
@@ -27,5 +27,12 @@
     "status": "SUPERSEDED pending new exact UI revision source; not installable"
   },
   "colorRevision": "User rejected native orange/brown build 2.0; Kimi neutral cardHi primary verified by Chinese native spot-check in build 2.1",
-  "cloudCIForUIRevision": "PENDING; previous 8be140b result remains historical"
+  "cloudCIForUIRevision": "PASS; exact f54b1a7 source",
+  "previousCloudCI": {
+    "conclusion": "success",
+    "head_sha": "8be140b925528e6f93521173d385d787c3442533",
+    "html_url": "https://github.com/liuquanqing/claude-switcher/actions/runs/41452017113",
+    "id": 41452017113,
+    "status": "completed"
+  }
 }
