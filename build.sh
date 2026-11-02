@@ -28,8 +28,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleShortVersionString</key><string>1.3.6</string>
-<key>CFBundleVersion</key><string>20261102.2.1</string>
-<key>CSReleaseVersion</key><string>1.3.6-rc.2</string>
+<key>CFBundleVersion</key><string>20261103.3.0</string>
+<key>CSReleaseVersion</key><string>1.3.6-rc.3</string>
 <key>CSReleaseChannel</key><string>preview</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>

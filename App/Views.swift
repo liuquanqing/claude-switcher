@@ -635,7 +635,7 @@ struct ProfileCard: View {
             Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.resetDueCachedHelp"))
         case .loaded:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.cacheTimeHelp"))
         case .notRequested, .cached:
             Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
@@ -834,19 +834,43 @@ struct AddAccountEntry: View {
     }
 }
 
-private struct FooterIcon: View {
+struct FooterIcon: View {
     let icon: String
     let hover: Bool
+    var preservesMenuColor = false
+
+    private var color: Color { hover ? .txt : .sub }
+
+    private var menuImage: NSImage? {
+        guard preservesMenuColor else { return nil }
+        let configuration = NSImage.SymbolConfiguration(paletteColors: [NSColor(color)])
+        guard let image = NSImage(systemSymbolName: icon, accessibilityDescription: nil)?
+            .withSymbolConfiguration(configuration) else { return nil }
+        image.isTemplate = false
+        return image
+    }
 
     var body: some View {
-        Image(systemName: icon).font(.system(size: 13, weight: .medium))
-            .foregroundColor(hover ? .txt : .sub).frame(width: 28, height: 28)
-            .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
+        Group {
+            if let image = menuImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 13, height: 13)
+            } else {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(color)
+            }
+        }
+        .frame(width: 28, height: 28)
+        .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
     }
 }
 
 struct FooterButton: View {
     let icon: String; let help: String
+    var accessibilityLabel: String? = nil
     var clearHoverAfterAction = false
     let action: () -> Void
     @State private var hover = false
@@ -856,7 +880,11 @@ struct FooterButton: View {
             if clearHoverAfterAction { hover = false }
         } label: {
             FooterIcon(icon: icon, hover: hover)
-        }.buttonStyle(.plain).help(help).onHover { hover = $0 }
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(accessibilityLabel ?? help)
+        .onHover { hover = $0 }
     }
 }
 
@@ -1064,10 +1092,6 @@ struct Panel: View {
                 accountGrid
             }
             HStack(spacing: 7) {
-                FooterButton(icon: "folder", help: t("footer.showDirectory")) {
-                    if !store.isDemo { NSWorkspace.shared.activateFileViewerSelecting([parkDir]) }
-                }
-                Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 if let b = store.busy {
                     ProgressView().controlSize(.small)
                     Text(generated(b)).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
@@ -1089,17 +1113,20 @@ struct Panel: View {
                         .help(summary.help + "\n" + t("refresh.officialCLIHelp")
                             + (protection.desktopScope == .api ? "\n" + t("api.subscriptionUsageHelp") : ""))
                         .accessibilityElement(children: .combine)
-                        .layoutPriority(-1)
                     }
                 }
                 Spacer(minLength: 4)
                 if store.sessionMigrationEnabled {
                     FooterButton(icon: "doc.on.doc", help: t("footer.import")) { CopyWindow.show(store) }
                 }
-                FooterButton(icon: "arrow.clockwise", help: t("footer.refresh")) {
+                FooterButton(
+                    icon: "arrow.clockwise",
+                    help: t("footer.refresh"),
+                    accessibilityLabel: t("footer.refreshAccessibility")
+                ) {
                     Task { await store.refreshAllStatuses() }
                 }
-                AppSettingsMenu(store: store)
+                AppSettingsMenu(store: store, accountDirectory: parkDir)
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {
                     HStack(spacing: 5) {
