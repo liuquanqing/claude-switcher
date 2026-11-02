@@ -9,7 +9,11 @@ case "${1:-}" in
 esac
 ARCH="$(uname -m)"
 SOURCE="$PWD/build/Claude Switcher.app"
-VERSION="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$SOURCE/Contents/Info.plist")"
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print CSReleaseVersion' "$SOURCE/Contents/Info.plist" 2>/dev/null || /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$SOURCE/Contents/Info.plist")"
+if codesign --display --verbose=4 "$SOURCE" 2>&1 | /usr/bin/grep -q 'Authority=Developer ID Application:'; then
+  echo 'Developer ID bundles must use the notarized release pipeline; refusing to modify or re-sign this bundle.' >&2
+  exit 1
+fi
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 APP="$STAGE/Claude Switcher.app"
@@ -20,7 +24,11 @@ import plistlib, sys
 p = Path(sys.argv[1]) / 'Contents/Info.plist'
 v = plistlib.loads(p.read_bytes())
 assert not any(k.startswith('CSPreview') for k in v)
-v.update(CFBundleIdentifier='dev.claudeswitcher.candidate', CFBundleName='Claude Switcher', CFBundleDisplayName='Claude Switcher')
+v.update(CFBundleIdentifier='dev.claudeswitcher.candidate', CFBundleName='Claude Switcher')
+if v.get('CSReleaseChannel') == 'preview':
+    v['CFBundleDisplayName'] = 'Claude Switcher 预览'
+else:
+    v['CFBundleDisplayName'] = 'Claude Switcher'
 p.write_bytes(plistlib.dumps(v))
 PY
 # Remove local debug paths from distributed executables, then sign the changed helpers.
@@ -45,7 +53,7 @@ root = Path.cwd()
 info = plistlib.loads((root / 'build/Claude Switcher.app/Contents/Info.plist').read_bytes())
 sums = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files}
 (root / 'dist/SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in sums.items()))
-manifest = {'version': info['CFBundleShortVersionString'], 'build': info['CFBundleVersion'], 'architecture': subprocess.check_output(['uname', '-m'], text=True).strip(), 'sourceCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'bundleIdentifier': 'dev.claudeswitcher.candidate', 'appName': 'Claude Switcher.app', 'signing': 'ad-hoc; not notarized', 'files': sums}
+manifest = {'version': info.get('CSReleaseVersion', info['CFBundleShortVersionString']), 'channel': info.get('CSReleaseChannel', 'stable'), 'build': info['CFBundleVersion'], 'architecture': subprocess.check_output(['uname', '-m'], text=True).strip(), 'sourceCommit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'bundleIdentifier': 'dev.claudeswitcher.candidate', 'appName': 'Claude Switcher.app', 'signing': 'ad-hoc; not notarized', 'files': sums}
 (root / 'dist/RELEASE-MANIFEST.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n')
 PY
 printf 'Packages and checksums written to dist/\n'

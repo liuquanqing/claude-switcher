@@ -32,6 +32,17 @@ final class UsageRefreshPolicyTests: XCTestCase {
         XCTAssertFalse(policy.shouldRequest(profile: "A", sampledAt: nil, resetsAt: [], active: true, trigger: .identityChanged, now: now.addingTimeInterval(1799)))
         XCTAssertTrue(policy.shouldRequest(profile: "A", sampledAt: nil, resetsAt: [], active: true, trigger: .periodic, now: now.addingTimeInterval(1800)))
     }
+    func testNewLoginRepairsOrdinaryFailureButNotServerLimit() {
+        var policy=UsageRefreshPolicy()
+        policy.failed(profile:"A",now:now)
+        policy.credentialsChanged(profile:"A")
+        XCTAssertTrue(policy.shouldRequest(profile:"A",sampledAt:now,resetsAt:[],active:true,trigger:.identityChanged,now:now.addingTimeInterval(15)))
+        policy.failed(profile:"A",now:now,retryAfter:now.addingTimeInterval(1800))
+        policy.credentialsChanged(profile:"A")
+        XCTAssertFalse(policy.permitsExplicitRequest(profile:"A",now:now.addingTimeInterval(61)))
+        XCTAssertFalse(policy.shouldRequest(profile:"A",sampledAt:nil,resetsAt:[],active:true,trigger:.identityChanged,now:now.addingTimeInterval(61)))
+        XCTAssertTrue(policy.permitsExplicitRequest(profile:"A",now:now.addingTimeInterval(1800)))
+    }
     func testResetNeedsServerReadWithoutBusyLoop() {
         var policy = UsageRefreshPolicy()
         let sample = now.addingTimeInterval(-100), reset = now.addingTimeInterval(-1)
