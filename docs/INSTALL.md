@@ -33,7 +33,7 @@ cat SHA256SUMS
 
 打开 DMG（或解压 ZIP），把 **`Claude Switcher Preview.app`** 拖进 **应用程序（/Applications）** 文件夹。
 
-- 预览包名称为 `Claude Switcher Preview.app`。若要保留同名原版，请先将原版改名或备份，再拖入；不要直接确认覆盖。内部 Bundle ID 保留 `dev.claudeswitcher.candidate`，以延续既有应用身份。
+- 预览包名称为 `Claude Switcher Preview.app`，可与原版 `Claude Switcher.app` 并存；不要覆盖原版。内部 Bundle ID 保留 `dev.claudeswitcher.candidate`，以延续既有应用身份。
 - **不要直接在磁盘映像或下载/临时目录里运行。** 独立守卫会记录 App 内 helper 的路径。磁盘映像推出后或临时目录被清理后，这个路径就会失效。
 - **本版和原版共享同一个账号目录。** 两者可以并存，但不要同时用两个管理器切号，也不要在两个管理器里同时开启保护。
 
@@ -70,7 +70,7 @@ cat SHA256SUMS
 2. 如果界面无法操作，可以在终端运行（路径按你的实际安装位置填写）：
 
    ```bash
-   "/Applications/Claude Switcher.app/Contents/MacOS/ClaudeSwitcher" --stop-protection
+   "/Applications/Claude Switcher Preview.app/Contents/MacOS/ClaudeSwitcher" --stop-protection
    ```
 
    源码仓库里的 `scripts/stop-protection.sh` 做的是同一件事，它接受 App 路径作为参数。
