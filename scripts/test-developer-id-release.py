@@ -23,7 +23,7 @@ class SigningChecks(unittest.TestCase):
         self.assertEqual(info["CFBundleShortVersionString"], "1.3.6")
         self.assertEqual(info["CSReleaseChannel"], "preview")
         self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.2")
-        self.assertEqual(info["CFBundleVersion"], "20261102.2.0")
+        self.assertEqual(info["CFBundleVersion"], "20261102.2.1")
         self.assertIn("预览", info["CFBundleDisplayName"])
         self.assertIn("预览", info["CFBundleName"])
         self.assertFalse(any(k.startswith("CSPreview") for k in info))
@@ -40,6 +40,7 @@ class SigningChecks(unittest.TestCase):
         for key, value in (("CSReleaseChannel", None), ("CSReleaseChannel", "stable"),
                            ("CSReleaseVersion", None), ("CSReleaseVersion", "1.3.6"),
                            ("CSReleaseVersion", "1.3.6-rc.1"), ("CFBundleVersion", "20261102.1.0"),
+                           ("CFBundleVersion", "20261102.2.0"),
                            ("CFBundleShortVersionString", "1.3.6-rc.1"),
                            ("CFBundleName", "Claude Switcher"),
                            ("CFBundleDisplayName", "Claude Switcher"),
@@ -93,9 +94,9 @@ class SigningChecks(unittest.TestCase):
             with patch.object(release, "ROOT", root), patch.object(release, "pinned_team", return_value="FAKE123456"), \
                  patch.object(release, "run", side_effect=fake_run), patch.object(sys, "argv", ["release", "prepare"]):
                 release.main()
-            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.2/RELEASE-MANIFEST.json").read_text())
+            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.2-r2/RELEASE-MANIFEST.json").read_text())
             self.assertEqual(manifest["release"], "1.3.6-rc.2")
-            self.assertEqual(manifest["candidateCommit"], "8be140b925528e6f93521173d385d787c3442533")
+            self.assertEqual(manifest["candidateCommit"], "f54b1a703c20fc686fb617aa566f92b810bada06")
             self.assertEqual(manifest["signing"], "NOT_RUN")
             self.assertEqual(manifest["phase"], "prepared")
             self.assertFalse(manifest["distributionReady"])
