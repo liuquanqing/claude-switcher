@@ -10,10 +10,10 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.6-rc.2"
-BUILD = "20261102.2.1"
-CANDIDATE_COMMIT = "f54b1a703c20fc686fb617aa566f92b810bada06"
-RC1_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.1-r2"
+RELEASE = "1.3.6-rc.3"
+BUILD = "20261103.3.0"
+CANDIDATE_COMMIT = "32d0b6891c396b8f46995bd52522abfbd59b7bb9"
+DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.2-r2"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
 APP_NAME = "Claude Switcher 签名预览.app"
 DISPLAY_NAME = "Claude Switcher 预览"
@@ -62,7 +62,7 @@ def verify_preview_metadata(info):
     require(info.get("CSReleaseChannel") == "preview", "Preview channel must be explicit")
     require(info.get("CSReleaseVersion") == RELEASE, "Preview release version mismatch")
     require(info.get("CFBundleShortVersionString") == "1.3.6", "Apple numeric version mismatch")
-    require(info.get("CFBundleVersion") == BUILD, "RC2 build version mismatch")
+    require(info.get("CFBundleVersion") == BUILD, "Candidate build version mismatch")
     require(info.get("CFBundleName") == DISPLAY_NAME and info.get("CFBundleDisplayName") == DISPLAY_NAME,
             "System display names must explicitly identify the preview")
 
@@ -123,7 +123,7 @@ def compare_designated_requirements(previous_app, current_app):
         require(len(lines) == 1, "Cannot read GUI designated requirement")
         return lines[0]
     previous, current = requirement(previous_app), requirement(current_app)
-    return {"same": previous == current, "rc1": previous, "rc2": current,
+    return {"same": previous == current, "baseline": previous, "candidate": current,
             "keychainACLInheritance": "NOT_PROVEN; no real Keychain item or ACL was read or changed"}
 
 
@@ -145,7 +145,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("prepare", "sign", "submit-app", "check-app",
                                           "package", "submit-dmg", "check-dmg"))
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / (RELEASE + "-r2"))
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / RELEASE)
     parser.add_argument("--identity", help="Exact 40-character SHA-1 of a local Developer ID identity")
     parser.add_argument("--team-id", help="Personal Team ID; never select a company team")
     parser.add_argument("--profile", help="Existing local notarytool Keychain profile name; no secrets")
@@ -178,7 +178,7 @@ def main():
                      staple={"app": "NOT_RUN", "dmg": "NOT_RUN"},
                      gatekeeper={"app": "NOT_RUN", "dmg": "NOT_RUN"},
                      installation="NOT_RUN", realAccountValidation="NOT_RUN",
-                     designatedRequirement={"status": "NOT_RUN; wait for unlock and parent continuation"},
+                     designatedRequirement={"status": "NOT_RUN", "baselineRelease": "1.3.6-rc.2", "baselineBuild": "20261102.2.1"},
                      distributionReady=False, files={}, phase="prepared")
         save(manifest, state)
     else:
@@ -209,18 +209,20 @@ def main():
             verify_app(app, args.team_id, evidence)
             state.update(identitySHA1=args.identity.upper(), teamID=args.team_id,
                          signing="Developer ID Application; Hardened Runtime; secure timestamp", phase="signed")
-            comparison = compare_designated_requirements(RC1_DIRECTORY / APP_NAME, app)
+            comparison = compare_designated_requirements(DR_BASELINE_DIRECTORY / APP_NAME, app)
+            comparison.update(baselineRelease="1.3.6-rc.2", baselineBuild="20261102.2.1",
+                              candidateRelease=RELEASE, candidateBuild=BUILD)
             save(evidence / "gui-designated-requirement-comparison.json", comparison)
             state["designatedRequirement"] = comparison
             save(manifest, state)
-            require(comparison["same"], "GUI designated requirement differs from RC1; stop for review")
+            require(comparison["same"], "GUI designated requirement differs from RC2; stop for review")
         elif phase.startswith("submit-"):
             kind = phase.removeprefix("submit-")
             require(args.profile, "Existing local Keychain profile required")
             require(state["phase"] == ("signed" if kind == "app" else "packaged"), "Unexpected submission phase")
             require(state["notarization"][kind]["status"] == "NOT_RUN", "Submission already exists")
             require(state["designatedRequirement"].get("same") is True,
-                    "RC1/RC2 GUI designated requirement equality must be reviewed before submission")
+                    "RC2/RC3 GUI designated requirement equality must be reviewed before submission")
             verify_app(app, state["teamID"], evidence)
             if kind == "app":
                 archive = directory / "app-submission.zip"
