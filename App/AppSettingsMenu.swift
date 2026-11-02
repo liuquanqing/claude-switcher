@@ -53,6 +53,7 @@ struct AppSettingsMenu: View {
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .frame(width: 28, height: 28)
         .help(t("settings.help"))
         .accessibilityLabel(t("settings.title"))
         .onHover { hover = $0 }

@@ -1089,7 +1089,6 @@ struct Panel: View {
                         .help(summary.help + "\n" + t("refresh.officialCLIHelp")
                             + (protection.desktopScope == .api ? "\n" + t("api.subscriptionUsageHelp") : ""))
                         .accessibilityElement(children: .combine)
-                        .layoutPriority(-1)
                     }
                 }
                 Spacer(minLength: 4)
