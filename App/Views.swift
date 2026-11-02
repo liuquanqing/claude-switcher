@@ -948,7 +948,7 @@ struct Panel: View {
             if hasNewData, let last = store.lastRefresh {
                 let age = ago(last, language: language, now: now)
                 return (t("refresh.failureSummary", arguments: ["age": age, "count": String(failed)]), .warn,
-                        t("refresh.failureHelp", arguments: ["age": age]))
+                        t("refresh.failureHelp", arguments: ["sampled": fullDateTime(last, language: language)]))
             }
             return (t("refresh.failureCached", arguments: ["count": String(failed)]), .warn,
                     t("refresh.failureCachedHelp"))
@@ -960,7 +960,8 @@ struct Panel: View {
             return (t("refresh.never"), .sub, t("refresh.neverHelp"))
         }
         let age = ago(last, language: language, now: now)
-        return (t("refresh.summary", arguments: ["age": age]), .sub, t("refresh.summaryHelp"))
+        return (t("refresh.summary", arguments: ["age": age]), .sub,
+                t("refresh.summaryHelp", arguments: ["sampled": fullDateTime(last, language: language)]))
     }
 
     private var languageBinding: Binding<String> {
