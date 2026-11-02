@@ -4,11 +4,11 @@
 目标 `1.3.6-rc.1`。实际签名、公证和加票结果以该 clone 的交付记录及产物清单为准。
 下文的版本和机器状态为 2026-10-30 历史记录，不能据此推断当前已发布版本或凭据状态。
 
-核对日期：2026-10-30。当前正式包为 `v1.3.1`，使用 ad-hoc 签名，尚未公证。本文是 Developer ID 分发准备说明，不表示现有附件已重新签名或通过 Apple 公证。
+核对日期：2026-11-02。`v1.3.6-rc.2`（build `20261102.2.1`）已以 Developer ID 签名，应用与 DMG 均完成 Apple 公证、加票与 Gatekeeper 验证。`v1.3.5` 仍为正式版，旧 ad-hoc 附件未被替换。详见[RC2 发布说明](releases/1.3.6-rc.2.md)。
 
 ## 版本命名
 
-本次正式发布统一使用 `1.3.1`：
+历史正式版命名示例 `1.3.1` 如下；当前预览版使用 `1.3.6-rc.2`，其实际已签名产物以 [RC2 说明](releases/1.3.6-rc.2.md)和构建清单为准：
 
 | 位置 | 名称 |
 | --- | --- |
@@ -33,7 +33,7 @@
 - 有效的 Apple Developer Program 会员资格。Apple 公布的标准年费为 99 USD，地区价格以注册页面为准；是否购买由账号持有人决定。
 - 带对应私钥的 **Developer ID Application** 证书，用于应用、helper 和 DMG。Apple Development、ad-hoc 及 Mac App Store 分发证书不能替代它。
 - Apple 公证服务的认证凭据，通过本机钥匙串配置或受保护的 CI secret 提供，不放进源码、普通日志、Release 附件或聊天。
-- `codesign`、`notarytool` 和 `stapler`。本机已具备工具，但只读检查返回 `0 valid identities found`；这不代表账号持有人一定没有开发者会员。
+- `codesign`、`notarytool` 和 `stapler`。本机现已具备工具与有效的 Developer ID 身份；构建、身份与票据仍须逐包核验。
 
 直接分发 DMG 无需上架 Mac App Store，也不需要为此申请 Developer ID Installer；后者用于 PKG。
 
@@ -53,9 +53,9 @@ CI 可以使用临时钥匙串，凭据由 GitHub Secrets 提供，任务结束�
 
 ## 当前采用的路径
 
-现有包继续采用用户逐应用授权，操作见 [INSTALL.md](INSTALL.md)。不关闭 Gatekeeper、不降低系统保护，不提供批量移除隔离属性的一键脚本。若具备可用 Developer ID，再执行以上流程发布新版本；若继续使用用户逐应用授权，正式版也必须如实标明未公证，不能仅凭版本后缀改变签名状态。
+新预览版采用 Developer ID＋Hardened Runtime＋安全时间戳＋应用与 DMG 公证；签名私钥和公证认证仅留本机受保护钥匙串，未放入仓库或 CI。旧发布附件保留其原签名状态。公证与钥匙串访问控制是不同层次；RC1 与修订 RC2 GUI 的 designated requirement 相同，但真实 ACL 继承不以该比较代替验收。
 
-CC Switch 的公开发布流程也执行 Developer ID 签名、应用和 DMG 公证、staple 及 Gatekeeper 验证；我们可以借鉴顺序，原生 Swift 项目不需要引入它的 Tauri 构建链或运行时权限。
+不关闭 Gatekeeper，不批量清除隔离属性。完整已签名包不混入旧 ad-hoc helper，也不在签名后 strip、修改 Info.plist 或重签。已有独立守卫升级时须保留有效运行路径，不能直接删除承载组件的旧目录。
 
 ## 一手资料
 
