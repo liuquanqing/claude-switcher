@@ -6,6 +6,10 @@ import SwitcherCore
 /// Never seed a second directory with the current refresh token: existing CLI
 /// tasks and the helper must participate in the same native lock.
 enum OfficialCLICurrentRenewal {
+    // --permission-prompts none controls CLI tool approval, not SecurityAgent.
+    // Do not advertise a silent native path until the official runtime offers
+    // an enforceable contract which can be validated without real accounts.
+    static let guaranteesNoSystemPrompt = false
     static let arguments = ["-p", "/usage", "--output-format", "json", "--tools", "", "--strict-mcp-config",
                             "--mcp-config", "{\"mcpServers\":{}}", "--setting-sources", "",
                             "--no-session-persistence", "--permission-prompts", "none"]

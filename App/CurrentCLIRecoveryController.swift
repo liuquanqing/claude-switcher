@@ -47,6 +47,26 @@ import SwitcherCore
                 && DesktopModeInspector.read(support: support) == scope
                 && self.cliConfiguration().allowsSubscriptionMutation
         }
+        let gate = suppliedGate ?? { await self.protection.preflight(target: .cli).allowed }
+        // Hold the UI's own operation slot before an interactive Keychain read.
+        // In particular, a user approving recovery does not bypass its region gate.
+        if manual {
+            currentCLIRecoveryRunning = true;busy = "检查恢复网络…"
+            guard await gate() else {
+                busy=nil;currentCLIRecoveryRunning=false
+                let message = "网络检查未通过，暂不请求授权或恢复登录。"
+                clearCurrentCLIRecoveryNotice();currentCLIRecoveryMessage=message
+                currentCLIRecoveryOutcome = .retryLater
+                if banner == nil { banner=message }
+                return .retryLater
+            }
+            guard (try? context()) == true else {
+                busy=nil;currentCLIRecoveryRunning=false
+                resetCurrentCLIRecoveryObservation();invalidateCLIStatus()
+                return .contextChanged
+            }
+        }
+        defer { if manual { busy=nil } }
         let io = provided ?? NativeCLIStorage(allowInteraction: manual, secretWriter: { service, account, data in
             guard let data else { throw SafetyError("当前登录恢复不删除原生登录。") }
             try KeychainWriteAccess.backup(service: service, account: account, data: data, allowInteraction: manual)
@@ -84,10 +104,14 @@ import SwitcherCore
             let clock: () -> Date = isDemo ? { now } : Date.init
             let outcome = try await CLICurrentRecovery.run(target: .init(name: name, identity: identity), io: io, now: clock,
                 finishPendingBackup: pending, requestNativeCheck: requestNativeCheck, contextIsCurrent: context,
-                gate: suppliedGate ?? { await self.protection.preflight(target: .cli).allowed },
+                gate: gate,
                 native: {
                     // Use the same consent gate for fixtures and production.
-                    guard manual || self.allowBackgroundCLIRenewal else { return .authorizationRequired }
+                    let silentCapability = suppliedNative != nil || OfficialCLICurrentRenewal.guaranteesNoSystemPrompt
+                    guard CLIRenewalInteractionPolicy.mayStartNative(userInitiated:manual,
+                        backgroundEnabled:self.allowBackgroundCLIRenewal,guaranteesNoSystemPrompt:silentCapability) else {
+                        return .authorizationRequired
+                    }
                     if let suppliedNative {
                         self.currentCLIRecoveryDidRunNative = true
                         self.currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)

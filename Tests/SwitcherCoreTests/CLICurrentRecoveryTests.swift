@@ -168,4 +168,10 @@ import XCTest
             contextIsCurrent:{true},gate:{true},native:{.loginRequired},verify:{_ in XCTFail("native rejection is not a verified login");return self.a})
         XCTAssertEqual(result,.needsLogin);XCTAssertTrue(io.backups.isEmpty);XCTAssertEqual(io.liveWrites,0)
     }
+    func testBackgroundRequiresARealSilentContractNotOnlyConsent() {
+        XCTAssertFalse(CLIRenewalInteractionPolicy.mayStartNative(userInitiated:false,backgroundEnabled:true,guaranteesNoSystemPrompt:false))
+        XCTAssertTrue(CLIRenewalInteractionPolicy.mayStartNative(userInitiated:false,backgroundEnabled:true,guaranteesNoSystemPrompt:true))
+        XCTAssertFalse(CLIRenewalInteractionPolicy.mayStartNative(userInitiated:false,backgroundEnabled:false,guaranteesNoSystemPrompt:true))
+        XCTAssertTrue(CLIRenewalInteractionPolicy.mayStartNative(userInitiated:true,backgroundEnabled:false,guaranteesNoSystemPrompt:false))
+    }
 }

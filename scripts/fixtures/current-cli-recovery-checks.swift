@@ -9,8 +9,10 @@ import SwitcherCore
     var backups: [String:Data] = [:]
     var liveWrites = 0
     var denyCredentialRead = false
+    var credentialReadCount = 0
     init(home: URL) { self.home = home }
     func readCredentials() throws -> Data? {
+        credentialReadCount += 1
         if denyCredentialRead { throw CLIInteractionRequired() }
         return try Data(contentsOf: home.appendingPathComponent(".claude/.credentials.json"))
     }
@@ -162,5 +164,28 @@ import SwitcherCore
     _ = failedStore.applyLocalAccountObservation(LocalAccountObservation(desktopAccountID:"fixture-other-account",fingerprint:"fixture-other"))
     require(failedStore.currentCLIRecoveryOutcome==nil && failedStore.banner==nil && failedStore.cliStatus == .unverified,
             "switching the real desktop identity does not carry the previous account's recovery failure into the new one")
+    let networkHeldStore=Store(demo:true)
+    let readsBefore=io.credentialReadCount
+    let held=await networkHeldStore.recoverCurrentCLI(manual:true,requestNativeCheck:true,io:io,context:{true},gate:{false},
+        native:{preconditionFailure("unsafe route cannot start official CLI")},verify:{_ in preconditionFailure("unsafe route cannot query identity")},now:fixtureNow)
+    require(held == .retryLater && io.credentialReadCount==readsBefore && !networkHeldStore.currentCLIRecoveryRunning && networkHeldStore.busy==nil,
+            "network rejection precedes every interactive credential read and releases the operation slot")
+    require(networkHeldStore.banner?.contains("网络检查未通过")==true && networkHeldStore.cliStatus != .needsLogin,
+            "unsafe network is explained as a network hold, not a revoked login")
+    let changedNetworkStore=Store(demo:true)
+    try old.write(to:home.appendingPathComponent(".claude/.credentials.json"))
+    var networkRounds=0
+    let afterAuthorization=await changedNetworkStore.recoverCurrentCLI(manual:true,io:io,context:{true},gate:{networkRounds += 1;return networkRounds==1},
+        native:{preconditionFailure("network lost during authorization")},verify:{_ in preconditionFailure("no identity query after route loss")},now:fixtureNow)
+    require(afterAuthorization == .retryLater && networkRounds==2 && !changedNetworkStore.currentCLIRecoveryDidRunNative,
+            "a successful pre-authorization check is never reused after authorization has had time to finish")
+    require(OfficialCLICurrentRenewal.guaranteesNoSystemPrompt == false,
+            "the current official adapter does not falsely promise control over macOS authorization UI")
+    let changedBeforeAuth=Store(demo:true)
+    let countBeforeChange=io.credentialReadCount
+    let changed=await changedBeforeAuth.recoverCurrentCLI(manual:true,io:io,context:{false},gate:{true},
+        native:{preconditionFailure("changed owner")},verify:{_ in identity},now:fixtureNow)
+    require(changed == .contextChanged && io.credentialReadCount==countBeforeChange && changedBeforeAuth.busy==nil && changedBeforeAuth.banner==nil,
+            "an account change during the initial network check is not mislabeled as a network failure and cannot request authorization")
     return checks
 }

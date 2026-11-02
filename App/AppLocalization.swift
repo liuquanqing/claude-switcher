@@ -82,6 +82,8 @@ enum AppLocalization {
     ]
 
     private static let generatedMessages = [
+        "检查恢复网络…": "Checking recovery network…",
+        "网络检查未通过，暂不请求授权或恢复登录。": "The network check did not pass. Authorization and login recovery were not started.",
         "登录存储需要系统授权，请手动刷新后重试。": "Login storage access needs system authorization. Refresh manually to continue.",
         "CLI 到期时间无法确认，未执行续期。": "The CLI expiry time is unconfirmed. Renewal was not attempted.",
         "恢复当前 CLI 登录…": "Recovering the current CLI login…",
