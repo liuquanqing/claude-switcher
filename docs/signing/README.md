@@ -1,5 +1,9 @@
 # Developer ID 独立签名预览
 
+此文记录 RC1 历史管线。RC1 固定在分支 `codex/developer-id-signing`、
+提交 `aa5f98c406c545e3bad514d3bbd8af7782a79c8a`；其最终产物保持不可变。
+当前 RC2 分支的脚本与操作范围请见 [RC2 准备说明](RC2.md)，不要照 RC1 历史路径重建或重签。
+
 本管线基于 `21a7eba19e4a61003edc6abdb51fed3fa8ace2f5`，只在独立 clone
 `claude-switcher-signing`、分支 `codex/developer-id-signing` 工作。
 目标是 `1.3.6-rc.1`，并非正式发布；不推主线、不打标签、不替换已发布附件。

@@ -10,7 +10,10 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.6-rc.1"
+RELEASE = "1.3.6-rc.2"
+BUILD = "20261102.2.0"
+CANDIDATE_COMMIT = "8be140b925528e6f93521173d385d787c3442533"
+RC1_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.1-r2"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
 APP_NAME = "Claude Switcher 签名预览.app"
 DISPLAY_NAME = "Claude Switcher 预览"
@@ -46,12 +49,20 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def pinned_team():
+    source = (ROOT / "App/UpdateSigningIdentity.swift").read_text()
+    match = re.search(r'static let team = "([A-Z0-9]{10})"', source)
+    require(match, "Cannot read public Team pin from candidate UpdateSigningIdentity.swift")
+    return match.group(1)
+
+
 def verify_preview_metadata(info):
     require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
     require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
     require(info.get("CSReleaseChannel") == "preview", "Preview channel must be explicit")
     require(info.get("CSReleaseVersion") == RELEASE, "Preview release version mismatch")
     require(info.get("CFBundleShortVersionString") == "1.3.6", "Apple numeric version mismatch")
+    require(info.get("CFBundleVersion") == BUILD, "RC2 build version mismatch")
     require(info.get("CFBundleName") == DISPLAY_NAME and info.get("CFBundleDisplayName") == DISPLAY_NAME,
             "System display names must explicitly identify the preview")
 
@@ -59,7 +70,7 @@ def verify_preview_metadata(info):
 def prepare_preview_metadata(info):
     require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
     require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
-    result = dict(info, CFBundleShortVersionString="1.3.6", CFBundleVersion="20261102.1.0",
+    result = dict(info, CFBundleShortVersionString="1.3.6", CFBundleVersion=BUILD,
                   CFBundleName=DISPLAY_NAME, CFBundleDisplayName=DISPLAY_NAME,
                   CSReleaseChannel="preview", CSReleaseVersion=RELEASE)
     verify_preview_metadata(result)
@@ -89,6 +100,7 @@ def verify_code(path, team, runtime=True):
 
 
 def verify_app(app, team, evidence):
+    require(team == pinned_team(), "Signing team differs from the update verifier's public Team pin")
     verify_preview_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
     inventory(app)
     for rel in BINARIES:
@@ -102,6 +114,17 @@ def sign(path, identity, runtime=True):
     if runtime:
         args += ["--options", "runtime"]
     run(*args, path)
+
+
+def compare_designated_requirements(previous_app, current_app):
+    def requirement(app):
+        output = run("codesign", "-d", "-r-", app)
+        lines = [line.strip() for line in output.splitlines() if line.startswith("designated => ")]
+        require(len(lines) == 1, "Cannot read GUI designated requirement")
+        return lines[0]
+    previous, current = requirement(previous_app), requirement(current_app)
+    return {"same": previous == current, "rc1": previous, "rc2": current,
+            "keychainACLInheritance": "NOT_PROVEN; no real Keychain item or ACL was read or changed"}
 
 
 def check_notary(kind, state, directory, profile):
@@ -122,7 +145,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("prepare", "sign", "submit-app", "check-app",
                                           "package", "submit-dmg", "check-dmg"))
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / (RELEASE + "-r2"))
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / RELEASE)
     parser.add_argument("--identity", help="Exact 40-character SHA-1 of a local Developer ID identity")
     parser.add_argument("--team-id", help="Personal Team ID; never select a company team")
     parser.add_argument("--profile", help="Existing local notarytool Keychain profile name; no secrets")
@@ -136,7 +159,8 @@ def main():
         require(not directory.exists(), "Output already exists; use a new directory, never overwrite evidence")
         require(not run("git", "status", "--porcelain").strip(), "Commit source changes before preparing")
         source = run("git", "rev-parse", "HEAD").strip()
-        print(run("bash", "build.sh"), end="", flush=True)
+        run("git", "merge-base", "--is-ancestor", CANDIDATE_COMMIT, source)
+        print(run("bash", "build.sh", "stage-unsigned"), end="", flush=True)
         directory.mkdir(parents=True)
         evidence.mkdir()
         run("ditto", "--norsrc", "--noextattr", ROOT / "build/Claude Switcher.app", app)
@@ -147,12 +171,15 @@ def main():
         for rel in BINARIES:
             run("strip", "-S", app / rel)
         state = dict(release=RELEASE, releaseChannel="preview", version="1.3.6", build=info["CFBundleVersion"],
-                     sourceCommit=source, architecture=run("uname", "-m").strip(),
+                     sourceCommit=source, candidateCommit=CANDIDATE_COMMIT, teamID=pinned_team(),
+                     architecture=run("uname", "-m").strip(),
                      bundleIdentifier=BUNDLE_ID, appPath=str(app), signing="NOT_RUN",
                      notarization={"app": {"status": "NOT_RUN"}, "dmg": {"status": "NOT_RUN"}},
                      staple={"app": "NOT_RUN", "dmg": "NOT_RUN"},
                      gatekeeper={"app": "NOT_RUN", "dmg": "NOT_RUN"},
-                     installation="NOT_RUN", realAccountValidation="NOT_RUN", files={}, phase="prepared")
+                     installation="NOT_RUN", realAccountValidation="NOT_RUN",
+                     designatedRequirement={"status": "NOT_RUN; wait for unlock and parent continuation"},
+                     distributionReady=False, files={}, phase="prepared")
         save(manifest, state)
     else:
         state = json.loads(manifest.read_text())
@@ -163,12 +190,14 @@ def main():
         require(state["release"] == RELEASE and state.get("releaseChannel") == "preview",
                 "Manifest preview channel/version mismatch; prepare a new output")
         require(state["appPath"] == str(app), "Output directory was moved")
+        require(state["teamID"] == pinned_team(), "Manifest team differs from candidate public Team pin")
         verify_preview_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
         phase = args.phase
         if phase == "sign":
             require(state["phase"] == "prepared", "Sign only a newly prepared app")
             require(args.identity and re.fullmatch(r"[0-9A-Fa-f]{40}", args.identity), "Use exact identity SHA-1")
             require(args.team_id and re.fullmatch(r"[A-Z0-9]{10}", args.team_id), "A 10-character personal Team ID is required")
+            require(args.team_id == pinned_team(), "Requested signing team differs from candidate public Team pin")
             identities = run("security", "find-identity", "-v", "-p", "codesigning")
             line = next((line for line in identities.splitlines() if args.identity.upper() in line.upper()), "")
             require("Developer ID Application:" in line and f"({args.team_id})" in line,
@@ -180,11 +209,18 @@ def main():
             verify_app(app, args.team_id, evidence)
             state.update(identitySHA1=args.identity.upper(), teamID=args.team_id,
                          signing="Developer ID Application; Hardened Runtime; secure timestamp", phase="signed")
+            comparison = compare_designated_requirements(RC1_DIRECTORY / APP_NAME, app)
+            save(evidence / "gui-designated-requirement-comparison.json", comparison)
+            state["designatedRequirement"] = comparison
+            save(manifest, state)
+            require(comparison["same"], "GUI designated requirement differs from RC1; stop for review")
         elif phase.startswith("submit-"):
             kind = phase.removeprefix("submit-")
             require(args.profile, "Existing local Keychain profile required")
             require(state["phase"] == ("signed" if kind == "app" else "packaged"), "Unexpected submission phase")
             require(state["notarization"][kind]["status"] == "NOT_RUN", "Submission already exists")
+            require(state["designatedRequirement"].get("same") is True,
+                    "RC1/RC2 GUI designated requirement equality must be reviewed before submission")
             verify_app(app, state["teamID"], evidence)
             if kind == "app":
                 archive = directory / "app-submission.zip"
@@ -226,6 +262,7 @@ def main():
                 state["files"] = {p.name: digest(p) for p in files}
                 (directory / "SHA256SUMS").write_text("".join(f"{h}  {n}\n" for n, h in state["files"].items()))
                 state["phase"] = "ready-for-review"
+                state["distributionReady"] = True
         elif phase == "package":
             require(state["phase"] == "app-accepted", "App must be Accepted, stapled and assessed first")
             verify_app(app, state["teamID"], evidence)

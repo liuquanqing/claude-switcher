@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 MODE="${1:-build}"
-case "$MODE" in build|install|dmg|test) ;; *) echo 'Usage: ./build.sh [build|install|dmg|test]' >&2; exit 2 ;; esac
+case "$MODE" in build|install|dmg|test|stage-unsigned) ;; *) echo 'Usage: ./build.sh [build|install|dmg|test|stage-unsigned]' >&2; exit 2 ;; esac
 if [ "$MODE" = test ]; then exec swift test; fi
 swift build -c release --product ClaudeSwitcher
 swift build -c release --product ClaudeGuard
@@ -35,10 +35,14 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST
-codesign --force -s - "$APP/Contents/Helpers/ClaudeGuard"
-codesign --force -s - "$APP/Contents/Helpers/ClaudeSessionTransfer"
-codesign --force -s - "$APP"
-codesign --verify --deep --strict "$APP"
+if [ "$MODE" != stage-unsigned ]; then
+  codesign --force -s - "$APP/Contents/Helpers/ClaudeGuard"
+  codesign --force -s - "$APP/Contents/Helpers/ClaudeSessionTransfer"
+  codesign --force -s - "$APP"
+  codesign --verify --deep --strict "$APP"
+else
+  echo 'Unsigned staging only: no codesign, certificate access, notarization or installation. Not a distribution bundle.'
+fi
 echo "Built $APP"
 if [ "$MODE" = install ]; then
   TARGET='/Applications/Claude Switcher.app'

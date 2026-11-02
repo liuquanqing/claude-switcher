@@ -3,6 +3,8 @@
 import importlib.util
 import json
 from pathlib import Path
+import plistlib
+import shutil
 import tempfile
 import sys
 import unittest
@@ -20,7 +22,8 @@ class SigningChecks(unittest.TestCase):
         self.assertEqual(info["CFBundleIdentifier"], "dev.claudeswitcher.candidate")
         self.assertEqual(info["CFBundleShortVersionString"], "1.3.6")
         self.assertEqual(info["CSReleaseChannel"], "preview")
-        self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.1")
+        self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.2")
+        self.assertEqual(info["CFBundleVersion"], "20261102.2.0")
         self.assertIn("预览", info["CFBundleDisplayName"])
         self.assertIn("预览", info["CFBundleName"])
         self.assertFalse(any(k.startswith("CSPreview") for k in info))
@@ -36,6 +39,7 @@ class SigningChecks(unittest.TestCase):
         valid = release.prepare_preview_metadata({"CFBundleIdentifier": release.BUNDLE_ID})
         for key, value in (("CSReleaseChannel", None), ("CSReleaseChannel", "stable"),
                            ("CSReleaseVersion", None), ("CSReleaseVersion", "1.3.6"),
+                           ("CSReleaseVersion", "1.3.6-rc.1"), ("CFBundleVersion", "20261102.1.0"),
                            ("CFBundleShortVersionString", "1.3.6-rc.1"),
                            ("CFBundleName", "Claude Switcher"),
                            ("CFBundleDisplayName", "Claude Switcher"),
@@ -52,12 +56,71 @@ class SigningChecks(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             app = Path(temporary)
             (app / "Contents").mkdir()
-            import plistlib
             (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": release.BUNDLE_ID}))
-            with patch.object(release, "run") as run:
+            with patch.object(release, "pinned_team", return_value="FAKE123456"), patch.object(release, "run") as run:
                 with self.assertRaisesRegex(ValueError, "Preview channel must be explicit"):
                     release.verify_app(app, "FAKE123456", app)
                 run.assert_not_called()
+
+    def test_unsigned_preparation_never_calls_security_codesign_or_notarytool(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            source = root / "build/Claude Switcher.app"
+            for rel in release.BINARIES:
+                binary = source / rel
+                binary.parent.mkdir(parents=True, exist_ok=True)
+                binary.write_bytes(bytes.fromhex("cffaedfe") + b"fictional binary")
+            (source / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": release.BUNDLE_ID}))
+            calls = []
+
+            def fake_run(*args):
+                calls.append(args)
+                if args[:2] == ("git", "status") or args[:2] == ("git", "merge-base"):
+                    return ""
+                if args[:2] == ("git", "rev-parse"):
+                    return "c" * 40
+                if args == ("bash", "build.sh", "stage-unsigned"):
+                    return "Unsigned fixture staging only\n"
+                if args[0] == "ditto":
+                    shutil.copytree(args[-2], args[-1])
+                    return ""
+                if args[0] == "strip":
+                    return ""
+                if args == ("uname", "-m"):
+                    return "arm64"
+                self.fail(f"Unexpected offline command: {args}")
+
+            with patch.object(release, "ROOT", root), patch.object(release, "pinned_team", return_value="FAKE123456"), \
+                 patch.object(release, "run", side_effect=fake_run), patch.object(sys, "argv", ["release", "prepare"]):
+                release.main()
+            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.2/RELEASE-MANIFEST.json").read_text())
+            self.assertEqual(manifest["release"], "1.3.6-rc.2")
+            self.assertEqual(manifest["candidateCommit"], "8be140b925528e6f93521173d385d787c3442533")
+            self.assertEqual(manifest["signing"], "NOT_RUN")
+            self.assertEqual(manifest["phase"], "prepared")
+            self.assertFalse(manifest["distributionReady"])
+            self.assertFalse(any(c[0] in ("security", "codesign", "xcrun") for c in calls))
+
+    def test_wrong_public_team_stops_before_any_signature_access(self):
+        with patch.object(release, "pinned_team", return_value="FAKE123456"), patch.object(release, "run") as run:
+            with self.assertRaisesRegex(ValueError, "public Team pin"):
+                release.verify_app(Path("fictional"), "OTHER12345", Path("fictional"))
+            run.assert_not_called()
+
+    def test_gui_requirement_comparison_ignores_executable_path(self):
+        requirement = 'designated => identifier "fictional.app" and anchor apple generic'
+        with patch.object(release, "run", side_effect=["Executable=/old/app\n" + requirement,
+                                                      "Executable=/new/app\n" + requirement]):
+            result = release.compare_designated_requirements(Path("old"), Path("new"))
+        self.assertTrue(result["same"])
+        self.assertTrue(result["keychainACLInheritance"].startswith("NOT_PROVEN"))
+
+    def test_gui_requirement_mismatch_or_missing_evidence_is_not_inheritance_proof(self):
+        with patch.object(release, "run", side_effect=['designated => identifier "old"', 'designated => identifier "new"']):
+            self.assertFalse(release.compare_designated_requirements(Path("old"), Path("new"))["same"])
+        with patch.object(release, "run", return_value="no designated requirement"):
+            with self.assertRaisesRegex(ValueError, "Cannot read GUI"):
+                release.compare_designated_requirements(Path("old"), Path("new"))
 
     def test_inventory_requires_all_three_components(self):
         with tempfile.TemporaryDirectory() as temporary:
