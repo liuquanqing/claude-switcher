@@ -27,6 +27,7 @@ import SwitcherCore
         context suppliedContext: (() throws -> Bool)? = nil,
         gate suppliedGate: (() async -> Bool)? = nil,
         native suppliedNative: (() async throws -> CLINativeRenewalOutcome)? = nil,
+        nativeIsSilent suppliedSilentCapability: Bool? = nil,
         verify suppliedVerify: ((String) async throws -> CLIIdentity)? = nil,
         now: Date = Date()) async -> CLICurrentRecoveryOutcome {
         guard !isDemo || (provided != nil && suppliedContext != nil && suppliedGate != nil && suppliedNative != nil && suppliedVerify != nil) else { return .unsupported }
@@ -93,7 +94,16 @@ import SwitcherCore
             let pending = changedNativeLogin || (currentCLIBackupPending.map { $0.name == name && $0.identity?.samePrincipal(as: identity) == true } ?? false)
             let due = try CLICurrentRecovery.isDue(before, now: now)
             guard pending || requestNativeCheck || due else {
+                if cliRecoveryNeedsAttention && !changedNativeLogin { return currentCLIRecoveryOutcome ?? .notNeeded }
                 clearCurrentCLIRecoveryNotice(); currentCLIRecoveryOutcome = nil
+                return .notNeeded
+            }
+            let silentCapability = suppliedSilentCapability ?? (suppliedNative != nil || OfficialCLICurrentRenewal.guaranteesNoSystemPrompt)
+            if !manual && !pending && !cliRecoveryNeedsAttention && before.usableAccessToken(now: now) != nil
+                && !CLIRenewalInteractionPolicy.mayStartNative(userInitiated:false,
+                    backgroundEnabled:allowBackgroundCLIRenewal,guaranteesNoSystemPrompt:silentCapability) {
+                // A healthy, merely near-expiry login normally refreshes in the
+                // user's existing CLI. Do not manufacture an authorization warning.
                 return .notNeeded
             }
             guard currentCLIRenewalPolicy.begin(version: before.digest, now: now, manual: manual) else {
@@ -107,7 +117,6 @@ import SwitcherCore
                 gate: gate,
                 native: {
                     // Use the same consent gate for fixtures and production.
-                    let silentCapability = suppliedNative != nil || OfficialCLICurrentRenewal.guaranteesNoSystemPrompt
                     guard CLIRenewalInteractionPolicy.mayStartNative(userInitiated:manual,
                         backgroundEnabled:self.allowBackgroundCLIRenewal,guaranteesNoSystemPrompt:silentCapability) else {
                         return .authorizationRequired

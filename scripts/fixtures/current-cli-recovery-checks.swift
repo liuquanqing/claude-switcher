@@ -187,5 +187,17 @@ import SwitcherCore
         native:{preconditionFailure("changed owner")},verify:{_ in identity},now:fixtureNow)
     require(changed == .contextChanged && io.credentialReadCount==countBeforeChange && changedBeforeAuth.busy==nil && changedBeforeAuth.banner==nil,
             "an account change during the initial network check is not mislabeled as a network failure and cannot request authorization")
+    let notExpiredFailure=Store(demo:true)
+    try new.write(to:home.appendingPathComponent(".claude/.credentials.json"))
+    _ = await notExpiredFailure.recoverCurrentCLI(manual:true,requestNativeCheck:true,io:io,context:{true},gate:{true},native:{.loginRequired},verify:{_ in identity},now:fixtureNow)
+    let retained=await notExpiredFailure.recoverCurrentCLI(io:io,context:{true},gate:{preconditionFailure("unchanged rejected login")},native:{preconditionFailure("paused login")},verify:{_ in identity},now:fixtureNow.addingTimeInterval(61))
+    require(retained == .needsLogin && notExpiredFailure.cliStatus == .needsLogin,
+            "a future local timestamp cannot clear the official CLI's explicit login rejection on the next automatic tick")
+    let nearExpiry=Store(demo:true)
+    nearExpiry.setBackgroundCLIRenewalPermission(true)
+    try data(token:"fixture-near",seconds:120).write(to:home.appendingPathComponent(".claude/.credentials.json"))
+    let quietlyWait=await nearExpiry.recoverCurrentCLI(io:io,context:{true},gate:{preconditionFailure("no near-expiry warning needs a network probe")},native:{preconditionFailure("no silent capability")},nativeIsSilent:false,verify:{_ in identity},now:fixtureNow)
+    require(quietlyWait == .notNeeded && nearExpiry.banner==nil && nearExpiry.cliStatus == .matched,
+            "a usable near-expiry login does not generate a false recovery warning while ordinary CLI sessions can still renew it")
     return checks
 }
