@@ -59,6 +59,22 @@ struct QuietUsageContext: Equatable {
 }
 
 @MainActor extension Store {
+    /// A freshly recovered/verified CLI can supply quota for the same desktop
+    /// principal even when the desktop token cache has not caught up yet.
+    /// Metadata or an email alone is never proof of token ownership.
+    func verifiedQuietCLILogin(matching identity: CLIIdentity, io provided: CLICredentialIO? = nil) throws -> (CLIIdentity, String)? {
+        guard !isDemo || provided != nil else { throw SafetyError("演示模式不读取真实登录。") }
+        guard isDemo || cliConfiguration().allowsSubscriptionMutation,
+              cliStatus == .matched || cliStandaloneVerified,
+              let proof = currentCLIObservedLogin, proof.name == current,
+              proof.identity.samePrincipal(as: identity), cliObservedIdentity?.samePrincipal(as: identity) == true else { return nil }
+        let io = provided ?? NativeCLIStorage(allowInteraction: false)
+        let login = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
+        guard login.digest == proof.version, let actual = try login.identity,
+              actual.samePrincipal(as: identity), let access = login.usableAccessToken(now: Date()) else { return nil }
+        return (actual, access)
+    }
+
     func quietUsageContext() async throws -> QuietUsageContext {
         let name = current
         let scope = protection.desktopScope
@@ -69,6 +85,11 @@ struct QuietUsageContext: Equatable {
         let access: String
         switch scope {
         case .subscription:
+            if let expected = active?.snapshot?.identity, expected.isComplete,
+               let verified = try? verifiedQuietCLILogin(matching: expected) {
+                identity = verified.0; access = verified.1
+                break
+            }
             let desktop = try await profileDescriptor(name, allowInteraction: false)
             guard let confirmed = desktop.identity, confirmed.isComplete,
                   let value = try await token(for: profileDir(name), allowInteraction: false),
@@ -79,12 +100,11 @@ struct QuietUsageContext: Equatable {
         case .api:
             // API mode still shows subscription quota, never the API provider's balance.
             guard cliConfiguration().allowsSubscriptionMutation else { throw SafetyError("默认 CLI 不是订阅登录，保留原额度。") }
-            let io = NativeCLIStorage(allowInteraction: false)
-            let login = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
-            guard let confirmed = try login.identity, confirmed.isComplete, let value = login.usableAccessToken(now: Date()) else {
+            guard let expected = active?.snapshot?.identity,
+                  let verified = try verifiedQuietCLILogin(matching: expected) else {
                 throw SafetyError("默认 CLI 订阅登录尚未就绪，保留原额度。")
             }
-            identity = confirmed; access = value
+            identity = verified.0; access = verified.1
         case .unknown: throw SafetyError("当前模式尚未确认，未查询额度。")
         }
         guard current == name, try confirmedCurrentProfile() == name,

@@ -72,6 +72,9 @@ import SwitcherCore
             guard let data else { throw SafetyError("当前登录恢复不删除原生登录。") }
             try KeychainWriteAccess.backup(service: service, account: account, data: data, allowInteraction: manual)
         })
+        defer {
+            if manual, let native = io as? NativeCLIStorage { lastRefreshDiagnostics?.credentialReads = native.readSummary }
+        }
         func owned() throws -> CLIOwnedLogin {
             try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
         }
@@ -91,12 +94,47 @@ import SwitcherCore
                 $0.name == name && $0.identity.samePrincipal(as: identity) && $0.version != before.digest
             } ?? false
             currentCLIObservedLogin = (name, identity, before.digest)
+            if changedNativeLogin {
+                usageRefreshPolicy.credentialsChanged(profile: name)
+                usageCatchUpPending = true
+                currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
+            }
             let pending = changedNativeLogin || (currentCLIBackupPending.map { $0.name == name && $0.identity?.samePrincipal(as: identity) == true } ?? false)
             let due = try CLICurrentRecovery.isDue(before, now: now)
-            guard pending || requestNativeCheck || due else {
-                if cliRecoveryNeedsAttention && !changedNativeLogin { return currentCLIRecoveryOutcome ?? .notNeeded }
-                clearCurrentCLIRecoveryNotice(); currentCLIRecoveryOutcome = nil
-                return .notNeeded
+            var forceNativeCheck = requestNativeCheck
+            if !pending && !forceNativeCheck && !due {
+                if cliRecoveryNeedsAttention && currentCLIRecoveryOutcome != .retryLater && currentCLIRecoveryOutcome != .authorizationRequired && !changedNativeLogin {
+                    return currentCLIRecoveryOutcome ?? .notNeeded
+                }
+                // A read-only cold-start verification is independent of renewal.
+                // A temporary profile/route failure must be allowed to recover
+                // next tick instead of freezing a healthy login in retryLater.
+                if manual || cliStatus == .unverified && !cliStandaloneVerified || cliStatus == .reported || currentCLIRecoveryOutcome == .retryLater || currentCLIRecoveryOutcome == .authorizationRequired {
+                    guard let access = before.usableAccessToken(now: now), await gate(), try context() else {
+                        return currentCLIRecoveryOutcome ?? .notNeeded
+                    }
+                    do {
+                        let actual = try await (suppliedVerify ?? { CLIIdentity.profile(try await getJSON("profile", $0)) })(access)
+                        guard actual.isComplete, actual.samePrincipal(as: identity), try context(), try owned() == before else { return .contextChanged }
+                        cliObservedIdentity = actual;cliProfile = name;cliEmail = actual.email
+                        cliStatus = scope == .subscription ? .matched : .unverified
+                        cliStandaloneVerified = scope != .subscription;cliStatusCheckedAt = now;cliStatusDetail = nil
+                    } catch let failure as ProfileHTTPFailure where failure.needsNativeConfirmation {
+                        cliStatus = .unverified;cliStandaloneVerified = false;cliStatusCheckedAt = nil
+                        if manual {forceNativeCheck = true}
+                        else {
+                            publishCurrentCLIRecovery(.authorizationRequired, profile: name, identity: identity, now: now)
+                            return .authorizationRequired
+                        }
+                    } catch is CLIInteractionRequired {
+                        publishCurrentCLIRecovery(.authorizationRequired, profile: name, identity: identity, now: now)
+                        return .authorizationRequired
+                    } catch { return currentCLIRecoveryOutcome ?? .notNeeded }
+                }
+                if !forceNativeCheck {
+                    clearCurrentCLIRecoveryNotice();currentCLIRecoveryOutcome = nil
+                    return .notNeeded
+                }
             }
             let silentCapability = suppliedSilentCapability ?? (suppliedNative != nil || OfficialCLICurrentRenewal.guaranteesNoSystemPrompt)
             if !manual && !pending && !cliRecoveryNeedsAttention && before.usableAccessToken(now: now) != nil
@@ -112,8 +150,8 @@ import SwitcherCore
             busy = "恢复当前 CLI 登录…"
             defer { busy = nil }
             let clock: () -> Date = isDemo ? { now } : Date.init
-            let outcome = try await CLICurrentRecovery.run(target: .init(name: name, identity: identity), io: io, now: clock,
-                finishPendingBackup: pending, requestNativeCheck: requestNativeCheck, contextIsCurrent: context,
+            var outcome = try await CLICurrentRecovery.run(target: .init(name: name, identity: identity), io: io, now: clock,
+                finishPendingBackup: pending, requestNativeCheck: forceNativeCheck, contextIsCurrent: context,
                 gate: gate,
                 native: {
                     // Use the same consent gate for fixtures and production.
@@ -121,17 +159,29 @@ import SwitcherCore
                         backgroundEnabled:self.allowBackgroundCLIRenewal,guaranteesNoSystemPrompt:silentCapability) else {
                         return .authorizationRequired
                     }
+                    guard self.usageRefreshPolicy.permitsExplicitRequest(profile: name, now: Date()) else { return .temporaryFailure }
                     if let suppliedNative {
                         self.currentCLIRecoveryDidRunNative = true
+                        if manual { self.lastRefreshDiagnostics?.nativeHelperRuns += 1 }
                         self.currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
                         return try await suppliedNative()
                     }
                     // Explicit consent is separate from the app's permission to
                     // read a keychain item: a native subprocess may ask macOS UI.
                     self.currentCLIRecoveryDidRunNative = true
+                    if manual { self.lastRefreshDiagnostics?.nativeHelperRuns += 1 }
                     self.currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
                     return try await OfficialCLICurrentRenewal.run(home: FileManager.default.homeDirectoryForCurrentUser)
                 }, verify: suppliedVerify ?? { CLIIdentity.profile(try await getJSON("profile", $0)) })
+            // Native success can leave the same token in place. It is positive
+            // evidence worth verifying, unlike a passive metadata tick; finish
+            // verification/backup without invoking the native helper again.
+            if outcome == .notNeeded && currentCLIRecoveryDidRunNative {
+                outcome = try await CLICurrentRecovery.run(target: .init(name: name, identity: identity), io: io, now: clock,
+                    finishPendingBackup: true, contextIsCurrent: context, gate: gate,
+                    native: { .temporaryFailure },
+                    verify: suppliedVerify ?? { CLIIdentity.profile(try await getJSON("profile", $0)) })
+            }
             let after = try? owned()
             if let after, try after.identity?.samePrincipal(as: identity) == true { currentCLIObservedLogin = (name, identity, after.digest) }
             currentCLIRenewalPolicy.finish(outcome, version: after?.digest ?? before.digest, now: clock())
@@ -139,6 +189,9 @@ import SwitcherCore
                 currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
             } else if outcome == .renewed || outcome == .contextChanged || outcome == .needsLogin || outcome == .notNeeded { currentCLIBackupPending = nil }
             else if after == before && !pending { currentCLIBackupPending = nil }
+            if outcome == .renewed {
+                usageRefreshPolicy.credentialsChanged(profile: name); usageCatchUpPending = true
+            }
             if outcome == .contextChanged {
                 clearCurrentCLIRecoveryNotice();currentCLIRecoveryOutcome = nil;invalidateCLIStatus()
             } else if try context(), after.map({ (try? $0.identity?.samePrincipal(as: identity)) == true
@@ -158,11 +211,10 @@ import SwitcherCore
         }
     }
 
-    /// Prime/repair the new default login before the existing post-switch quota
-    /// read; a successful native renewal is not followed by a second native run.
     func refreshAfterLinkedCLIOperation() async {
-        let recovery = await recoverCurrentCLI(manual: true)
-        await refresh(allowInteraction: recovery == .notNeeded)
+        usageRefreshPolicy.credentialsChanged(profile: current)
+        usageCatchUpPending = true
+        await refreshAllStatuses()
     }
 
     func clearCurrentCLIRecoveryNotice() {
@@ -180,7 +232,7 @@ import SwitcherCore
             cliStatus = protection.desktopScope == .subscription ? .matched : .unverified
             cliStandaloneVerified = protection.desktopScope != .subscription
             cliStatusCheckedAt = now
-            cliStatusDetail = "当前默认 CLI 登录已由官方程序恢复，身份已核验，备份已更新。"
+            cliStatusDetail = currentCLIRecoveryDidRunNative ? "当前默认 CLI 登录已由官方程序恢复，身份已核验，备份已更新。" : nil
             clearCurrentCLIRecoveryNotice(); return
         case .needsLogin:
             cliStatus = .needsLogin
@@ -189,7 +241,9 @@ import SwitcherCore
             cliStatus = .refreshNeeded
             message = "CLI 登录恢复需要授权，请点击底部刷新；不会切换账号。"
         case .backupPending:
-            cliStatus = .refreshNeeded
+            // Online identity already passed. A backup permission failure is
+            // not a failed login and must not prevent same-account quota reads.
+            cliStatus = protection.desktopScope == .subscription ? .matched : .unverified
             message = "CLI 登录已恢复，但备份尚未保存；请手动刷新完成授权与备份。"
         case .verificationPending:
             cliStatus = .refreshNeeded
@@ -204,7 +258,7 @@ import SwitcherCore
             invalidateCLIStatus(); return
         case .notNeeded: clearCurrentCLIRecoveryNotice(); return
         }
-        cliStandaloneVerified = false
+        cliStandaloneVerified = outcome == .backupPending && protection.desktopScope != .subscription
         cliStatusDetail = message; cliStatusCheckedAt = now
         if previous != outcome {
             clearCurrentCLIRecoveryNotice(); currentCLIRecoveryMessage = message

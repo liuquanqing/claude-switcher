@@ -9,14 +9,34 @@ import SwitcherCore
     private let writeSecret: (String, String, Data?) throws -> Void
     private let credentials: CLIStoredCredentialRouter
     private let backupPresence: (String, String) throws -> Bool
+    private let audit: CredentialReadAudit
+    var readSummary: [CredentialReadSummary] { audit.summary }
     init(identity: URL = claudeJSON, marker: URL = cliCurrentFile, allowInteraction: Bool = true,
          credentialFile: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/.credentials.json"),
          secretReader: ((String, String) throws -> Data?)? = nil,
-         secretWriter: ((String, String, Data?) throws -> Void)? = nil) {
+         secretWriter: ((String, String, Data?) throws -> Void)? = nil,
+         interactionReader: ((String, String, Bool) throws -> Data?)? = nil) {
         identityURL = identity; markerURL = marker
-        let reader = secretReader ?? { service, account in try readKeychain(service: service, account: account, allowInteraction: allowInteraction).map(CLIJSON.encode) }
+        let audit = CredentialReadAudit(); self.audit = audit
+        let accessReader = interactionReader ?? { service, account, interaction in
+            try readKeychain(service: service, account: account, allowInteraction: interaction).map(CLIJSON.encode)
+        }
+        var interactionAttempted = Set<String>()
+        let reader = secretReader ?? { service, account in
+            // Fresh comparisons still read the real store. Only the first read
+            // of each object in this operation may solicit system UI.
+            let mayAsk = allowInteraction && interactionAttempted.insert(service + "\u{0}" + account).inserted
+            do {
+                let data = try accessReader(service, account, mayAsk)
+                audit.record(service: service, interactive: mayAsk, result: .success(data))
+                return data
+            } catch {
+                audit.record(service: service, interactive: mayAsk, result: .failure(error))
+                throw error
+            }
+        }
         let writer = secretWriter ?? Self.writeNativeSecret
-        backupPresence = secretReader == nil
+        backupPresence = secretReader == nil && interactionReader == nil
             ? { service, account in try KeychainReadAccess.contains(service: service, account: account) }
             : { service, account in try reader(service, account) != nil }
         readSecret = reader; writeSecret = writer

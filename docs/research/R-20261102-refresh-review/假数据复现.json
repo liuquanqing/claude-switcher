@@ -1,0 +1,35 @@
+{
+  "fictionalDataOnly": true,
+  "realKeychainRead": false,
+  "realLoginOrGuardOperation": false,
+  "reproducedFindings": [
+    {
+      "id": "CLI-COLD-STATUS",
+      "nativeCalls": 0,
+      "observed": "Healthy saved identity remains unverified after background metadata and recovery"
+    },
+    {
+      "credentialFileChanged": true,
+      "id": "SAME-ACCOUNT-ROTATION",
+      "localIdentityFingerprintChanged": false
+    },
+    {
+      "id": "LOGIN-COOLDOWN",
+      "identityChangeRequestedAtSeconds": 61,
+      "ordinaryFailureBackoffSeconds": 300,
+      "quotaRequestAllowed": false
+    },
+    {
+      "cacheReadAgeSeconds": 1200,
+      "cliDisplay": "matched",
+      "id": "RECOVERY-STALE-USAGE",
+      "nativeRecovery": "renewed",
+      "nativeUsageCacheWrittenByFixture": false
+    }
+  ],
+  "scope": "component reproduction plus source control-flow review; not end-to-end live acceptance",
+  "verifiedSourceCommit": "d6cb36ffc14e994a1ac6a3b89fe0773bac0fb02f",
+  "applicationSourcesChangedInAudit": false,
+  "diagnosticSourceSHA256": "b6f5dd4b4e6c7b58b53aee6bd266756052c2ada449671c7963917a38756eecd9",
+  "standaloneRebuild": "PASS; freshly compiled SwitcherCore and application declarations; four findings reproduced"
+}

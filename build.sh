@@ -22,13 +22,15 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleName</key><string>Claude Switcher</string>
-<key>CFBundleDisplayName</key><string>Claude Switcher</string>
+<key>CFBundleDisplayName</key><string>Claude Switcher 预览</string>
 <key>CFBundleIdentifier</key><string>dev.claudeswitcher.candidate</string>
 <key>CFBundleExecutable</key><string>ClaudeSwitcher</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleShortVersionString</key><string>1.3.5</string>
-<key>CFBundleVersion</key><string>20261101.18.0</string>
+<key>CFBundleShortVersionString</key><string>1.3.6</string>
+<key>CFBundleVersion</key><string>20261102.2.0</string>
+<key>CSReleaseVersion</key><string>1.3.6-rc.2</string>
+<key>CSReleaseChannel</key><string>preview</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 </dict></plist>

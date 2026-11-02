@@ -1,0 +1,16 @@
+{
+  "release": "1.3.6-rc.2",
+  "build": "20261102.2.0",
+  "coreTests": 228,
+  "controllerChecks": 319,
+  "localBuild": "PASS; ad-hoc development bundle only",
+  "frontendAuthor": "Kimi Code CLI 2.3.0, default model configuration; exact model version not confirmed",
+  "existingNotarizedRC1PackageVerification": "PASS; read-only mount and unmount, no app launch",
+  "nativeQA": "PARTIAL; forced demo, final standard-Menu clicks blocked by locked Mac; no real login-item action",
+  "realAuthentication": "NOT_RUN",
+  "realKeychainGrantPersistence": "NOT_RUN",
+  "installedApplicationsChanged": false,
+  "guardStoppedOrChanged": false,
+  "networkFaultTest": "NOT_RUN",
+  "formalRelease": "NOT_RUN"
+}

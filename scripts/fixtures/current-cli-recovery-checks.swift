@@ -141,8 +141,8 @@ import SwitcherCore
     require(unsupportedResult == .unsupported && unsupportedStore.currentCLIBackupPending==nil,
             "an unsupported native command with unchanged credentials cannot become a pending successful renewal")
     let supportedAgain=await unsupportedStore.recoverCurrentCLI(manual:true,requestNativeCheck:true,io:io,context:{true},gate:{true},native:{nativeChecks += 1;return .completed},verify:{_ in identity},now:fixtureNow)
-    require(supportedAgain == .notNeeded && nativeChecks==2 && unsupportedStore.banner==nil,
-            "a later explicit retry rechecks the native command and clears its obsolete unsupported notice")
+    require(supportedAgain == .renewed && nativeChecks==2 && unsupportedStore.banner==nil,
+            "a later explicit native success is remotely verified and backed up before clearing the obsolete unsupported notice")
     var wrote=false
     try KeychainWriteAccess.backup(service:switcherService,account:"fixture",data:Data("fake".utf8),allowInteraction:false,update:{query,_ in
         let q=query as NSDictionary

@@ -124,7 +124,7 @@ func getJSON(_ path: String, _ tok: String) async throws -> [String: Any] {
     r.timeoutInterval = 15
     let (data, resp) = try await URLSession.shared.data(for: r)
     let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
-    guard code == 200 else { throw err(code == 401 ? "登录已过期，请在对应客户端确认登录后重试。" : "API error \(code)") }
+    guard code == 200 else { throw ProfileHTTPFailure(code: code) }
     return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
 }
 
@@ -203,6 +203,9 @@ final class Store: ObservableObject {
     var localAccountObservation: LocalAccountObservation?
     var usageRefreshPolicy = UsageRefreshPolicy()
     var automaticRefreshInProgress = false
+    @Published var statusRefreshInProgress = false
+    var usageCatchUpPending = false
+    var lastRefreshDiagnostics: RefreshDiagnostics?
     var panelIsVisible: () -> Bool = { false }
     var currentCLIRecoveryRunning = false
     var currentCLIRecoveryDidRunNative = false
@@ -401,7 +404,10 @@ final class Store: ObservableObject {
     }
 
     func refresh(allowInteraction: Bool = false) async {
-        guard !isDemo, !refreshing, busy == nil else { return }
+        guard !isDemo, !refreshing, busy == nil, !statusRefreshInProgress else { return }
+        if allowInteraction && !usageRefreshPolicy.permitsExplicitRequest(profile: current, now: Date()) {
+            usageNotice = "额度查询受限，将按服务器指定时间重试。";return
+        }
         refreshing = true
         defer { refreshing = false }
         if allowInteraction { usageRefreshPolicy.began(profile: current, now: Date()) }
@@ -428,23 +434,6 @@ final class Store: ObservableObject {
         } catch { usageNotice = error.localizedDescription }
         if allowInteraction { await refreshCLI(verify: false) }
         onChange?()
-    }
-
-    /// Explicit footer action may ask the official CLI to recover its own login;
-    /// it never switches accounts or enables protection.
-    func refreshAllStatuses() async {
-        guard busy == nil, !refreshing, !cliStatusRefreshing else { return }
-        if isDemo { await verifyDefaultCLI(); return }
-        let recovery = await recoverCurrentCLI(manual: true, requestNativeCheck: true)
-        if recovery != .notNeeded && recovery != .contextChanged || currentCLIRecoveryDidRunNative {
-            if recovery == .notNeeded { await verifyDefaultCLI() }
-            protection.refreshStatus()
-            await refresh(allowInteraction: false)
-            return
-        }
-        await verifyDefaultCLI()
-        protection.refreshStatus()
-        await refresh(allowInteraction: true)
     }
 
     /// UUID/organization matching, never display email alone, selects the card.
@@ -483,7 +472,7 @@ final class Store: ObservableObject {
     }
 
     func openProtectedClaude() async {
-        guard busy == nil else { return }
+        guard busy == nil, !statusRefreshInProgress else { return }
         banner = nil
         busy = "检查网络与地区…"
         defer { busy = nil }
@@ -506,7 +495,7 @@ final class Store: ObservableObject {
     }
 
     func switchTo(_ target: String) async {
-        guard busy == nil else { return }
+        guard busy == nil, !statusRefreshInProgress else { return }
         desktopOnlyOffer = nil
         banner = nil
         guard !refreshing else { banner = "用量正在刷新，请稍后切换账号。"; return }
@@ -623,6 +612,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         MainActor.assumeIsolated {
             store = demoMode ? Store(demo: true) : Store()
+            if !demoMode { ApplicationUpdater.shared.startAutomaticChecks() }
             store.onChange = { [weak self] in self?.updateTitle() }
             titleModeObservation = store.protection.$desktopScope.removeDuplicates().dropFirst()
                 .receive(on: RunLoop.main)
@@ -713,6 +703,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let commands = NSMenu()
         commands.addItem(withTitle: appText("menu.open", language: store.appLanguage),
                          action: #selector(showPanel), keyEquivalent: "o").target = self
+        if !demoMode || CommandLine.arguments.contains("--demo-updates") {
+            commands.addItem(withTitle: store.appLanguage == "en" ? "Check for Updates…" : "检查更新…",
+                             action: #selector(showApplicationUpdates), keyEquivalent: "").target = self
+        }
         commands.addItem(.separator())
         commands.addItem(withTitle: appText("menu.quit", language: store.appLanguage),
                          action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -811,6 +805,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func showPanel() {
         if !popover.isShown { toggle() }
         else { NSApp.activate(ignoringOtherApps: true) }
+    }
+
+    @MainActor @objc func showApplicationUpdates() {
+        ApplicationUpdateWindowController.shared.show(updater: ApplicationUpdater.shared, language: store.appLanguage)
     }
 }
 

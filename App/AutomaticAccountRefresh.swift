@@ -23,6 +23,7 @@ struct LocalAccountObservation: Equatable {
     func applyLocalAccountObservation(_ observation: LocalAccountObservation) -> Bool {
         let changed = localAccountObservation != nil && localAccountObservation != observation
         localAccountObservation = observation
+        if changed { usageRefreshPolicy.credentialsChanged(profile: current); usageCatchUpPending = true }
         if protection.desktopScope == .subscription,
            let actual = observation.desktopAccountID, let saved = active?.snapshot?.identity.accountID,
            CLIReportedStatus.sameAccountRecord(CLIIdentity(accountID: actual, organizationID: nil, email: nil),
@@ -54,7 +55,7 @@ struct LocalAccountObservation: Equatable {
     }
 
     func automaticRefresh(trigger: UsageRefreshPolicy.Trigger = .periodic, now: Date = Date()) async {
-        guard !isDemo, busy == nil, !refreshing, !cliStatusRefreshing, !automaticRefreshInProgress else { return }
+        guard !isDemo, busy == nil, !refreshing, !cliStatusRefreshing, !automaticRefreshInProgress, !statusRefreshInProgress else { return }
         automaticRefreshInProgress = true
         defer { automaticRefreshInProgress = false }
         let changed = await observeAccountMetadata()
@@ -64,12 +65,12 @@ struct LocalAccountObservation: Equatable {
         let resetDates = [snapshot?.session?.resetsAt, snapshot?.weekly?.resetsAt].compactMap { $0 }
         guard usageRefreshPolicy.shouldRequest(profile: name, sampledAt: snapshot?.fetchedAt, resetsAt: resetDates,
             active: claudeRunning || panelIsVisible() || trigger == .panel,
-            trigger: changed ? .identityChanged : trigger, now: now) else { return }
+            trigger: changed || usageCatchUpPending ? .identityChanged : trigger, now: now) else { return }
         guard busy == nil, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
         usageRefreshPolicy.began(profile: name, now: now)
-        do { try await refreshQuietUsage() }
+        do { try await refreshQuietUsage(); usageCatchUpPending = false }
         catch {
             usageRefreshPolicy.failed(profile: name, now: Date(), retryAfter: (error as? UsageHTTPFailure)?.retryAfter)
             usageNotice = error.localizedDescription

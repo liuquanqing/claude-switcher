@@ -17,7 +17,7 @@ enum OfficialCLICurrentRenewal {
     static func environment(home: URL, inherited: [String: String]) -> [String: String] {
         let allowed = ["PATH", "USER", "LOGNAME", "TMPDIR", "LANG", "LC_ALL", "LC_CTYPE",
                        "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy",
-                       "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"]
+                       "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS"]
         var result = inherited.filter { allowed.contains($0.key) }
         result["HOME"] = home.path
         result["CLAUDE_CODE_DISABLE_AUTO_MEMORY"] = "1"
@@ -49,78 +49,13 @@ enum OfficialCLICurrentRenewal {
                     timeoutSeconds: TimeInterval = 45, graceSeconds: TimeInterval = 2) async throws -> CLINativeRenewalOutcome {
         let choices = [home.appendingPathComponent(".local/bin/claude"), URL(fileURLWithPath: "/opt/homebrew/bin/claude"), URL(fileURLWithPath: "/usr/local/bin/claude")]
         guard let executable = executable ?? choices.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else { return .unsupported }
-        let version = try await command(home: home, executable: executable, arguments: ["--version"], inherited: inherited,
+        let effectiveEnvironment = environment(home: home, inherited: inherited)
+        let version = try await BoundedCLICommand.run(home: home, executable: executable, arguments: ["--version"], inherited: effectiveEnvironment,
                                         timeoutSeconds: max(1, min(timeoutSeconds, 10)), graceSeconds: graceSeconds)
         guard !version.timedOut, version.status == 0, supportsVersion(version.text) else { return .unsupported }
-        let result = try await command(home: home, executable: executable, arguments: arguments, inherited: inherited,
+        let result = try await BoundedCLICommand.run(home: home, executable: executable, arguments: arguments, inherited: effectiveEnvironment,
                                        timeoutSeconds: timeoutSeconds, graceSeconds: graceSeconds)
         return result.timedOut ? .timedOut : classify(status: result.status, text: result.text)
     }
 
-    private struct Output: Sendable { let status: Int32; let text: String; let timedOut: Bool }
-    private static func command(home: URL, executable: URL, arguments: [String], inherited: [String: String],
-                                timeoutSeconds: TimeInterval, graceSeconds: TimeInterval) async throws -> Output {
-        try await Task.detached(priority: .utility) {
-            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-current-cli-" + UUID().uuidString)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            defer { try? FileManager.default.removeItem(at: directory) }
-            let process = Process(), output = Pipe()
-            process.executableURL = executable; process.arguments = arguments
-            process.environment = environment(home: home, inherited: inherited)
-            process.currentDirectoryURL = directory
-            process.standardInput = FileHandle.nullDevice
-            process.standardOutput = output; process.standardError = output
-            let fd = output.fileHandleForReading.fileDescriptor
-            guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 else { throw SafetyError("官方 CLI 输出通道不可用。") }
-            let queue = DispatchQueue(label: "switcher.current-cli-output")
-            let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
-            // Drain on a single queue. Keep bounded diagnostic text in memory
-            // only, and return a classification rather than the raw output.
-            let capture = RenewalOutputCapture()
-            source.setEventHandler { capture.drain(fd) }
-            source.setCancelHandler { try? output.fileHandleForReading.close() }
-            source.resume()
-            return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Output, Error>) in
-                let deadline = ProcessInfo.processInfo.systemUptime + timeoutSeconds
-                let terminate = DispatchWorkItem { if process.isRunning { process.terminate() } }
-                let forceStop = DispatchWorkItem { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
-                process.terminationHandler = { child in
-                    terminate.cancel(); forceStop.cancel(); child.terminationHandler = nil
-                    queue.async {
-                        capture.drain(fd); source.cancel()
-                        let result = Output(status: child.terminationStatus, text: capture.text,
-                                            timedOut: ProcessInfo.processInfo.systemUptime >= deadline)
-                        continuation.resume(returning: result)
-                    }
-                }
-                do {
-                    try process.run()
-                    try? output.fileHandleForWriting.close()
-                    DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: terminate)
-                    DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds + graceSeconds, execute: forceStop)
-                } catch {
-                    process.terminationHandler = nil
-                    terminate.cancel(); forceStop.cancel()
-                    try? output.fileHandleForWriting.close()
-                    queue.async { source.cancel(); continuation.resume(throwing: error) }
-                }
-            }
-        }.value
-    }
-}
-
-private final class RenewalOutputCapture: @unchecked Sendable {
-    private var data = Data()
-    var text: String { String(decoding: data, as: UTF8.self) }
-    func drain(_ fd: Int32) {
-        var bytes = [UInt8](repeating: 0, count: 8192)
-        while true {
-            let count = Darwin.read(fd, &bytes, bytes.count)
-            if count > 0 {
-                data.append(contentsOf: bytes.prefix(count))
-                if data.count > 65536 { data.removeFirst(data.count - 65536) }
-            } else if count < 0 && errno == EINTR { continue }
-            else { return }
-        }
-    }
 }

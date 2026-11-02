@@ -172,7 +172,7 @@ import SwitcherCore
             return // Metadata alone cannot erase an explicit recovery failure.
         }
         let preserveCompleted = sameIdentity && sameProfile && result.status != .different
-            && (result.metadataOnly && (cliStatus == .reported || cliStatus == .matched && result.profile == current)
+            && (result.metadataOnly && (cliStandaloneVerified || cliStatus == .reported || cliStatus == .matched && result.profile == current)
                 || result.status == .reported && cliStatus == .matched && result.profile == current)
         cliObservedIdentity = result.identity
         if preserveCompleted {
@@ -322,7 +322,7 @@ import SwitcherCore
             banner = nil; cliProfile = target; cliEmail = profiles.first { $0.name == target }?.snapshot?.email
             cliStatus = cliEmail == nil ? .needsLogin : .matched; return
         }
-        guard busy == nil, !refreshing else { return }
+        guard busy == nil, !refreshing, !statusRefreshInProgress else { return }
         banner = nil; busy = "检查网络与默认 CLI 登录…"
         defer { busy = nil }
         let gate = await protection.preflight(target: .cli)

@@ -146,7 +146,7 @@ struct Header: View {
     // shortcut around the gate or around the takeover confirmation.
 
     private var running: Bool { store.claudeRunning }
-    private var controlLocked: Bool { store.busy != nil || protection.working }
+    private var controlLocked: Bool { store.busy != nil || store.statusRefreshInProgress || protection.working }
 
     private var actionTitle: String { appText(running ? "desktop.show" : "desktop.open", language: language) }
     private var actionIcon: String { running ? "macwindow" : "play.fill" }
@@ -363,7 +363,7 @@ struct TerminalStrip: View {
         return AppLocalization.message(message, language: language)
     }
 
-    private var controlsLocked: Bool { store.busy != nil || store.refreshing }
+    private var controlsLocked: Bool { store.busy != nil || store.refreshing || store.statusRefreshInProgress }
 
     /// A background check is in flight. The strip keeps showing the last finished result; only the
     /// info popover mentions the check, so periodic refreshes never reshape the card.
@@ -978,7 +978,7 @@ struct Panel: View {
                 let isSaved = p.name == store.current
                 let subscription = protection.desktopScope == .subscription
                 ProfileCard(p: p, active: isSaved && subscription, savedOnly: isSaved && !subscription,
-                            busy: store.busy != nil || store.refreshing) {
+                            busy: store.busy != nil || store.refreshing || store.statusRefreshInProgress) {
                     Task { await store.switchTo(p.name) }
                 }
             }
@@ -991,7 +991,7 @@ struct Panel: View {
             Header(store: store, protection: protection) {
                 Task { await store.openProtectedClaude() }
             }
-            TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil)
+            TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)
             if let b = store.banner {
                 HStack(spacing: 8) {
                     Label(t("banner.lastOperation", arguments: ["message": generated(b)]), systemImage: "exclamationmark.triangle.fill")
@@ -1044,8 +1044,8 @@ struct Panel: View {
                         .foregroundColor(.claude)
                         .padding(.horizontal, 9).padding(.vertical, 5)
                         .background(RoundedRectangle(cornerRadius: 6).fill(Color.claude.opacity(0.1)))
-                        .disabled(store.busy != nil || store.refreshing)
-                        .opacity(store.busy == nil && !store.refreshing ? 1 : 0.45)
+                        .disabled(store.busy != nil || store.refreshing || store.statusRefreshInProgress)
+                        .opacity(store.busy == nil && !store.refreshing && !store.statusRefreshInProgress ? 1 : 0.45)
                     }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 9)
@@ -1071,7 +1071,7 @@ struct Panel: View {
                     ProgressView().controlSize(.small)
                     Text(generated(b)).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
                         .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
-                } else if store.refreshing {
+                } else if store.refreshing || store.statusRefreshInProgress {
                     ProgressView().controlSize(.small)
                     Text(t("common.refreshing")).font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
                         .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
@@ -1098,11 +1098,7 @@ struct Panel: View {
                 FooterButton(icon: "arrow.clockwise", help: t("footer.refresh")) {
                     Task { await store.refreshAllStatuses() }
                 }
-                FooterButton(icon: store.openAtLogin ? "sunrise.fill" : "sunrise",
-                             help: t(store.openAtLogin ? "footer.loginEnabled" : "footer.loginDisabled")) {
-                    store.toggleOpenAtLogin()
-                }
-                LanguageMenu(selection: languageBinding)
+                AppSettingsMenu(store: store)
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {
                     HStack(spacing: 5) {
