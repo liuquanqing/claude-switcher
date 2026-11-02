@@ -24,6 +24,7 @@ private enum ApplicationUpdateLocalization {
             "status.downloading": "正在下载更新",
             "status.ready": "安装包已校验",
             "status.failed": "更新未完成",
+            "status.demo": "演示模式",
             "detail.idle": "检查是否有适用于此 Mac 的新版本。",
             "detail.checking": "正在获取版本信息，你可以关闭此窗口。",
             "detail.current": "Claude Switcher {version} 已是最新版本。",
@@ -33,7 +34,7 @@ private enum ApplicationUpdateLocalization {
             "detail.downloadingGeneric": "正在下载更新，关闭窗口不会取消下载。",
             "detail.ready": "版本 {version} 已下载并通过校验。",
             "detail.readyGeneric": "更新已下载并通过校验。",
-            "detail.failed": "操作没有完成，请查看原因并重试。",
+            "detail.failed": "请查看下方详情后再重试。",
             "release.prerelease": "预览版",
             "download.progress": "下载进度",
             "failure.unknown": "未提供详细原因。",
@@ -70,6 +71,7 @@ private enum ApplicationUpdateLocalization {
             "status.downloading": "Downloading update",
             "status.ready": "Installer verified",
             "status.failed": "Update not completed",
+            "status.demo": "Demo mode",
             "detail.idle": "Check for a new version for this Mac.",
             "detail.checking": "Fetching release information. You can close this window.",
             "detail.current": "Claude Switcher {version} is up to date.",
@@ -79,7 +81,7 @@ private enum ApplicationUpdateLocalization {
             "detail.downloadingGeneric": "Downloading the update. Closing this window won’t cancel the download.",
             "detail.ready": "Version {version} has been downloaded and verified.",
             "detail.readyGeneric": "The update has been downloaded and verified.",
-            "detail.failed": "The operation didn’t finish. Review the message and try again.",
+            "detail.failed": "Review the details below before trying again.",
             "release.prerelease": "Prerelease",
             "download.progress": "Download progress",
             "failure.unknown": "No details were provided.",
@@ -143,7 +145,7 @@ struct ApplicationUpdateView: View {
         case .available: return t("status.available")
         case .downloading: return t("status.downloading")
         case .ready: return t("status.ready")
-        case .failed: return t("status.failed")
+        case .failed: return isDemoLimitation ? t("status.demo") : t("status.failed")
         }
     }
 
@@ -165,7 +167,7 @@ struct ApplicationUpdateView: View {
             guard let version = release?.version else { return t("detail.readyGeneric") }
             return t("detail.ready", arguments: ["version": version])
         case .failed:
-            return t("detail.failed")
+            return isDemoLimitation ? failureMessage : t("detail.failed")
         }
     }
 
@@ -174,7 +176,7 @@ struct ApplicationUpdateView: View {
         case .idle: return .sub
         case .checking, .available, .downloading: return .claude
         case .current, .ready: return .good
-        case .failed: return .warn
+        case .failed: return isDemoLimitation ? .sub : .warn
         }
     }
 
@@ -183,7 +185,18 @@ struct ApplicationUpdateView: View {
         case .idle, .checking: return "arrow.clockwise.circle"
         case .current, .ready: return "checkmark.circle.fill"
         case .available, .downloading: return "arrow.down.circle.fill"
-        case .failed: return "exclamationmark.triangle.fill"
+        case .failed: return isDemoLimitation ? "info.circle.fill" : "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var isDemoLimitation: Bool {
+        let message = updater.message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        switch message {
+        case "演示模式不访问更新服务。", "Demo mode does not access the update service.",
+             "演示模式不下载或打开安装包。", "Demo mode does not download or open installers.":
+            return true
+        default:
+            return false
         }
     }
 
@@ -323,10 +336,10 @@ struct ApplicationUpdateView: View {
                 }
             }
 
-            if updater.phase == .failed {
+            if updater.phase == .failed, !isDemoLimitation {
                 Text(failureMessage)
                     .font(.callout)
-                    .foregroundColor(.warn)
+                    .foregroundColor(.txt)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
@@ -463,10 +476,9 @@ struct ApplicationUpdateView: View {
                                action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .foregroundColor(.bg)
         }
         .buttonStyle(.borderedProminent)
-        .tint(.claude)
+        .tint(.cardHi)
         .controlSize(.regular)
         .font(.system(.callout, weight: .semibold))
         .help(help)
