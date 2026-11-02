@@ -1,8 +1,10 @@
 import SwiftUI
+import AppKit
 
 @MainActor
 struct AppSettingsMenu: View {
     @ObservedObject var store: Store
+    let accountDirectory: URL
     @Environment(\.appLanguage) private var language
     @State private var hover = false
 
@@ -30,6 +32,10 @@ struct AppSettingsMenu: View {
 
     var body: some View {
         Menu {
+            Button(t("footer.showDirectory")) {
+                if !store.isDemo { NSWorkspace.shared.activateFileViewerSelecting([accountDirectory]) }
+            }
+            Divider()
             Button(t("settings.checkForUpdates")) {
                 ApplicationUpdateWindowController.shared.show(
                     updater: ApplicationUpdater.shared,
@@ -45,14 +51,11 @@ struct AppSettingsMenu: View {
                 }
             }
         } label: {
-            Image(systemName: "gearshape")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(hover ? .txt : .sub)
-                .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
+            FooterIcon(icon: "gearshape", hover: hover, preservesMenuColor: true)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
+        .frame(width: 28, height: 28)
         .help(t("settings.help"))
         .accessibilityLabel(t("settings.title"))
         .onHover { hover = $0 }

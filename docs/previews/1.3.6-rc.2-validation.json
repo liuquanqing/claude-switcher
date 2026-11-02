@@ -6,26 +6,50 @@
   "localBuild": "PASS; ad-hoc development bundle only",
   "frontendAuthor": "Kimi Code CLI 2.3.0, default model configuration; exact model version not confirmed",
   "existingNotarizedRC1PackageVerification": "PASS; read-only mount and unmount, no app launch",
-  "nativeQA": "PASS targeted forced-demo menu/language/demo-login-toggle/update-window-close/Esc/reopen/quit; no actual login item or authentication",
+  "nativeQA": "PASS targeted forced-demo menu/language/demo-login-toggle/update-window-close/Esc/reopen/quit; build 2.1 native Chinese color and age-only footer spot-check; real authentication NOT_RUN",
   "realAuthentication": "NOT_RUN",
   "realKeychainGrantPersistence": "NOT_RUN",
   "installedApplicationsChanged": false,
   "guardStoppedOrChanged": false,
   "networkFaultTest": "NOT_RUN",
   "formalRelease": "NOT_RUN",
-  "codeCommit": "8be140b925528e6f93521173d385d787c3442533",
+  "codeCommit": "f54b1a703c20fc686fb617aa566f92b810bada06",
   "cloudCI": {
+    "conclusion": "success",
+    "head_sha": "f54b1a703c20fc686fb617aa566f92b810bada06",
+    "html_url": "https://github.com/liuquanqing/claude-switcher/actions/runs/41463477582",
+    "id": 41463477582,
+    "status": "completed"
+  },
+  "signingPreparation": {
+    "status": "COMPLETE; revised build 20261102.2.1 independently verified; NOT INSTALLED",
+    "signedSourceCommit": "49dfa8b65c89cb77292e52e8e0b39822bec00c68",
+    "parentCodeCommit": "f54b1a703c20fc686fb617aa566f92b810bada06",
+    "developerID": true,
+    "notarizationApp": "Accepted",
+    "notarizationDMG": "Accepted",
+    "stapleAndGatekeeper": "PASS app and final packages",
+    "parentIndependentVerification": "PASS source parity, app, ZIP extraction, DMG read-only verifier and hashes",
+    "designatedRequirementMatchesRC1": true,
+    "actualKeychainACLInheritance": "NOT_PROVEN",
+    "packages": [
+      {
+        "name": "ClaudeSwitcher-1.3.6-rc.2-arm64-developer-id-preview.zip",
+        "sha256": "e81a6aca5f954aeceb7cfb9b479da9444dcd095ac5744d7e0fd8ce53da9d2012"
+      },
+      {
+        "name": "ClaudeSwitcher-1.3.6-rc.2-arm64-developer-id-preview.dmg",
+        "sha256": "63afd5901db11fbd373328d3e8d39888b76ecf781904b8a608ddd80f4cc24355"
+      }
+    ]
+  },
+  "colorRevision": "User rejected native orange/brown build 2.0; Kimi neutral cardHi primary verified by Chinese native spot-check in build 2.1",
+  "cloudCIForUIRevision": "PASS; exact f54b1a7 source",
+  "previousCloudCI": {
     "conclusion": "success",
     "head_sha": "8be140b925528e6f93521173d385d787c3442533",
     "html_url": "https://github.com/liuquanqing/claude-switcher/actions/runs/41452017113",
     "id": 41452017113,
     "status": "completed"
-  },
-  "signingPreparation": {
-    "sourceCommit": "d0379882259b9fde4ff8c34284247bdea2737a87",
-    "pipelineChecks": 15,
-    "status": "SUPERSEDED pending new exact UI revision source; not installable"
-  },
-  "colorRevision": "User rejected native orange/brown build 2.0; Kimi neutral cardHi primary verified by Chinese native spot-check in build 2.1",
-  "cloudCIForUIRevision": "PENDING; previous 8be140b result remains historical"
+  }
 }
