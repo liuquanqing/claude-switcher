@@ -64,11 +64,14 @@ final class SessionTransferTests: FixtureTest {
     }
     func testUpdatePreservesTargetTitleUnknownFieldsAndConnections() throws {
         try index(); let file = try index(turns: 10, time: 1000, space: target, extras: ["title": "目标自己改的标题", "newUnknown": 42, "remoteMcpServersConfig": ["target-only"]])
-        let before = try bytes(file, in: target), receipt = try service.execute(plan(updates: true))
+        let updatePlan = try plan(updates: true)
+        XCTAssertEqual(updatePlan.changes.first?.title, "目标自己改的标题", "The pre-write confirmation names the actual destination session")
+        let before = try bytes(file, in: target), receipt = try service.execute(updatePlan)
         XCTAssertEqual(receipt.updatedCount, 1)
         let after = try Disk.json(bytes(file, in: target))
         XCTAssertEqual(after["title"] as? String, "目标自己改的标题"); XCTAssertEqual(after["newUnknown"] as? Int, 42)
         XCTAssertNotNil(after["remoteMcpServersConfig"]); XCTAssertEqual(after["completedTurns"] as? Int, 20)
+        XCTAssertEqual(receipt.items.first?.title, "目标自己改的标题", "The completion list names the session as it actually appears at the destination")
         XCTAssertEqual(try Data(contentsOf: backups.appendingPathComponent(receipt.id + "/before-0.json")), before)
     }
     func testTargetAheadAndIncomparableProgressAreNotOverwritten() throws {

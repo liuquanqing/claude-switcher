@@ -172,6 +172,9 @@ actor SessionTransferWorker {
     }
     var canCopy: Bool { !isWorking && !picked.isEmpty && sourceSpaceID != targetSpaceID && !sourceSpaceID.isEmpty && !targetSpaceID.isEmpty && historyError == nil && !recoveryBlocksTarget }
     var canExport: Bool { canCopy }
+    var currentEndpointID: String {
+        environment?.activeEndpointIDs.first(where: { $0.hasPrefix("profile:") }) ?? "profile:" + store.current
+    }
     private var recoveryBlocksTarget: Bool {
         guard let receipt = latestReceipt, receipt.state.needsRecovery else { return false }
         return targetSpaceID == receipt.target.endpointID + "/" + receipt.target.account + "/" + receipt.target.organization
@@ -197,10 +200,10 @@ actor SessionTransferWorker {
         preselectMissing = true
         errorMessage = nil; statusMessage = nil; operationStatus = nil
     }
-    private func queueRefresh() {
+    private func queueRefresh(selectUpdates: Bool = false) {
         refreshID = UUID() // invalidate an older in-flight scan before the next Task starts
         isWorking = true
-        Task { await refresh() }
+        Task { await refresh(selectUpdates: selectUpdates) }
     }
     func setSource(_ id: String) { guard !isWorking, id != sourceID else { return }; sourceID = id; sourceSpaceID = ""; clearSelection(); queueRefresh() }
     func setTarget(_ id: String) { guard !isWorking, id != targetID else { return }; targetID = id; targetSpaceID = ""; clearSelection(); queueRefresh() }
@@ -210,7 +213,15 @@ actor SessionTransferWorker {
         guard !isWorking else { return }
         updateExisting = value
         if !value { picked.subtract(rows.filter { $0.kind == .update }.map(\.id)) }
-        pendingPlan = nil; confirmation = nil; queueRefresh()
+        pendingPlan = nil; confirmation = nil; queueRefresh(selectUpdates: value)
+    }
+    func swapDirection() {
+        guard !isWorking, !sourceID.isEmpty, !targetID.isEmpty, sourceID != targetID,
+              locations.contains(where: { $0.id == sourceID }),
+              locations.contains(where: { $0.id == targetID }) else { return }
+        swap(&sourceID, &targetID)
+        swap(&sourceSpaceID, &targetSpaceID)
+        clearSelection(); queueRefresh()
     }
     func setPicked(_ id: String, selected: Bool) {
         guard !isWorking, let row = rows.first(where: { $0.id == id }), row.selectable else { return }
@@ -221,7 +232,7 @@ actor SessionTransferWorker {
         let ids = Set(visibleRows.filter(\.selectable).map(\.id))
         if ids.isSubset(of: picked) { picked.subtract(ids) } else { picked.formUnion(ids) }
     }
-    func refresh() async {
+    func refresh(selectUpdates: Bool = false) async {
         guard !writing else { return }
         let token = UUID(); refreshID = token; isWorking = true
         defer { if refreshID == token { isWorking = false } }
@@ -231,13 +242,20 @@ actor SessionTransferWorker {
             guard refreshID == token, !writing else { return }
             environment = env; spaces = loaded.spaces; historyError = loaded.historyError
             locations = env.endpoints.map { TransferLocationOption(id: $0.id, name: $0.name) }
-            if !locations.contains(where: { $0.id == targetID }) { targetID = locations.first(where: { $0.id == "profile:" + store.current })?.id ?? locations.first?.id ?? "" }
-            if !locations.contains(where: { $0.id == sourceID }) { sourceID = locations.first(where: { $0.id != targetID && $0.id != "api" })?.id ?? "" }
+            if !locations.contains(where: { $0.id == sourceID }) {
+                sourceID = locations.first(where: { $0.id == currentEndpointID })?.id
+                    ?? locations.first(where: { $0.id != "api" })?.id ?? ""
+            }
+            if !locations.contains(where: { $0.id == targetID }) { targetID = "" }
             let a = spaces[sourceID] ?? [], b = spaces[targetID] ?? []
             sourceSpaces = a.map { TransferSpaceOption(id: $0.id, name: $0.name) }; targetSpaces = b.map { TransferSpaceOption(id: $0.id, name: $0.name) }
             if !a.contains(where: { $0.id == sourceSpaceID }) { sourceSpaceID = a.count == 1 ? a[0].id : "" }
             if !b.contains(where: { $0.id == targetSpaceID }) { targetSpaceID = b.count == 1 ? b[0].id : "" }
             if let last = preferredReceipt(loaded.receipts) { display(last, environment: env) } else { latestReceipt = nil; lastOperation = nil }
+            if targetID.isEmpty {
+                rows = []; picked = []; statusMessage = nil; errorMessage = historyError
+                return
+            }
             guard let source = a.first(where: { $0.id == sourceSpaceID }), let target = b.first(where: { $0.id == targetSpaceID }), source.id != target.id else {
                 rows = []; errorMessage = loaded.errors[sourceID] ?? loaded.errors[targetID] ?? historyError
                 statusMessage = sourceSpaces.isEmpty || targetSpaces.isEmpty ? "请先在相应账号或 API 工作区打开 Code 页，再重新检查。" : "请选择不同的来源和目标空间。"
@@ -255,6 +273,9 @@ actor SessionTransferWorker {
                 preselectMissing = false
             } else {
                 picked.formIntersection(result.filter(\.selectable).map(\.id))
+            }
+            if selectUpdates && updateExisting {
+                picked.formUnion(visibleRows.filter { $0.kind == .update }.map(\.id))
             }
             statusMessage = operationStatus; errorMessage = historyError
         } catch {

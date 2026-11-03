@@ -130,14 +130,25 @@ struct CopyThreadsView: View {
         ])
     }
 
+    private var canSwapDirection: Bool {
+        !controller.isWorking && !controller.sourceID.isEmpty && !controller.targetID.isEmpty &&
+            controller.sourceID != controller.targetID
+    }
+
     private var selectedSummary: String {
-        let count = controller.picked.count
-        let visibleCount = controller.visibleRows.filter { controller.picked.contains($0.id) }.count
-        let outsideCount = max(0, count - visibleCount)
-        if !controller.query.isEmpty && outsideCount > 0 {
-            return text("selectedCountOutside", arguments: ["count": String(count), "outside": String(outsideCount)])
+        let plannedRows = controller.rows.filter { row in
+            controller.picked.contains(row.id) &&
+                (row.kind == .add || (row.kind == .update && controller.updateExisting))
         }
-        return text("selectedCount", arguments: ["count": String(count)])
+        let added = plannedRows.filter { $0.kind == .add }.count
+        let updated = plannedRows.filter { $0.kind == .update }.count
+        let visibleIDs = Set(controller.visibleRows.map(\.id))
+        let outsideCount = plannedRows.filter { !visibleIDs.contains($0.id) }.count
+        let arguments = ["added": String(added), "updated": String(updated), "outside": String(outsideCount)]
+        if !controller.query.isEmpty && outsideCount > 0 {
+            return text("plannedChangesOutside", arguments: arguments)
+        }
+        return text("plannedChanges", arguments: arguments)
     }
 
     private var visibleStatusMessage: String? {
@@ -190,14 +201,46 @@ struct CopyThreadsView: View {
 
             HStack(alignment: .center, spacing: 10) {
                 VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        Text(text("from"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.sub)
+                        if !controller.sourceID.isEmpty && controller.sourceID == controller.currentEndpointID {
+                            Text(text("currentAccount"))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.importAccentSoft)
+                        }
+                    }
                     picker(text("from"), selection: sourceBinding, options: controller.locations)
+                        .labelsHidden()
                     if controller.sourceSpaces.count > 1 {
                         spacePicker(text("sourceSpace"), selection: sourceSpaceBinding, options: controller.sourceSpaces)
                     }
                 }
-                Image(systemName: "arrow.right").foregroundColor(.sub)
+                Button { controller.swapDirection() } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.sub)
+                .help(text("swapDirection"))
+                .accessibilityLabel(Text(text("swapDirection")))
+                .disabled(!canSwapDirection)
                 VStack(alignment: .leading, spacing: 8) {
-                    picker(text("to"), selection: targetBinding, options: controller.locations)
+                    HStack(spacing: 6) {
+                        Text(text("to"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.sub)
+                        if !controller.targetID.isEmpty && controller.targetID == controller.currentEndpointID {
+                            Text(text("currentAccount"))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.importAccentSoft)
+                        }
+                    }
+                    picker(text("to"), selection: targetBinding, options: controller.locations, placeholder: text("chooseTarget"))
+                        .labelsHidden()
                     if controller.targetSpaces.count > 1 {
                         spacePicker(text("targetSpace"), selection: targetSpaceBinding, options: controller.targetSpaces)
                     }
@@ -205,7 +248,15 @@ struct CopyThreadsView: View {
                 Spacer(minLength: 0)
             }
 
-            if let error = controller.errorMessage {
+            Text(text("copyScope"))
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+                .fixedSize(horizontal: false, vertical: true)
+                .help(text("copyScopeHelp"))
+
+            if controller.targetID.isEmpty {
+                message(text("chooseTargetPrompt"), color: .importAccentSoft)
+            } else if let error = controller.errorMessage {
                 message(generated(error), color: .bad)
             } else if let status = visibleStatusMessage {
                 message(status, color: .sub)
@@ -268,7 +319,7 @@ struct CopyThreadsView: View {
                             .foregroundColor(.sub)
                             .fixedSize(horizontal: false, vertical: true)
                             .help(row.cwd)
-                        if !row.selectable && row.kind == .blocked {
+                        if shouldShowReason(row) {
                             Text(generated(row.reason))
                                 .font(.system(size: 11))
                                 .foregroundColor(Color.txt.opacity(0.72))
@@ -281,11 +332,12 @@ struct CopyThreadsView: View {
                             .font(.system(size: 11).monospacedDigit())
                             .foregroundColor(.sub)
                             .frame(width: 66, alignment: .trailing)
-                        if let status = rowStatus(row) {
-                            Text(status)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(row.kind == .update ? .importAccentSoft : (row.kind == .blocked ? .warn : .sub))
-                        }
+                        Text(rowStatus(row))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(rowStatusColor(row, picked: isPicked))
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: 104, alignment: .trailing)
                     }
                 }
                 .padding(.horizontal, 9)
@@ -304,10 +356,12 @@ struct CopyThreadsView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
+            .frame(minHeight: 56)
+            .layoutPriority(0)
             .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.25)))
             .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.75), lineWidth: 1))
             .overlay {
-                if controller.visibleRows.isEmpty {
+                if controller.visibleRows.isEmpty && !controller.targetID.isEmpty {
                     Text(text(controller.rows.isEmpty ? "noRows" : "noMatches"))
                         .font(.system(size: 12))
                         .foregroundColor(.sub)
@@ -326,8 +380,8 @@ struct CopyThreadsView: View {
                 Text(selectedSummary)
                     .font(.system(size: 12))
                     .foregroundColor(.sub)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 Button(text(instructionsCopied ? "copiedInstructions" : "copyForClaude")) {
                     copyInstructions()
@@ -416,25 +470,42 @@ struct CopyThreadsView: View {
         SessionTransferLocalization.message(value, language: controller.language)
     }
 
-    private func picker(_ label: String, selection: Binding<String>, options: [TransferLocationOption]) -> some View {
-        Picker(label, selection: selection) {
+    private func picker(_ label: String, selection: Binding<String>, options: [TransferLocationOption], placeholder: String? = nil) -> some View {
+        let selectedName = options.first { $0.id == selection.wrappedValue }.map {
+            $0.id == "api" ? text("apiWorkspace") : $0.name
+        } ?? placeholder ?? label
+        return Picker(label, selection: selection) {
+            if let placeholder {
+                Text(placeholder).tag("")
+            }
             ForEach(options) { option in
-                Text(option.id == "api" ? text("apiWorkspace") : option.name).tag(option.id)
+                Text(option.id == "api" ? text("apiWorkspace") : option.name)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .tag(option.id)
             }
         }
         .frame(width: 210)
         .disabled(controller.isWorking)
+        .help(selectedName)
     }
 
     private func spacePicker(_ label: String, selection: Binding<String>, options: [TransferSpaceOption]) -> some View {
-        Picker(label, selection: selection) {
+        let selectedName = options.first { $0.id == selection.wrappedValue }.map {
+            SessionTransferLocalization.spaceName($0.name, language: controller.language)
+        } ?? text("chooseSpace")
+        return Picker(label, selection: selection) {
             Text(text("chooseSpace")).tag("")
             ForEach(options) { option in
-                Text(SessionTransferLocalization.spaceName(option.name, language: controller.language)).tag(option.id)
+                Text(SessionTransferLocalization.spaceName(option.name, language: controller.language))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .tag(option.id)
             }
         }
         .frame(width: 210)
         .disabled(controller.isWorking)
+        .help(selectedName)
     }
 
     private func message(_ value: String, color: Color) -> some View {
@@ -445,13 +516,39 @@ struct CopyThreadsView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func rowStatus(_ row: SessionTransferRow) -> String? {
-        switch row.kind {
-        case .add: return nil
-        case .update: return text("canUpdate")
-        case .skip: return text("existing")
-        case .blocked: return text("needsReview")
+    private func skipStatus(_ row: SessionTransferRow) -> String? {
+        switch row.reason {
+        case "目标已同步，无需重复复制。": return text("skipSynced")
+        case "目标进度较新，保留目标。": return text("skipTargetNewer")
+        case "目标已有这段会话；开启更新后可同步列表进度。": return text("skipUpdatesDisabled")
+        case "目标已有同一会话，保留目标条目。": return text("skipExisting")
+        default: return nil
         }
+    }
+
+    private func shouldShowReason(_ row: SessionTransferRow) -> Bool {
+        guard !row.reason.isEmpty else { return false }
+        return row.kind == .blocked || (row.kind == .skip && skipStatus(row) == nil)
+    }
+
+    private func rowStatus(_ row: SessionTransferRow) -> String {
+        switch row.kind {
+        case .add:
+            return text(controller.picked.contains(row.id) ? "willAdd" : "canAddUnselected")
+        case .update:
+            let willUpdate = controller.updateExisting && controller.picked.contains(row.id)
+            return text(willUpdate ? "willUpdate" : "canUpdateUnselected")
+        case .skip:
+            return skipStatus(row) ?? text("skipRetained")
+        case .blocked:
+            return text("needsReview")
+        }
+    }
+
+    private func rowStatusColor(_ row: SessionTransferRow, picked: Bool) -> Color {
+        if row.kind == .blocked { return .warn }
+        let willChange = row.kind == .add ? picked : (row.kind == .update && picked && controller.updateExisting)
+        return willChange ? .importAccentSoft : .sub
     }
 
     private func activityTime(_ date: Date) -> String {
@@ -508,34 +605,111 @@ struct CopyThreadsView: View {
 
     private func operationView(_ operation: SessionTransferOperation) -> some View {
         let content = operationContent(operation)
-        return HStack(alignment: .center, spacing: 9) {
-            Circle().fill(content.color).frame(width: 6, height: 6)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(content.title)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(content.color)
-                Text(content.summary)
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 9) {
+                Circle()
+                    .fill(content.color)
+                    .frame(width: 6, height: 6)
+                    .padding(.top, 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(content.title)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(content.color)
+                    Text(content.summary)
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+                Spacer(minLength: 4)
+                Button(text("viewBackup")) { controller.showBackup() }
+                    .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
+                    .fixedSize()
+                if operation.canUndo {
+                    Button(text("undo")) { controller.requestUndo() }
+                        .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
+                        .fixedSize()
+                        .disabled(controller.isWorking)
+                }
+                if operation.needsRecovery {
+                    Button(text("recover")) { controller.requestRecovery() }
+                        .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
+                        .fixedSize()
+                        .disabled(controller.isWorking)
+                }
+            }
+            if operation.state == .completed && !operation.items.isEmpty {
+                let changesKey = operation.items.count > 2 ? "actualChangesScrollable" : "actualChanges"
+                Text(text(changesKey, arguments: ["count": String(operation.items.count)]))
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundColor(.sub)
+                operationResultList(operation.items)
+                Text(text("copyNextStep", arguments: ["target": operation.targetName]))
                     .font(.system(size: 10.5))
                     .foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer(minLength: 4)
-            Button(text("viewBackup")) { controller.showBackup() }
-                .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
-            if operation.canUndo {
-                Button(text("undo")) { controller.requestUndo() }
-                    .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .disabled(controller.isWorking)
-            }
-            if operation.needsRecovery {
-                Button(text("recover")) { controller.requestRecovery() }
-                    .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .disabled(controller.isWorking)
-            }
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
+        .padding(.horizontal, 10).padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.card))
+        .layoutPriority(1)
+    }
+
+    private func operationResultList(_ items: [TransferSessionItem]) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(items) { item in
+                    let project = (item.cwd as NSString).lastPathComponent
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(operationItemKind(item.kind) ?? "")
+                            .font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(.importAccentSoft)
+                            .frame(width: 52, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                Text(item.title)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.txt)
+                                    .lineLimit(2)
+                                    .truncationMode(.tail)
+                                    .help(item.title)
+                                    .layoutPriority(1)
+                                if !project.isEmpty {
+                                    Text(project)
+                                        .font(.system(size: 10.5))
+                                        .foregroundColor(.sub)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .help(project)
+                                }
+                            }
+                            Text(item.cwd)
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundColor(.sub)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .help(item.cwd)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    if item.id != items.last?.id { Divider().overlay(Color.stroke) }
+                }
+            }
+        }
+        .scrollIndicators(.visible)
+        .frame(minHeight: 92, idealHeight: 108, maxHeight: 150)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.card.opacity(0.6)))
+    }
+
+    private func operationItemKind(_ kind: SessionTransferKind) -> String? {
+        switch kind {
+        case .add: return text("resultAdded")
+        case .update: return text("resultUpdated")
+        case .skip, .blocked: return nil
+        }
     }
 
     private func sheetContent(_ sheet: SessionTransferSheet) -> some View {

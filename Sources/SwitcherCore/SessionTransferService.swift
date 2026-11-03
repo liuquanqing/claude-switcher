@@ -110,8 +110,8 @@ public struct SessionTransferService {
             lastActivity: Date(timeIntervalSince1970: (index.time ?? Index.number(index.object["createdAt"]) ?? 0) / 1000), kind: kind, reason: reason, identity: index.identity)
     }
     func decision(_ source: Index, sourceCatalogue: Catalogue, target: Catalogue, updates: Bool) throws -> (SessionTransferRow, SessionTransferChange?) {
-        func result(_ kind: SessionTransferKind, _ reason: String, before: Data? = nil, after: Data? = nil) -> (SessionTransferRow, SessionTransferChange?) {
-            (row(source, kind, reason), after.map { SessionTransferChange(name: source.name, title: source.title, kind: kind, before: before, after: $0) })
+        func result(_ kind: SessionTransferKind, _ reason: String, before: Data? = nil, after: Data? = nil, destinationTitle: String? = nil) -> (SessionTransferRow, SessionTransferChange?) {
+            (row(source, kind, reason), after.map { SessionTransferChange(name: source.name, title: destinationTitle ?? source.title, kind: kind, before: before, after: $0) })
         }
         if removed(source, in: sourceCatalogue) || removed(source, in: target) { return result(.blocked, "归档或删除的会话不自动带回。") }
         do {
@@ -145,7 +145,7 @@ public struct SessionTransferService {
             object["completedTurns"] = source.object["completedTurns"]
             object["lastActivityAt"] = source.object["lastActivityAt"]
             let after = try Disk.encode(object)
-            return result(.update, "只更新同一会话的列表进度；旧索引自动备份。", before: old.bytes, after: after)
+            return result(.update, "只更新同一会话的列表进度；旧索引自动备份。", before: old.bytes, after: after, destinationTitle: old.title)
         }
         let unsupportedBindings = ["accountUuid", "accountUUID", "accountId", "account_uuid", "organizationUuid", "organizationId", "organization_uuid", "orgUuid",
                                    "oauthAccount", "claudeAiOauth", "accessToken", "refreshToken", "apiKey", "providerConfig", "gatewayConfig"]
