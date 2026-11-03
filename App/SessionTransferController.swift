@@ -44,6 +44,13 @@ struct SessionTransferLoaded: Sendable {
     let receipts: [SessionTransferReceipt]
     let historyError: String?
 }
+
+private struct SessionCopyResultSnapshot {
+    let operationID: String
+    let sourceSpaceID: String
+    let targetSpaceID: String
+    let rows: [SessionTransferRow]
+}
 actor SessionTransferWorker {
     private let runningProbe: @Sendable () throws -> Bool
     private let beforePlan: @Sendable () async -> Void
@@ -121,6 +128,7 @@ actor SessionTransferWorker {
     @Published private(set) var backupItems: [TransferSessionItem] = []
     @Published private(set) var handoffInformation: String?
     @Published private(set) var language = AppLocalization.defaultLanguage
+    @Published private var completedSnapshot: SessionCopyResultSnapshot?
     private var languageObservation: AnyCancellable?
     private let store: Store
     private let worker: SessionTransferWorker
@@ -168,9 +176,22 @@ actor SessionTransferWorker {
     }
     deinit { if let demoRoot { try? FileManager.default.removeItem(at: demoRoot) } }
     var visibleRows: [SessionTransferRow] {
-        rows.filter { query.isEmpty || "\($0.title) \($0.cwd)".localizedCaseInsensitiveContains(query) }
+        let displayed = isShowingCopyResult ? completedSnapshot?.rows ?? rows : rows
+        return displayed.filter {
+            query.isEmpty || "\($0.title) \($0.cwd) \(resultItem(for: $0)?.title ?? "")".localizedCaseInsensitiveContains(query)
+        }
     }
-    var canCopy: Bool { !isWorking && !picked.isEmpty && sourceSpaceID != targetSpaceID && !sourceSpaceID.isEmpty && !targetSpaceID.isEmpty && historyError == nil && !recoveryBlocksTarget }
+    var isShowingCopyResult: Bool {
+        guard let snapshot = completedSnapshot, let operation = lastOperation else { return false }
+        return operation.state == .completed && operation.id == snapshot.operationID
+            && sourceSpaceID == snapshot.sourceSpaceID && targetSpaceID == snapshot.targetSpaceID
+    }
+    func resultItem(for row: SessionTransferRow) -> TransferSessionItem? {
+        guard isShowingCopyResult, let snapshot = completedSnapshot,
+              snapshot.rows.contains(where: { $0.id == row.id && $0.identity == row.identity }) else { return nil }
+        return lastOperation?.items.first { $0.id == row.id }
+    }
+    var canCopy: Bool { !isShowingCopyResult && !isWorking && !picked.isEmpty && sourceSpaceID != targetSpaceID && !sourceSpaceID.isEmpty && !targetSpaceID.isEmpty && historyError == nil && !recoveryBlocksTarget }
     var canExport: Bool { canCopy }
     var currentEndpointID: String {
         environment?.activeEndpointIDs.first(where: { $0.hasPrefix("profile:") }) ?? "profile:" + store.current
@@ -196,6 +217,7 @@ actor SessionTransferWorker {
             backups: support.appendingPathComponent("ClaudeSwitcher/session-migrations"))
     }
     private func clearSelection() {
+        completedSnapshot = nil
         picked = []; pendingPlan = nil; pendingRestore = nil; pendingPreserve = nil; confirmation = nil
         preselectMissing = true
         errorMessage = nil; statusMessage = nil; operationStatus = nil
@@ -211,6 +233,7 @@ actor SessionTransferWorker {
     func setTargetSpace(_ id: String) { guard !isWorking, id != targetSpaceID else { return }; targetSpaceID = id; clearSelection(); queueRefresh() }
     func setUpdates(_ value: Bool) {
         guard !isWorking else { return }
+        completedSnapshot = nil
         updateExisting = value
         if !value { picked.subtract(rows.filter { $0.kind == .update }.map(\.id)) }
         pendingPlan = nil; confirmation = nil; queueRefresh(selectUpdates: value)
@@ -224,13 +247,17 @@ actor SessionTransferWorker {
         clearSelection(); queueRefresh()
     }
     func setPicked(_ id: String, selected: Bool) {
-        guard !isWorking, let row = rows.first(where: { $0.id == id }), row.selectable else { return }
+        guard !isWorking, !isShowingCopyResult, let row = rows.first(where: { $0.id == id }), row.selectable else { return }
         if selected { picked.insert(id) } else { picked.remove(id) }
     }
     func selectAllVisible() {
-        guard !isWorking else { return }
+        guard !isWorking, !isShowingCopyResult else { return }
         let ids = Set(visibleRows.filter(\.selectable).map(\.id))
         if ids.isSubset(of: picked) { picked.subtract(ids) } else { picked.formUnion(ids) }
+    }
+    func beginAnotherCopy() {
+        guard !isWorking else { return }
+        clearSelection(); query = ""; queueRefresh()
     }
     func refresh(selectUpdates: Bool = false) async {
         guard !writing else { return }
@@ -349,6 +376,9 @@ actor SessionTransferWorker {
         guard fresh.endpoints == env.endpoints else { throw SessionTransferFailure("账号档案已变化，请重新选择。") }
         let result = try await worker.execute(fresh, plan)
         display(result, environment: fresh); picked = []
+        completedSnapshot = SessionCopyResultSnapshot(operationID: result.id, sourceSpaceID: plan.source.id,
+            targetSpaceID: plan.target.id, rows: plan.rows)
+        query = ""
         operationStatus = "已复制\(result.addedCount)条、更新\(result.updatedCount)条会话。"; statusMessage = operationStatus
     }
     private func display(_ receipt: SessionTransferReceipt, environment env: SessionTransferEnvironment) {
