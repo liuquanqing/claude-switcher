@@ -381,6 +381,11 @@ actor FixtureGuardWorker: GuardWorking {
   transfer.setPicked("local_ui.json", selected: true)
   await transfer.copySelected(); try await settled(transfer)
   require(transfer.lastOperation?.canUndo == true && transfer.confirmation == nil, "add-only native action uses actual temp engine without extra dialog")
+  require(transfer.isShowingCopyResult && !transfer.canCopy && !transfer.canExport,
+          "a completed copy is a result phase, not a zero-selection start form")
+  require(transfer.visibleRows.count == originalSessionTitles.count
+          && transfer.resultItem(for: transfer.visibleRows.first { $0.id == "local_ui.json" }!)?.kind == .add,
+          "the same list keeps all source sessions and marks only the actual copied item")
   require(Dictionary(uniqueKeysWithValues: transfer.rows.map { ($0.id, $0.title) }) == originalSessionTitles,
           "copy completion retains every concrete source session, including now-synchronized rows")
   require(transfer.lastOperation?.items.first?.title == "设置面板排版整理" && transfer.lastOperation?.items.first?.cwd == "/demo/atlas",
@@ -389,12 +394,15 @@ actor FixtureGuardWorker: GuardWorking {
   try await chooseBusinessToPersonal(reopenedTransfer)
   require(reopenedTransfer.lastOperation?.items.first?.title == "设置面板排版整理" && reopenedTransfer.rows.count == originalSessionTitles.count,
           "reopening the copy page retains the receipt's concrete session and the full source list")
+  require(!reopenedTransfer.isShowingCopyResult && reopenedTransfer.resultItem(for: reopenedTransfer.rows.first!) == nil,
+          "a cold controller does not apply an unbound historical receipt to the current list")
   transfer.showBackup(); try await settled(transfer)
   require(transfer.backupItems.first?.title == "设置面板排版整理" && transfer.backupItems.first?.cwd == "/demo/atlas", "backup preview verifies actual temp files before showing concrete session metadata")
   transfer.dismissBackup()
   require(transfer.rows.first { $0.id == "local_ui.json" }?.selectable == false, "copied session is immediately deduplicated")
   transfer.requestUndo(); transfer.dismissConfirmation(); await transfer.confirmAction(); try await settled(transfer)
   require(transfer.lastOperation?.canUndo == false && transfer.rows.first { $0.id == "local_ui.json" }?.selectable == true, "native alert dismissal cannot consume pending undo")
+  require(!transfer.isShowingCopyResult, "undo does not leave the list marked as successfully copied")
   transfer.setUpdates(true); try await settled(transfer)
   transfer.setPicked("local_api.json", selected: true)
   let targetIndex = transferFixture.0.endpoints.first { $0.id == "profile:Personal" }!.root.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_api.json")
@@ -507,6 +515,45 @@ actor FixtureGuardWorker: GuardWorking {
   require(returnedController === returnController && returnedController.rows.count == 4
           && returnedController.lastOperation?.items.first?.title == "设置面板排版整理",
           "returning and revisiting keeps the full source list and the persisted completion item")
+  require(returnedController.isShowingCopyResult && returnedController.visibleRows.count == 4,
+          "returning to the same copy window preserves its completed single-list snapshot")
+  let resultFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: resultFixture.1) }
+  let resultTargetIndex = resultFixture.0.endpoints[1].root.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_api.json")
+  var resultTarget = try JSONSerialization.jsonObject(with: Data(contentsOf: resultTargetIndex)) as! [String: Any]
+  resultTarget["title"] = "目标中的自定义会话名"
+  try JSONSerialization.data(withJSONObject: resultTarget).write(to: resultTargetIndex)
+  let resultStore = Store(demo: true); resultStore.current = "Business"
+  let resultController = SessionTransferController(store: resultStore, testEnvironment: resultFixture.0)
+  try await chooseBusinessToPersonal(resultController)
+  resultController.setUpdates(true); try await settled(resultController)
+  resultController.query = "设置"
+  await resultController.copySelected(); await resultController.confirmAction(); try await settled(resultController)
+  require(resultController.isShowingCopyResult && resultController.query.isEmpty && resultController.visibleRows.count == 4,
+          "completion clears the old search and shows one full snapshot rather than hiding selected sessions")
+  let copiedUpdateRow = resultController.visibleRows.first { $0.id == "local_api.json" }!
+  require(resultController.resultItem(for: copiedUpdateRow)?.title == "目标中的自定义会话名"
+          && resultController.resultItem(for: copiedUpdateRow)?.kind == .update,
+          "completed rows expose the actual retained destination title and update result")
+  require(resultController.resultItem(for: resultController.visibleRows.first { $0.id == "local_deploy.json" }!) == nil,
+          "a skipped target-ahead session cannot be labelled as copied")
+  resultController.query = "自定义会话名"
+  require(resultController.visibleRows.map(\.id) == ["local_api.json"],
+          "result search finds the displayed destination title as well as the original source title")
+  resultController.query = ""
+  let extraSource = resultFixture.0.endpoints[0].root.appendingPathComponent("claude-code-sessions/account-business/org-team/local_later.json")
+  try JSONSerialization.data(withJSONObject: ["sessionId":"logical-later", "cliSessionId":"cli-later", "title":"复制完成后新增的会话", "cwd":"/demo/atlas", "completedTurns":1, "lastActivityAt":Date().timeIntervalSince1970 * 1000]).write(to: extraSource)
+  try Data("FICTIONAL TRANSCRIPT ONLY\n".utf8).write(to: resultFixture.0.transcripts.appendingPathComponent("demo-project/cli-later.jsonl"))
+  await resultController.refresh()
+  require(resultController.rows.count == 5 && resultController.visibleRows.count == 4 && resultController.isShowingCopyResult,
+          "a quiet refresh keeps the finished operation stable while new live sessions wait for another copy")
+  resultController.beginAnotherCopy(); try await settled(resultController)
+  require(!resultController.isShowingCopyResult && resultController.visibleRows.count == 5
+          && resultController.picked == ["local_later.json"] && resultController.query.isEmpty,
+          "continue-copy explicitly returns to preparation with fresh missing sessions only")
+  resultController.setTarget("api"); try await settled(resultController)
+  require(!resultController.isShowingCopyResult && resultController.resultItem(for: copiedUpdateRow) == nil,
+          "changing the destination cannot reuse old result badges")
   let filteredUpdatesFixture = try SessionTransferDemo.environment()
   defer { try? FileManager.default.removeItem(at: filteredUpdatesFixture.1) }
   let filteredUpdates = SessionTransferController(store: Store(demo: true), testEnvironment: filteredUpdatesFixture.0)
