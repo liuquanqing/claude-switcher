@@ -366,18 +366,43 @@ actor FixtureGuardWorker: GuardWorking {
    }
    preconditionFailure("transfer fixture did not settle")
   }
+  func chooseBusinessToPersonal(_ controller: SessionTransferController) async throws {
+   await controller.refresh()
+   controller.setSource("profile:Business"); try await settled(controller)
+   controller.setTarget("profile:Personal"); try await settled(controller)
+  }
   await transfer.refresh()
+  require(transfer.sourceID == "profile:Personal" && transfer.targetID.isEmpty && !transfer.canCopy,
+          "first entry starts at the current account and requires an explicit destination")
+  try await chooseBusinessToPersonal(transfer)
+  let originalSessionTitles = Dictionary(uniqueKeysWithValues: transfer.rows.map { ($0.id, $0.title) })
   require(transfer.rows.contains { $0.title == "设置面板排版整理" && $0.cwd == "/demo/atlas" }, "native controller exposes concrete session title/project")
   require(transfer.rows.first { $0.id == "local_ui.json" }?.selectable == true && !transfer.updateExisting, "native default adds only")
   transfer.setPicked("local_ui.json", selected: true)
   await transfer.copySelected(); try await settled(transfer)
   require(transfer.lastOperation?.canUndo == true && transfer.confirmation == nil, "add-only native action uses actual temp engine without extra dialog")
+  require(transfer.isShowingCopyResult && !transfer.canCopy && !transfer.canExport,
+          "a completed copy is a result phase, not a zero-selection start form")
+  require(transfer.visibleRows.count == originalSessionTitles.count
+          && transfer.resultItem(for: transfer.visibleRows.first { $0.id == "local_ui.json" }!)?.kind == .add,
+          "the same list keeps all source sessions and marks only the actual copied item")
+  require(Dictionary(uniqueKeysWithValues: transfer.rows.map { ($0.id, $0.title) }) == originalSessionTitles,
+          "copy completion retains every concrete source session, including now-synchronized rows")
+  require(transfer.lastOperation?.items.first?.title == "设置面板排版整理" && transfer.lastOperation?.items.first?.cwd == "/demo/atlas",
+          "completion data retains the copied session title and project without requiring backup presentation")
+  let reopenedTransfer = SessionTransferController(store: transferStore, testEnvironment: transferFixture.0)
+  try await chooseBusinessToPersonal(reopenedTransfer)
+  require(reopenedTransfer.lastOperation?.items.first?.title == "设置面板排版整理" && reopenedTransfer.rows.count == originalSessionTitles.count,
+          "reopening the copy page retains the receipt's concrete session and the full source list")
+  require(!reopenedTransfer.isShowingCopyResult && reopenedTransfer.resultItem(for: reopenedTransfer.rows.first!) == nil,
+          "a cold controller does not apply an unbound historical receipt to the current list")
   transfer.showBackup(); try await settled(transfer)
   require(transfer.backupItems.first?.title == "设置面板排版整理" && transfer.backupItems.first?.cwd == "/demo/atlas", "backup preview verifies actual temp files before showing concrete session metadata")
   transfer.dismissBackup()
   require(transfer.rows.first { $0.id == "local_ui.json" }?.selectable == false, "copied session is immediately deduplicated")
   transfer.requestUndo(); transfer.dismissConfirmation(); await transfer.confirmAction(); try await settled(transfer)
   require(transfer.lastOperation?.canUndo == false && transfer.rows.first { $0.id == "local_ui.json" }?.selectable == true, "native alert dismissal cannot consume pending undo")
+  require(!transfer.isShowingCopyResult, "undo does not leave the list marked as successfully copied")
   transfer.setUpdates(true); try await settled(transfer)
   transfer.setPicked("local_api.json", selected: true)
   let targetIndex = transferFixture.0.endpoints.first { $0.id == "profile:Personal" }!.root.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_api.json")
@@ -411,13 +436,13 @@ actor FixtureGuardWorker: GuardWorking {
   defer { try? FileManager.default.removeItem(at: blockedFixture.1) }
   let blockedEnv = SessionTransferEnvironment(endpoints: blockedFixture.0.endpoints, activeEndpointIDs: ["profile:Personal"], transcripts: blockedFixture.0.transcripts, backups: blockedFixture.0.backups)
   let blockedTransfer = SessionTransferController(store: Store(demo: true), testEnvironment: blockedEnv, worker: SessionTransferWorker(runningProbe: { true }))
-  await blockedTransfer.refresh(); blockedTransfer.setPicked("local_ui.json", selected: true); await blockedTransfer.copySelected()
+  try await chooseBusinessToPersonal(blockedTransfer); blockedTransfer.setPicked("local_ui.json", selected: true); await blockedTransfer.copySelected()
   require(blockedTransfer.errorMessage?.contains("自行退出 Claude") == true && !FileManager.default.fileExists(atPath: blockedEnv.backups.path), "fake live-desktop gate prevents backup and target writes without querying real processes")
   let intentFixture = try SessionTransferDemo.environment()
   defer { try? FileManager.default.removeItem(at: intentFixture.1) }
   let intentController = SessionTransferController(store: Store(demo: true), testEnvironment: intentFixture.0,
    worker: SessionTransferWorker(runningProbe: { false }, beforePlan: { try? await Task.sleep(nanoseconds: 150_000_000) }))
-  await intentController.refresh(); intentController.setPicked("local_ui.json", selected: true)
+  try await chooseBusinessToPersonal(intentController); intentController.setPicked("local_ui.json", selected: true)
   let oldSourceID = intentController.sourceID, oldTargetID = intentController.targetID
   let inFlightCopy = Task { @MainActor in await intentController.copySelected() }
   for _ in 0..<50 { if intentController.isWorking { break }; await Task.yield() }
@@ -433,12 +458,12 @@ actor FixtureGuardWorker: GuardWorking {
   let inactiveEnv = SessionTransferEnvironment(endpoints: inactiveFixture.0.endpoints, activeEndpointIDs: ["api"], transcripts: inactiveFixture.0.transcripts, backups: inactiveFixture.0.backups)
   let inactiveController = SessionTransferController(store: Store(demo: true), testEnvironment: inactiveEnv,
    worker: SessionTransferWorker(runningProbe: { throw SafetyError("probe must not run for parked target") }))
-  await inactiveController.refresh(); inactiveController.setPicked("local_ui.json", selected: true); await inactiveController.copySelected()
+  try await chooseBusinessToPersonal(inactiveController); inactiveController.setPicked("local_ui.json", selected: true); await inactiveController.copySelected()
   require(inactiveController.lastOperation?.canUndo == true, "parked target does not query or stop a running desktop")
   let exportFixture = try SessionTransferDemo.environment()
   defer { try? FileManager.default.removeItem(at: exportFixture.1) }
   let exportController = SessionTransferController(store: Store(demo: true), testEnvironment: exportFixture.0, commandURL: URL(fileURLWithPath: "/usr/bin/true"))
-  await exportController.refresh(); exportController.setPicked("local_ui.json", selected: true)
+  try await chooseBusinessToPersonal(exportController); exportController.setPicked("local_ui.json", selected: true)
   let directInstructions = await exportController.generateInstructions()
   require(directInstructions?.contains("plan --request") == true && exportController.handoffInformation == nil && exportController.confirmation == nil, "direct instruction generation returns text without presenting any modal")
   require(!FileManager.default.fileExists(atPath: exportFixture.0.backups.path) && exportController.picked == ["local_ui.json"], "direct generation never starts import or consumes selected sessions")
@@ -451,7 +476,7 @@ actor FixtureGuardWorker: GuardWorking {
   let request = try SessionTransferRequest.load(from: exported[0]); _ = try request.checkedPlan()
   require(request.selected == ["local_ui.json"] && request.updateExisting == false, "local request preserves exact selected add-only intent")
   let missingHelperController = SessionTransferController(store: Store(demo: true), testEnvironment: exportFixture.0, commandURL: exportFixture.1.appendingPathComponent("missing-helper"))
-  await missingHelperController.refresh()
+  try await chooseBusinessToPersonal(missingHelperController)
   let missingInstructions = await missingHelperController.generateInstructions()
   require(missingInstructions == nil && missingHelperController.errorMessage?.contains("未找到备用复制工具") == true && missingHelperController.handoffInformation == nil, "failed direct generation returns no clipboard text and no preview")
   require(!missingHelperController.isWorking && missingHelperController.picked == ["local_ui.json"], "failure resets processing and preserves the user's selection")
@@ -459,7 +484,7 @@ actor FixtureGuardWorker: GuardWorking {
    let fixture = try SessionTransferDemo.environment(scenario: scenario)
    defer { try? FileManager.default.removeItem(at: fixture.1) }
    let controller = SessionTransferController(store: Store(demo: true), testEnvironment: fixture.0)
-   await controller.refresh(); require(controller.lastOperation?.needsRecovery == true, "native QA scenario has a real isolated unresolved journal")
+   try await chooseBusinessToPersonal(controller); require(controller.lastOperation?.needsRecovery == true, "native QA scenario has a real isolated unresolved journal")
    controller.requestRecovery(); controller.dismissConfirmation(); await controller.confirmAction()
    if scenario == "recovery" {
     require(controller.lastOperation?.state == .restored, "native recoverable fixture reaches restored with actual temp engine")
@@ -471,6 +496,104 @@ actor FixtureGuardWorker: GuardWorking {
     require(controller.lastOperation?.state == .preserved, "explicit exception closes journal without claiming recovery")
    }
   }
+  let returnStore = Store(demo: true); returnStore.current = "Business"
+  var returnedFromCopy = 0; returnStore.onShowAccounts = { returnedFromCopy += 1 }
+  let returnController = CopyWindow.controller(for: returnStore)
+  await returnController.refresh()
+  returnController.setTarget("profile:Personal"); try await settled(returnController)
+  await returnController.copySelected(); try await settled(returnController)
+  require(returnController.lastOperation?.items.first?.title == "设置面板排版整理",
+          "the real copy-window controller retains the concrete copied session")
+  let returnRoot = returnController.lastOperation!.backupURL.deletingLastPathComponent().deletingLastPathComponent()
+  require(returnRoot.lastPathComponent.hasPrefix("claude-transfer-demo-"), "return-window fixture remains under its generated demo root")
+  defer { try? FileManager.default.removeItem(at: returnRoot) }
+  CopyWindow.returnToAccounts(returnStore)
+  require(returnedFromCopy == 1 && returnStore.current == "Business",
+          "returning from the actual copy-window path invokes navigation without switching the desktop account")
+  let returnedController = CopyWindow.controller(for: returnStore)
+  await returnedController.refresh()
+  require(returnedController === returnController && returnedController.rows.count == 4
+          && returnedController.lastOperation?.items.first?.title == "设置面板排版整理",
+          "returning and revisiting keeps the full source list and the persisted completion item")
+  require(returnedController.isShowingCopyResult && returnedController.visibleRows.count == 4,
+          "returning to the same copy window preserves its completed single-list snapshot")
+  let resultFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: resultFixture.1) }
+  let resultTargetIndex = resultFixture.0.endpoints[1].root.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_api.json")
+  var resultTarget = try JSONSerialization.jsonObject(with: Data(contentsOf: resultTargetIndex)) as! [String: Any]
+  resultTarget["title"] = "目标中的自定义会话名"
+  try JSONSerialization.data(withJSONObject: resultTarget).write(to: resultTargetIndex)
+  let resultStore = Store(demo: true); resultStore.current = "Business"
+  let resultController = SessionTransferController(store: resultStore, testEnvironment: resultFixture.0)
+  try await chooseBusinessToPersonal(resultController)
+  resultController.setUpdates(true); try await settled(resultController)
+  resultController.query = "设置"
+  await resultController.copySelected(); await resultController.confirmAction(); try await settled(resultController)
+  require(resultController.isShowingCopyResult && resultController.query.isEmpty && resultController.visibleRows.count == 4,
+          "completion clears the old search and shows one full snapshot rather than hiding selected sessions")
+  let copiedUpdateRow = resultController.visibleRows.first { $0.id == "local_api.json" }!
+  require(resultController.resultItem(for: copiedUpdateRow)?.title == "目标中的自定义会话名"
+          && resultController.resultItem(for: copiedUpdateRow)?.kind == .update,
+          "completed rows expose the actual retained destination title and update result")
+  require(resultController.resultItem(for: resultController.visibleRows.first { $0.id == "local_deploy.json" }!) == nil,
+          "a skipped target-ahead session cannot be labelled as copied")
+  resultController.query = "自定义会话名"
+  require(resultController.visibleRows.map(\.id) == ["local_api.json"],
+          "result search finds the displayed destination title as well as the original source title")
+  resultController.query = ""
+  let extraSource = resultFixture.0.endpoints[0].root.appendingPathComponent("claude-code-sessions/account-business/org-team/local_later.json")
+  try JSONSerialization.data(withJSONObject: ["sessionId":"logical-later", "cliSessionId":"cli-later", "title":"复制完成后新增的会话", "cwd":"/demo/atlas", "completedTurns":1, "lastActivityAt":Date().timeIntervalSince1970 * 1000]).write(to: extraSource)
+  try Data("FICTIONAL TRANSCRIPT ONLY\n".utf8).write(to: resultFixture.0.transcripts.appendingPathComponent("demo-project/cli-later.jsonl"))
+  await resultController.refresh()
+  require(resultController.rows.count == 5 && resultController.visibleRows.count == 4 && resultController.isShowingCopyResult,
+          "a quiet refresh keeps the finished operation stable while new live sessions wait for another copy")
+  resultController.beginAnotherCopy(); try await settled(resultController)
+  require(!resultController.isShowingCopyResult && resultController.visibleRows.count == 5
+          && resultController.picked == ["local_later.json"] && resultController.query.isEmpty,
+          "continue-copy explicitly returns to preparation with fresh missing sessions only")
+  resultController.setTarget("api"); try await settled(resultController)
+  require(!resultController.isShowingCopyResult && resultController.resultItem(for: copiedUpdateRow) == nil,
+          "changing the destination cannot reuse old result badges")
+  let filteredUpdatesFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: filteredUpdatesFixture.1) }
+  let filteredUpdates = SessionTransferController(store: Store(demo: true), testEnvironment: filteredUpdatesFixture.0)
+  try await chooseBusinessToPersonal(filteredUpdates)
+  filteredUpdates.query = "设置"
+  filteredUpdates.setUpdates(true); try await settled(filteredUpdates)
+  require(filteredUpdates.picked == ["local_ui.json"],
+          "enabling updates under a project/session filter does not add hidden update candidates")
+  filteredUpdates.query = ""; await filteredUpdates.refresh()
+  require(filteredUpdates.picked == ["local_ui.json"],
+          "clearing search does not silently select updates that were outside the explicit action")
+  filteredUpdates.setUpdates(false); try await settled(filteredUpdates)
+  filteredUpdates.query = "接口"
+  filteredUpdates.setUpdates(true); try await settled(filteredUpdates)
+  require(filteredUpdates.picked == ["local_ui.json", "local_api.json"],
+          "enabling visible updates adds matching rows while retaining previously selected hidden rows")
+  let observedScope = SessionTransferEnvironment(endpoints: filteredUpdatesFixture.0.endpoints,
+   activeEndpointIDs: ["profile:Business"], transcripts: filteredUpdatesFixture.0.transcripts, backups: filteredUpdatesFixture.0.backups)
+  let staleAccountStore = Store(demo: true)
+  let observedDirection = SessionTransferController(store: staleAccountStore, testEnvironment: observedScope)
+  await observedDirection.refresh()
+  require(staleAccountStore.current == "Personal" && observedDirection.sourceID == "profile:Business"
+          && observedDirection.currentEndpointID == "profile:Business",
+          "default source follows the freshly bound active directory even before the main account observer catches up")
+  let directionFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: directionFixture.1) }
+  let directionStore = Store(demo: true); directionStore.current = "Business"
+  let direction = SessionTransferController(store: directionStore, testEnvironment: directionFixture.0)
+  await direction.refresh()
+  require(direction.sourceID == direction.currentEndpointID && direction.targetID.isEmpty,
+          "a copy-out flow starts at its current source, never an arbitrary parked account")
+  direction.setTarget("profile:Personal"); try await settled(direction)
+  let priorSourceSpace = direction.sourceSpaceID, priorTargetSpace = direction.targetSpaceID
+  direction.swapDirection(); try await settled(direction)
+  require(direction.sourceID == "profile:Personal" && direction.targetID == "profile:Business"
+          && direction.sourceSpaceID == priorTargetSpace && direction.targetSpaceID == priorSourceSpace,
+          "swapping direction carries the matching explicit spaces, not a stale old scope")
+  await direction.refresh()
+  require(direction.sourceID == "profile:Personal" && direction.targetID == "profile:Business",
+          "refresh preserves a user's explicit reverse direction")
   let navigationStore = Store(demo: true); let previousAccount = navigationStore.current
   var returned = 0; navigationStore.onShowAccounts = { returned += 1 }
   navigationStore.returnToAccounts()
@@ -478,7 +601,7 @@ actor FixtureGuardWorker: GuardWorking {
   let selectionFixture = try SessionTransferDemo.environment()
   defer { try? FileManager.default.removeItem(at: selectionFixture.1) }
   let selection = SessionTransferController(store: Store(demo: true), testEnvironment: selectionFixture.0)
-  await selection.refresh()
+  try await chooseBusinessToPersonal(selection)
   require(selection.visibleRows.count == 4 && selection.visibleRows.filter(\.selectable).count == 1, "four visible sessions can legitimately contain only one selectable add")
   require(selection.picked == ["local_ui.json"], "first valid load defaults to missing sessions only, without selecting updates")
   selection.selectAllVisible()
@@ -491,6 +614,9 @@ actor FixtureGuardWorker: GuardWorking {
   selection.setSourceSpace(selection.sourceSpaceID); selection.setTargetSpace(selection.targetSpaceID)
   require(selection.picked.isEmpty && !selection.isWorking, "reselecting unchanged scope cannot reset explicit user deselection")
   selection.setUpdates(true); try await settled(selection)
+  require(selection.picked == ["local_api.json"], "explicitly enabling updates selects safe updates without reselecting a deselected new session")
+  selection.setPicked("local_api.json", selected: false); await selection.refresh()
+  require(selection.picked.isEmpty, "ordinary refresh preserves a manually deselected update")
   selection.setPicked("local_ui.json", selected: true)
   selection.selectAllVisible()
   require(selection.picked == ["local_ui.json", "local_api.json"], "mixed selection becomes all eligible, without selecting ahead or conflicting rows")

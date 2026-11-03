@@ -98,6 +98,7 @@ struct CopyThreadsView: View {
     @State private var handoffCopied = false
     @State private var instructionsCopied = false
     @State private var instructionCopySequence = 0
+    @State private var showingScopeHelp = false
     private let store: Store
 
     init(store: Store) {
@@ -123,30 +124,65 @@ struct CopyThreadsView: View {
         return visiblePickedCount == selectableVisibleRows.count ? .on : .mixed
     }
 
-    private var listSummary: String {
-        text(controller.query.isEmpty ? "listSummary" : "filteredListSummary", arguments: [
-            "shown": String(controller.visibleRows.count),
-            "selectable": String(selectableVisibleRows.count)
-        ])
+    private var canSwapDirection: Bool {
+        !controller.isWorking && !controller.sourceID.isEmpty && !controller.targetID.isEmpty &&
+            controller.sourceID != controller.targetID
+    }
+
+    private var directionLabelWidth: CGFloat {
+        controller.language == "en" ? 72 : 48
     }
 
     private var selectedSummary: String {
-        let count = controller.picked.count
-        let visibleCount = controller.visibleRows.filter { controller.picked.contains($0.id) }.count
-        let outsideCount = max(0, count - visibleCount)
-        if !controller.query.isEmpty && outsideCount > 0 {
-            return text("selectedCountOutside", arguments: ["count": String(count), "outside": String(outsideCount)])
+        let plannedRows = controller.rows.filter { row in
+            controller.picked.contains(row.id) &&
+                (row.kind == .add || (row.kind == .update && controller.updateExisting))
         }
-        return text("selectedCount", arguments: ["count": String(count)])
+        let added = plannedRows.filter { $0.kind == .add }.count
+        let updated = plannedRows.filter { $0.kind == .update }.count
+        let visibleIDs = Set(controller.visibleRows.map(\.id))
+        let outsideCount = plannedRows.filter { !visibleIDs.contains($0.id) }.count
+        let arguments = [
+            "selected": String(plannedRows.count),
+            "added": String(added),
+            "updated": String(updated)
+        ]
+        let key = updated > 0 ? (added > 0 ? "selectedChanges" : "selectedUpdates") : "selectedCount"
+        let summary = text(key, arguments: arguments)
+        guard outsideCount > 0 else { return summary }
+        return text("selectedOutside", arguments: [
+            "summary": summary,
+            "outside": String(outsideCount)
+        ])
+    }
+
+    private var missingSelectionPrompt: String? {
+        if controller.sourceID.isEmpty || controller.targetID.isEmpty {
+            if controller.sourceID.isEmpty && controller.targetID.isEmpty {
+                return text("chooseSourceAndTargetPrompt")
+            }
+            return text(controller.sourceID.isEmpty ? "chooseSourcePrompt" : "chooseTargetPrompt")
+        }
+        let sourceSpaceMissing = controller.sourceSpaceID.isEmpty
+        let targetSpaceMissing = controller.targetSpaceID.isEmpty
+        guard sourceSpaceMissing || targetSpaceMissing else { return nil }
+        if (sourceSpaceMissing && controller.sourceSpaces.isEmpty) ||
+            (targetSpaceMissing && controller.targetSpaces.isEmpty) {
+            return text("statusOpenCode")
+        }
+        if sourceSpaceMissing && targetSpaceMissing {
+            return text("chooseSpacesPrompt")
+        }
+        return text(sourceSpaceMissing ? "chooseSourceSpacePrompt" : "chooseTargetSpacePrompt")
     }
 
     private var visibleStatusMessage: String? {
         guard let status = controller.statusMessage else { return nil }
-        if status.hasPrefix("已复制") || status == "已撤销上次复制。" ||
-            status == "已恢复上次未完成的变更。" || status.hasPrefix("已保留当前数据并结束记录") {
-            return nil
-        }
+        if status.hasPrefix("已复制") { return nil }
+        if status.hasPrefix("已保留当前数据并结束记录") { return text("preservedStatus") }
         switch status {
+        case "已撤销上次复制。": return text("undone")
+        case "已恢复上次未完成的变更。": return text("restored")
         case "选择或空间已变化，请重新复制。": return text("statusSelectionChanged")
         case "请先在相应账号或 API 工作区打开 Code 页，再重新检查。": return text("statusOpenCode")
         case "请选择不同的来源和目标空间。": return text("statusDifferentSpaces")
@@ -173,177 +209,47 @@ struct CopyThreadsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Button { CopyWindow.returnToAccounts(store) } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "chevron.left")
-                        Text(text("back"))
-                    }
-                    .font(.system(size: 11, weight: .medium))
+        VStack(alignment: .leading, spacing: 10) {
+            if controller.isShowingCopyResult {
+                if let operation = controller.lastOperation, operation.state == .completed {
+                    completionSummary(operation)
                 }
-                .buttonStyle(.link)
-                .foregroundColor(.sub)
-                .help(text("backHelp"))
-                Spacer()
+            } else {
+                navigationBar
+                directionEditor
+                scopeLabel
             }
 
-            HStack(alignment: .center, spacing: 10) {
-                VStack(alignment: .leading, spacing: 8) {
-                    picker(text("from"), selection: sourceBinding, options: controller.locations)
-                    if controller.sourceSpaces.count > 1 {
-                        spacePicker(text("sourceSpace"), selection: sourceSpaceBinding, options: controller.sourceSpaces)
-                    }
+            if !controller.isShowingCopyResult, let prompt = missingSelectionPrompt {
+                if let error = controller.errorMessage {
+                    message(generated(error), color: .bad)
                 }
-                Image(systemName: "arrow.right").foregroundColor(.sub)
-                VStack(alignment: .leading, spacing: 8) {
-                    picker(text("to"), selection: targetBinding, options: controller.locations)
-                    if controller.targetSpaces.count > 1 {
-                        spacePicker(text("targetSpace"), selection: targetSpaceBinding, options: controller.targetSpaces)
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-
-            if let error = controller.errorMessage {
-                message(generated(error), color: .bad)
-            } else if let status = visibleStatusMessage {
-                message(status, color: .sub)
-            }
-
-            HStack(spacing: 12) {
-                TextField(text("search"), text: $controller.query)
-                    .textFieldStyle(.roundedBorder)
-                Toggle(text("updateExisting"), isOn: updateBinding)
-                    .toggleStyle(.checkbox)
+                Text(prompt)
                     .font(.system(size: 12))
-                    .tint(.importAccentSoft)
-                    .disabled(controller.isWorking)
-                    .help(text("updateHelp"))
-            }
-
-            HStack(spacing: 7) {
-                MixedSelectionCheckbox(
-                    title: text("selectCopyable"),
-                    state: visibleSelectionState,
-                    isEnabled: !selectableVisibleRows.isEmpty && !controller.isWorking,
-                    help: text("selectCopyableHelp"),
-                    action: controller.selectAllVisible
-                )
-                .frame(height: 22)
-                FooterButton(icon: "arrow.clockwise", help: text("refreshHelp")) {
-                    Task { await controller.refresh() }
+                    .foregroundColor(.sub)
+                    .frame(maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
+            } else {
+                if let error = controller.errorMessage {
+                    message(generated(error), color: .bad)
+                } else if let status = visibleStatusMessage {
+                    message(status, color: .sub)
                 }
-                .disabled(controller.isWorking)
-                Spacer()
-                Text(listSummary)
-                    .font(.system(size: 12)).foregroundColor(.sub)
-            }
-
-            List(controller.visibleRows) { row in
-                let isPicked = controller.picked.contains(row.id)
-                HStack(alignment: .top, spacing: 10) {
-                    Toggle("", isOn: pickedBinding(row))
-                        .toggleStyle(.checkbox)
-                        .labelsHidden()
-                        .tint(.importAccentSoft)
-                        .disabled(!row.selectable || controller.isWorking)
-                        .accessibilityLabel(Text(row.title))
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Text(row.title)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.txt)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                                .help(row.title)
-                                .layoutPriority(1)
-                            Text(row.project)
-                                .font(.system(size: 11))
-                                .foregroundColor(.sub)
-                                .lineLimit(1)
-                        }
-                        Text(row.cwd)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.sub)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .help(row.cwd)
-                        if !row.selectable && row.kind == .blocked {
-                            Text(generated(row.reason))
-                                .font(.system(size: 11))
-                                .foregroundColor(Color.txt.opacity(0.72))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    Spacer(minLength: 4)
-                    VStack(alignment: .trailing, spacing: 6) {
-                        Text(activityTime(row.lastActivity))
-                            .font(.system(size: 11).monospacedDigit())
-                            .foregroundColor(.sub)
-                            .frame(width: 66, alignment: .trailing)
-                        if let status = rowStatus(row) {
-                            Text(status)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(row.kind == .update ? .importAccentSoft : (row.kind == .blocked ? .warn : .sub))
-                        }
-                    }
+                searchAndUpdate
+                if !controller.isShowingCopyResult {
+                    selectionToolbar
                 }
-                .padding(.horizontal, 9)
-                .padding(.vertical, 9)
-                .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.importAccent.opacity(0.22) : Color.clear))
-                .contentShape(Rectangle())
-                .help(generated(row.reason))
-                .accessibilityHint(generated(row.reason))
-                .onTapGesture {
-                    guard row.selectable, !controller.isWorking else { return }
-                    controller.setPicked(row.id, selected: !controller.picked.contains(row.id))
-                }
-                .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
-            }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.25)))
-            .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.75), lineWidth: 1))
-            .overlay {
-                if controller.visibleRows.isEmpty {
-                    Text(text(controller.rows.isEmpty ? "noRows" : "noMatches"))
-                        .font(.system(size: 12))
-                        .foregroundColor(.sub)
-                }
+                sessionList
             }
 
             if let operation = controller.lastOperation {
-                operationView(operation)
+                if operation.needsRecovery {
+                    recoveryRecordView(operation)
+                } else if !controller.isShowingCopyResult {
+                    recentRecordView(operation)
+                }
             }
 
-            HStack(spacing: 10) {
-                if controller.isWorking {
-                    ProgressView().controlSize(.small)
-                    Text(text("processing")).font(.system(size: 12)).foregroundColor(.importAccentSoft)
-                }
-                Text(selectedSummary)
-                    .font(.system(size: 12))
-                    .foregroundColor(.sub)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 4)
-                Button(text(instructionsCopied ? "copiedInstructions" : "copyForClaude")) {
-                    copyInstructions()
-                }
-                .buttonStyle(.link)
-                .font(.system(size: 12))
-                .foregroundColor(.sub)
-                .fixedSize()
-                .disabled(!controller.canExport || controller.isWorking)
-                Button(text("copy")) {
-                    Task { await controller.copySelected() }
-                }
-                .buttonStyle(ImportProminentButtonStyle())
-                .fixedSize()
-                .disabled(!controller.canCopy || controller.isWorking)
-            }
+            bottomBar
         }
         .padding(16)
         .frame(minWidth: 680, minHeight: 520)
@@ -358,6 +264,293 @@ struct CopyThreadsView: View {
         }
         .onChange(of: controller.handoffInformation) { _ in
             handoffCopied = false
+        }
+    }
+
+    private var navigationBar: some View {
+        HStack {
+            Button { CopyWindow.returnToAccounts(store) } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.left")
+                    Text(text("back"))
+                }
+                .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.link)
+            .foregroundColor(.sub)
+            .help(text("backHelp"))
+            Spacer()
+            Button(text(instructionsCopied ? "copiedInstructions" : "copyForClaude")) {
+                copyInstructions()
+            }
+            .buttonStyle(.link)
+            .font(.system(size: 11))
+            .foregroundColor(.sub)
+            .fixedSize()
+            .disabled(!controller.canExport || controller.isWorking)
+        }
+    }
+
+    private var directionEditor: some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(text("from"))
+                        .frame(width: directionLabelWidth, alignment: .leading)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.sub)
+                    picker(text("from"), selection: sourceBinding, options: controller.locations)
+                        .labelsHidden()
+                    if !controller.sourceID.isEmpty && controller.sourceID == controller.currentEndpointID {
+                        Text(text("currentAccount"))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.importAccentSoft)
+                    }
+                }
+                if controller.sourceSpaces.count > 1 {
+                    HStack(spacing: 6) {
+                        Text(text("sourceSpace"))
+                            .frame(width: directionLabelWidth, alignment: .leading)
+                            .font(.system(size: 11))
+                            .foregroundColor(.sub)
+                        spacePicker(text("sourceSpace"), selection: sourceSpaceBinding, options: controller.sourceSpaces)
+                    }
+                }
+            }
+            Button { controller.swapDirection() } label: {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 13, weight: .medium))
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(.sub)
+            .padding(.top, 2)
+            .help(text("swapDirection"))
+            .accessibilityLabel(Text(text("swapDirection")))
+            .disabled(!canSwapDirection)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 6) {
+                    Text(text("to"))
+                        .frame(width: directionLabelWidth, alignment: .leading)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.sub)
+                    picker(text("to"), selection: targetBinding, options: controller.locations, placeholder: text("chooseTarget"))
+                        .labelsHidden()
+                    if !controller.targetID.isEmpty && controller.targetID == controller.currentEndpointID {
+                        Text(text("currentAccount"))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.importAccentSoft)
+                    }
+                }
+                if controller.targetSpaces.count > 1 {
+                    HStack(spacing: 6) {
+                        Text(text("targetSpace"))
+                            .frame(width: directionLabelWidth, alignment: .leading)
+                            .font(.system(size: 11))
+                            .foregroundColor(.sub)
+                        spacePicker(text("targetSpace"), selection: targetSpaceBinding, options: controller.targetSpaces)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var scopeLabel: some View {
+        HStack(spacing: 5) {
+            Text(text("copyScopeLabel"))
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+            Button { showingScopeHelp.toggle() } label: {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 11))
+                    .frame(width: 20, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundColor(.sub)
+            .accessibilityLabel(Text(text("copyScopeAccessibility")))
+            .popover(isPresented: $showingScopeHelp, arrowEdge: .bottom) {
+                Text(text("copyScopeHelp"))
+                    .font(.system(size: 11))
+                    .foregroundColor(.txt)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(width: 340)
+                    .background(Color.bg)
+            }
+            Spacer()
+        }
+    }
+
+    private var searchAndUpdate: some View {
+        HStack(spacing: 12) {
+            TextField(text("search"), text: $controller.query)
+                .textFieldStyle(.roundedBorder)
+                .disabled(controller.isWorking)
+            if !controller.isShowingCopyResult {
+                Toggle(text("updateExisting"), isOn: updateBinding)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 12))
+                    .tint(.importAccentSoft)
+                    .disabled(controller.isWorking)
+                    .help(text("updateHelp"))
+            }
+        }
+    }
+
+    private var selectionToolbar: some View {
+        HStack(spacing: 7) {
+            MixedSelectionCheckbox(
+                title: text("selectCopyable"),
+                state: visibleSelectionState,
+                isEnabled: !selectableVisibleRows.isEmpty && !controller.isWorking,
+                help: text("selectCopyableHelp"),
+                action: controller.selectAllVisible
+            )
+            .frame(height: 22)
+            FooterButton(icon: "arrow.clockwise", help: text("refreshHelp")) {
+                Task { await controller.refresh() }
+            }
+            .disabled(controller.isWorking)
+            Spacer(minLength: 8)
+            Text(selectedSummary)
+                .font(.system(size: 12))
+                .foregroundColor(.sub)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .help(selectedSummary)
+        }
+    }
+
+    private var sessionList: some View {
+        List(controller.visibleRows) { row in
+            sessionRow(row)
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .frame(minHeight: 180)
+        .layoutPriority(1)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.25)))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.75), lineWidth: 1))
+        .overlay {
+            if controller.visibleRows.isEmpty {
+                Text(emptyListMessage)
+                    .font(.system(size: 12))
+                    .foregroundColor(.sub)
+            }
+        }
+    }
+
+    private func sessionRow(_ row: SessionTransferRow) -> some View {
+        let result = controller.isShowingCopyResult ? controller.resultItem(for: row) : nil
+        let title = result?.title ?? row.title
+        let path = result?.cwd ?? row.cwd
+        let isPicked = !controller.isShowingCopyResult && controller.picked.contains(row.id)
+        let showsOriginalTitle = result.map { $0.title != row.title } ?? false
+        return HStack(alignment: .top, spacing: 10) {
+            if !controller.isShowingCopyResult {
+                Toggle("", isOn: pickedBinding(row))
+                    .toggleStyle(.checkbox)
+                    .labelsHidden()
+                    .tint(.importAccentSoft)
+                    .disabled(!row.selectable || controller.isWorking)
+                    .accessibilityLabel(Text(row.title))
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.txt)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(title)
+                if showsOriginalTitle {
+                    Text(text("originalTitle", arguments: ["title": row.title]))
+                        .font(.system(size: 11))
+                        .foregroundColor(.sub)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(row.title)
+                }
+                Text(path)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.sub)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(path)
+                if shouldShowReason(row) {
+                    Text(generated(row.reason))
+                        .font(.system(size: 11))
+                        .foregroundColor(Color.txt.opacity(0.72))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(generated(row.reason))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .trailing, spacing: 5) {
+                Text(activityTime(row.lastActivity))
+                    .font(.system(size: 11).monospacedDigit())
+                    .foregroundColor(.sub)
+                    .frame(width: 66, alignment: .trailing)
+                Text(rowStatus(row, result: result))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(rowStatusColor(row, result: result))
+                    .lineLimit(1)
+                    .frame(width: 88, alignment: .trailing)
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 7)
+        .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.importAccent.opacity(0.22) : Color.clear))
+        .contentShape(Rectangle())
+        .accessibilityHint(generated(row.reason))
+        .onTapGesture {
+            guard !controller.isShowingCopyResult, row.selectable, !controller.isWorking else { return }
+            controller.setPicked(row.id, selected: !controller.picked.contains(row.id))
+        }
+        .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    private var emptyListMessage: String {
+        if controller.errorMessage != nil { return text("rowsUnavailable") }
+        if controller.isShowingCopyResult || !controller.query.isEmpty {
+            return text(controller.query.isEmpty ? "noRows" : "noMatches")
+        }
+        return text(controller.rows.isEmpty ? "noRows" : "noMatches")
+    }
+
+    private var bottomBar: some View {
+        HStack(spacing: 10) {
+            if controller.isShowingCopyResult {
+                Button(text("continueCopy")) { controller.beginAnotherCopy() }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12))
+                    .foregroundColor(.sub)
+                    .disabled(controller.isWorking)
+                Spacer()
+                Button(text("back")) { CopyWindow.returnToAccounts(store) }
+                    .buttonStyle(ImportProminentButtonStyle())
+                    .fixedSize()
+                    .disabled(controller.isWorking)
+            } else {
+                if controller.isWorking {
+                    ProgressView().controlSize(.small)
+                    Text(text("processing"))
+                        .font(.system(size: 12))
+                        .foregroundColor(.importAccentSoft)
+                }
+                Spacer(minLength: 4)
+                Button(text("copy")) {
+                    Task { await controller.copySelected() }
+                }
+                .buttonStyle(ImportProminentButtonStyle())
+                .fixedSize()
+                .disabled(!controller.canCopy || controller.isWorking)
+            }
         }
     }
 
@@ -416,42 +609,103 @@ struct CopyThreadsView: View {
         SessionTransferLocalization.message(value, language: controller.language)
     }
 
-    private func picker(_ label: String, selection: Binding<String>, options: [TransferLocationOption]) -> some View {
-        Picker(label, selection: selection) {
+    private func picker(_ label: String, selection: Binding<String>, options: [TransferLocationOption], placeholder: String? = nil) -> some View {
+        let selectedName = options.first { $0.id == selection.wrappedValue }.map {
+            $0.id == "api" ? text("apiWorkspace") : $0.name
+        } ?? placeholder ?? label
+        return Picker(label, selection: selection) {
+            if let placeholder {
+                Text(placeholder).tag("")
+            }
             ForEach(options) { option in
-                Text(option.id == "api" ? text("apiWorkspace") : option.name).tag(option.id)
+                Text(option.id == "api" ? text("apiWorkspace") : option.name)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .tag(option.id)
             }
         }
-        .frame(width: 210)
+        .frame(width: 170)
         .disabled(controller.isWorking)
+        .help(selectedName)
     }
 
     private func spacePicker(_ label: String, selection: Binding<String>, options: [TransferSpaceOption]) -> some View {
-        Picker(label, selection: selection) {
+        let selectedName = options.first { $0.id == selection.wrappedValue }.map {
+            SessionTransferLocalization.spaceName($0.name, language: controller.language)
+        } ?? text("chooseSpace")
+        return Picker(label, selection: selection) {
             Text(text("chooseSpace")).tag("")
             ForEach(options) { option in
-                Text(SessionTransferLocalization.spaceName(option.name, language: controller.language)).tag(option.id)
+                Text(SessionTransferLocalization.spaceName(option.name, language: controller.language))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .tag(option.id)
             }
         }
-        .frame(width: 210)
+        .labelsHidden()
+        .frame(width: 170)
         .disabled(controller.isWorking)
+        .help(selectedName)
     }
 
     private func message(_ value: String, color: Color) -> some View {
         Text(value)
             .font(.system(size: 11))
             .foregroundColor(color)
-            .fixedSize(horizontal: false, vertical: true)
+            .lineLimit(2)
+            .truncationMode(.tail)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .help(value)
     }
 
-    private func rowStatus(_ row: SessionTransferRow) -> String? {
+    private func skipStatus(_ row: SessionTransferRow) -> String? {
+        switch row.reason {
+        case "目标已同步，无需重复复制。": return text("skipSynced")
+        case "目标进度较新，保留目标。": return text("skipTargetNewer")
+        case "目标已有这段会话；开启更新后可同步列表进度。": return text("skipUpdatesDisabled")
+        case "目标已有同一会话，保留目标条目。": return text("skipExisting")
+        default: return nil
+        }
+    }
+
+    private func shouldShowReason(_ row: SessionTransferRow) -> Bool {
+        guard !row.reason.isEmpty else { return false }
+        return row.kind == .blocked || (row.kind == .skip && skipStatus(row) == nil)
+    }
+
+    private func rowStatus(_ row: SessionTransferRow, result: TransferSessionItem?) -> String {
+        if let result {
+            switch result.kind {
+            case .add: return text("resultAdded")
+            case .update: return text("resultUpdated")
+            case .skip, .blocked: return text("notCopied")
+            }
+        }
+        if controller.isShowingCopyResult {
+            switch row.kind {
+            case .add, .update: return text("notCopied")
+            case .skip: return skipStatus(row) ?? text("notCopied")
+            case .blocked: return text("needsReview")
+            }
+        }
         switch row.kind {
-        case .add: return nil
-        case .update: return text("canUpdate")
-        case .skip: return text("existing")
+        case .add: return text("willAdd")
+        case .update: return text("willUpdate")
+        case .skip: return skipStatus(row) ?? text("skipRetained")
         case .blocked: return text("needsReview")
         }
+    }
+
+    private func rowStatusColor(_ row: SessionTransferRow, result: TransferSessionItem?) -> Color {
+        if let result {
+            switch result.kind {
+            case .add, .update: return .good
+            case .skip, .blocked: return .warn
+            }
+        }
+        if row.kind == .blocked { return .warn }
+        if controller.isShowingCopyResult { return .sub }
+        return row.kind == .add || row.kind == .update ? .importAccentSoft : .sub
     }
 
     private func activityTime(_ date: Date) -> String {
@@ -506,36 +760,95 @@ struct CopyThreadsView: View {
         }
     }
 
-    private func operationView(_ operation: SessionTransferOperation) -> some View {
+    private func completionSummary(_ operation: SessionTransferOperation) -> some View {
         let content = operationContent(operation)
-        return HStack(alignment: .center, spacing: 9) {
-            Circle().fill(content.color).frame(width: 6, height: 6)
+        return HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundColor(.good)
+                .padding(.top, 1)
+                .accessibilityHidden(true)
+            Text(content.summary)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.txt)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .layoutPriority(1)
+                .help(content.summary)
+            Button(text("viewBackup")) { controller.showBackup() }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+                .fixedSize()
+                .disabled(controller.isWorking)
+            if operation.canUndo {
+                Button(text("undo")) { controller.requestUndo() }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                    .foregroundColor(.sub)
+                    .fixedSize()
+                    .disabled(controller.isWorking)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func recentRecordView(_ operation: SessionTransferOperation) -> some View {
+        let content = operationContent(operation)
+        return HStack(spacing: 12) {
+            Button(text("recentOperation")) { controller.showBackup() }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+                .help(content.title + "\n" + content.summary)
+                .disabled(controller.isWorking)
+            if operation.canUndo {
+                Button(text("undo")) { controller.requestUndo() }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                    .foregroundColor(.sub)
+                    .disabled(controller.isWorking)
+            }
+            Spacer()
+        }
+    }
+
+    private func recoveryRecordView(_ operation: SessionTransferOperation) -> some View {
+        let content = operationContent(operation)
+        return HStack(alignment: .top, spacing: 9) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(content.color)
+                .padding(.top, 2)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(content.title)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(content.color)
                 Text(content.summary)
-                    .font(.system(size: 10.5))
+                    .font(.system(size: 11))
                     .foregroundColor(.sub)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .help(content.summary)
             }
-            Spacer(minLength: 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
             Button(text("viewBackup")) { controller.showBackup() }
-                .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
-            if operation.canUndo {
-                Button(text("undo")) { controller.requestUndo() }
-                    .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .disabled(controller.isWorking)
-            }
-            if operation.needsRecovery {
-                Button(text("recover")) { controller.requestRecovery() }
-                    .buttonStyle(.link).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .disabled(controller.isWorking)
-            }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+                .fixedSize()
+                .disabled(controller.isWorking)
+            Button(text("recover")) { controller.requestRecovery() }
+                .buttonStyle(.link)
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+                .fixedSize()
+                .disabled(controller.isWorking)
         }
-        .padding(.horizontal, 10).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(Color.card))
     }
 
     private func sheetContent(_ sheet: SessionTransferSheet) -> some View {

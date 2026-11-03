@@ -78,8 +78,9 @@ extension SessionTransferService {
                 let beforeFile = change.before == nil ? nil : "before-\(i).json", afterFile = "after-\(i).json"
                 if let bytes = change.before, let name = beforeFile { try io.write(bytes, dir.appendingPathComponent(name), .create) }
                 try io.write(change.after, dir.appendingPathComponent(afterFile), .create)
-                items.append(SessionTransferReceiptItem(name: change.name, title: change.title, kind: change.kind,
-                    cwd: try Disk.json(change.after)["cwd"] as? String,
+                let destination = try Disk.json(change.after)
+                items.append(SessionTransferReceiptItem(name: change.name, title: destination["title"] as? String ?? change.title, kind: change.kind,
+                    cwd: destination["cwd"] as? String,
                     beforeHash: change.before.map(Disk.hash), afterHash: Disk.hash(change.after), beforeFile: beforeFile, afterFile: afterFile))
             }
             var receipt = SessionTransferReceipt(version: 1, id: id, createdAt: Date(), target: plan.targetScope,
