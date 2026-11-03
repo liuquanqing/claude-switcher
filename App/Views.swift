@@ -1092,6 +1092,10 @@ struct Panel: View {
                 accountGrid
             }
             HStack(spacing: 7) {
+                FooterButton(icon: "folder", help: t("footer.showDirectory")) {
+                    if !store.isDemo { NSWorkspace.shared.activateFileViewerSelecting([parkDir]) }
+                }
+                Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 if let b = store.busy {
                     ProgressView().controlSize(.small)
                     Text(generated(b)).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
@@ -1126,7 +1130,7 @@ struct Panel: View {
                 ) {
                     Task { await store.refreshAllStatuses() }
                 }
-                AppSettingsMenu(store: store, accountDirectory: parkDir)
+                AppSettingsMenu(store: store)
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {
                     HStack(spacing: 5) {

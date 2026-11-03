@@ -60,5 +60,82 @@ import SwitcherCore
     require(silent.phase == .idle && silent.message==nil,"background update failures are quiet and never open UI")
     await silent.check()
     require(silent.phase == .failed && silent.message != nil,"explicit checks explain a failure without requesting a GitHub login")
+
+    // Menu presentation uses only fictional release metadata and an injected
+    // presenter. It never opens a live window, browser, installer or account.
+    var presentations = 0, currentFeedback = 0, failedFeedback = 0, panelDismissals = 0
+    let presentation = ApplicationUpdatePresentation { model, language in
+        require([.available, .downloading, .ready].contains(model.phase), "the presenter reads the committed phase, not @Published willSet state")
+        require(language == "en", "update presentation retains the requested global language")
+        presentations += 1
+    }
+    presentation.onWillPresent = { panelDismissals += 1 }
+    func feedback(_ value: ApplicationUpdatePresentation.Feedback) {
+        switch value {
+        case .current: currentFeedback += 1
+        case .failed: failedFeedback += 1
+        }
+    }
+    var menuFetches = 0
+    var finishMenuFetch: CheckedContinuation<Data, Error>?
+    let menuUpdater = ApplicationUpdater(demo: true, operations: .init(fetch: { _ in
+        menuFetches += 1
+        return try await withCheckedThrowingContinuation { finishMenuFetch = $0 }
+    }, download: operations.download, verify: operations.verify, directory: root),
+        currentVersion: "1.3.6", architecture: "arm64")
+    presentation.check(updater: menuUpdater, language: "en", feedback: feedback)
+    presentation.check(updater: menuUpdater, language: "en", feedback: feedback)
+    while finishMenuFetch == nil { await Task.yield() }
+    require(presentation.isChecking && presentations == 0 && menuFetches == 1,
+            "repeated menu clicks share one check and do not open a checking window")
+    finishMenuFetch!.resume(returning: Data("[]".utf8)); finishMenuFetch = nil
+    while presentation.isChecking { await Task.yield() }
+    require(currentFeedback == 1 && presentations == 0,
+            "an up-to-date installation gets lightweight feedback without an update window")
+
+    presentation.check(updater: menuUpdater, language: "en", feedback: feedback)
+    while finishMenuFetch == nil { await Task.yield() }
+    finishMenuFetch!.resume(throwing: URLError(.notConnectedToInternet)); finishMenuFetch = nil
+    while presentation.isChecking { await Task.yield() }
+    require(failedFeedback == 1 && presentations == 0 && menuUpdater.phase == .failed,
+            "a failed menu check explains the error without opening an empty update page")
+
+    // A user click during the daily check must attach to that in-flight result.
+    let background = Task { await menuUpdater.check(manual: true) }
+    while finishMenuFetch == nil { await Task.yield() }
+    let beforeSharedFetches = menuFetches
+    presentation.check(updater: menuUpdater, language: "en", feedback: feedback)
+    finishMenuFetch!.resume(returning: data); finishMenuFetch = nil
+    await background.value
+    while presentation.isChecking { await Task.yield() }
+    require(!presentation.isChecking && menuFetches == beforeSharedFetches && presentations == 1,
+            "an in-flight check is shared and only an available release opens the update window")
+
+    await menuUpdater.download()
+    let beforeReadyFetches = menuFetches
+    presentation.check(updater: menuUpdater, language: "en", feedback: feedback)
+    require(menuUpdater.phase == .ready && presentations == 2 && menuFetches == beforeReadyFetches,
+            "reopening a verified installer preserves it rather than discarding it for a new check")
+
+    presentation.check(updater: silent, language: "en", feedback: feedback)
+    while presentation.isChecking { await Task.yield() }
+    require(failedFeedback == 2 && presentations == 2,
+            "retry after a failed check stays lightweight and never claims current")
+
+    var finishDaily: CheckedContinuation<Data, Error>?
+    let daily = ApplicationUpdater(demo: true, operations: .init(fetch: { _ in
+        try await withCheckedThrowingContinuation { finishDaily = $0 }
+    }, download: operations.download, verify: operations.verify, directory: root),
+        currentVersion: "1.3.6", architecture: "arm64")
+    let dailyTask = Task { await daily.check(manual: false) }
+    while finishDaily == nil { await Task.yield() }
+    presentation.check(updater: daily, language: "en", feedback: feedback)
+    finishDaily!.resume(throwing: URLError(.notConnectedToInternet)); finishDaily = nil
+    await dailyTask.value
+    while presentation.isChecking { await Task.yield() }
+    require(failedFeedback == 3 && daily.phase == .idle && presentations == 2,
+            "an explicit click joining an offline daily check gets failure feedback rather than silence")
+    require(panelDismissals == presentations,
+            "only actionable update presentations dismiss the menu panel before fronting a normal window")
     return checks
 }

@@ -172,6 +172,7 @@ final class Store: ObservableObject {
     @Published var banner: String?
     @Published var usageNotice: String?
     @Published var openAtLogin = false
+    @Published var applicationUpdateNotice: String?
     @Published var cliProfile: String?     // profile the terminal `claude` is logged in as
     @Published var cliEmail: String?
     @Published var cliStatus: CLILoginStatus = .unverified
@@ -187,6 +188,7 @@ final class Store: ObservableObject {
     func setAppLanguage(_ value: String) {
         guard AppLocalization.isSupported(value), value != appLanguage else { return }
         appLanguage = value
+        applicationUpdateNotice = nil
         if !isDemo { UserDefaults.standard.set(value, forKey: "applicationLanguage") }
         onLanguageChange?()
     }
@@ -602,6 +604,7 @@ func writeKeychain(service: String, account: String, json: [String: Any]) throws
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     let popover = NSPopover()
+    private var popoverDismissal: PopoverDismissalController?
     var store: Store!
     var previewWindow: NSWindow?
     var previewContentHeight: CGFloat?
@@ -612,6 +615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         MainActor.assumeIsolated {
             store = demoMode ? Store(demo: true) : Store()
+            ApplicationUpdatePresentation.shared.onWillPresent = { [weak self] in self?.popover.close() }
             if !demoMode { ApplicationUpdater.shared.startAutomaticChecks() }
             store.onChange = { [weak self] in self?.updateTitle() }
             titleModeObservation = store.protection.$desktopScope.removeDuplicates().dropFirst()
@@ -630,6 +634,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.contentViewController = host
             item.button?.target = self
             item.button?.action = #selector(toggle)
+            popoverDismissal = PopoverDismissalController()
+            popoverDismissal?.attach(to: popover, anchor: item.button)
             updateTitle()
             rebuildMainMenu()
             let transferPreview = demoMode && Bundle.main.object(forInfoDictionaryKey: "CSPreviewTransfer") as? Bool == true
@@ -682,6 +688,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 button.frame = NSRect(x: 60, y: 20, width: 180, height: 32)
                 content.addSubview(button)
                 previewButton = button
+                popoverDismissal?.attach(to: popover, anchor: button)
                 window.contentView = content
                 window.center()
                 if let visibleFrame = (window.screen ?? NSScreen.main)?.visibleFrame {
@@ -704,7 +711,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         commands.addItem(withTitle: appText("menu.open", language: store.appLanguage),
                          action: #selector(showPanel), keyEquivalent: "o").target = self
         if !demoMode || CommandLine.arguments.contains("--demo-updates") {
-            commands.addItem(withTitle: store.appLanguage == "en" ? "Check for Updates…" : "检查更新…",
+            commands.addItem(withTitle: appText("settings.checkForUpdates", language: store.appLanguage),
                              action: #selector(showApplicationUpdates), keyEquivalent: "").target = self
         }
         commands.addItem(.separator())
@@ -774,7 +781,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.activate(ignoringOtherApps: true)
                 return
             }
-            if popover.isShown { popover.performClose(nil); return }
+            if popover.isShown { popover.close(); return }
             guard let b = item.button else { return }
             store.panelWillOpen()
             if let v = popover.contentViewController?.view {
@@ -790,7 +797,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openPreviewPopover(_ sender: NSButton) {
         MainActor.assumeIsolated {
             guard demoPopover else { return }
-            if popover.isShown { popover.performClose(nil) }
+            if popover.isShown { popover.close() }
             store.panelWillOpen()
             if let v = popover.contentViewController?.view {
                 v.layoutSubtreeIfNeeded()
@@ -808,7 +815,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @MainActor @objc func showApplicationUpdates() {
-        ApplicationUpdateWindowController.shared.show(updater: ApplicationUpdater.shared, language: store.appLanguage)
+        store.checkApplicationUpdates()
     }
 }
 
