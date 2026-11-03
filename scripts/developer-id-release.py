@@ -11,8 +11,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE = "1.3.6-rc.4"
-BUILD = "20261103.4.0"
-CANDIDATE_COMMIT = "302a3f72636f4f491a7ea5bebe76631574319920"
+BUILD = "20261103.4.1"
+CANDIDATE_COMMIT = "d33dda383c677ff58c8fc641a2dd26795f40568e"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.3-r2"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
@@ -146,7 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("prepare", "sign", "submit-app", "check-app",
                                           "package", "submit-dmg", "check-dmg"))
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / RELEASE)
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / (RELEASE + "-r2"))
     parser.add_argument("--identity", help="Exact 40-character SHA-1 of a local Developer ID identity")
     parser.add_argument("--team-id", help="Personal Team ID; never select a company team")
     parser.add_argument("--profile", help="Existing local notarytool Keychain profile name; no secrets")
