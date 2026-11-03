@@ -10,10 +10,10 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.6-rc.4"
-BUILD = "20261103.4.1"
-CANDIDATE_COMMIT = "d33dda383c677ff58c8fc641a2dd26795f40568e"
-DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.3-r2"
+RELEASE = "1.3.6-rc.5"
+BUILD = "20261104.5.0"
+CANDIDATE_COMMIT = "10e9e33fa3b49be0d0b224495b566300b8b34911"
+DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.4-r2"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
 APP_NAME = "Claude Switcher Preview.app"
@@ -146,7 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("prepare", "sign", "submit-app", "check-app",
                                           "package", "submit-dmg", "check-dmg"))
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / (RELEASE + "-r2"))
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/developer-id" / RELEASE)
     parser.add_argument("--identity", help="Exact 40-character SHA-1 of a local Developer ID identity")
     parser.add_argument("--team-id", help="Personal Team ID; never select a company team")
     parser.add_argument("--profile", help="Existing local notarytool Keychain profile name; no secrets")
@@ -179,7 +179,7 @@ def main():
                      staple={"app": "NOT_RUN", "dmg": "NOT_RUN"},
                      gatekeeper={"app": "NOT_RUN", "dmg": "NOT_RUN"},
                      installation="NOT_RUN", realAccountValidation="NOT_RUN",
-                     designatedRequirement={"status": "NOT_RUN", "baselineRelease": "1.3.6-rc.3", "baselineBuild": "20261103.3.0"},
+                     designatedRequirement={"status": "NOT_RUN", "baselineRelease": "1.3.6-rc.4", "baselineBuild": "20261103.4.1"},
                      distributionReady=False, files={}, phase="prepared")
         save(manifest, state)
     else:
@@ -211,19 +211,19 @@ def main():
             state.update(identitySHA1=args.identity.upper(), teamID=args.team_id,
                          signing="Developer ID Application; Hardened Runtime; secure timestamp", phase="signed")
             comparison = compare_designated_requirements(DR_BASELINE_DIRECTORY / DR_BASELINE_APP_NAME, app)
-            comparison.update(baselineRelease="1.3.6-rc.3", baselineBuild="20261103.3.0",
+            comparison.update(baselineRelease="1.3.6-rc.4", baselineBuild="20261103.4.1",
                               candidateRelease=RELEASE, candidateBuild=BUILD)
             save(evidence / "gui-designated-requirement-comparison.json", comparison)
             state["designatedRequirement"] = comparison
             save(manifest, state)
-            require(comparison["same"], "GUI designated requirement differs from RC3; stop for review")
+            require(comparison["same"], "GUI designated requirement differs from RC4; stop for review")
         elif phase.startswith("submit-"):
             kind = phase.removeprefix("submit-")
             require(args.profile, "Existing local Keychain profile required")
             require(state["phase"] == ("signed" if kind == "app" else "packaged"), "Unexpected submission phase")
             require(state["notarization"][kind]["status"] == "NOT_RUN", "Submission already exists")
             require(state["designatedRequirement"].get("same") is True,
-                    "RC3/RC4 GUI designated requirement equality must be reviewed before submission")
+                    "RC4/RC5 GUI designated requirement equality must be reviewed before submission")
             verify_app(app, state["teamID"], evidence)
             if kind == "app":
                 archive = directory / "app-submission.zip"
