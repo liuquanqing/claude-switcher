@@ -12,7 +12,8 @@ struct ClaudeGuard {
         let files = SafetyFiles(directory: configURL.deletingLastPathComponent())
         guard configURL == files.configURL else { exit(2) }
         let support = files.directory.deletingLastPathComponent()
-        let scope = DesktopModeInspector.read(support: support)
+        let initialEvidence = DesktopModeInspector.evidence(support: support)
+        let scope = initialEvidence.scope
         let session = files.loadManagedDesktop()
         let config: SafetyConfig
         do { config = try files.loadConfig() }
@@ -34,14 +35,20 @@ struct ClaudeGuard {
         }
         // A user may stop protection or change its target while the request is pending.
         guard (try? files.loadConfig()) == config, files.loadManagedDesktop() == session else { exit(0) }
-        let currentScope = DesktopModeInspector.read(support: support)
-        if currentScope != .subscription, session != nil, files.loadManagedDesktop() == session {
-            // Revoke only our own process record; leave API/unknown clients untouched.
+        let currentEvidence = DesktopModeInspector.evidence(support: support)
+        let currentScope = currentEvidence.scope
+        let authorized = session.flatMap { record in
+            record.authorizes(initialEvidence) && record.authorizes(currentEvidence) ? record : nil
+        }
+        if authorized == nil, session != nil, files.loadManagedDesktop() == session {
+            // An observed loss of mode evidence requires a fresh confirmation.
+            // Do not give the revoked record to this tick's stop operation.
             try? FileManager.default.removeItem(at: files.managedDesktopURL)
         }
-        let receipt = await GuardEngine.tick(config: config, network: network,
-            stop: { await stopClaude(session: session, support: support) }, desktopScope: currentScope,
-            desktopManaged: isManaged(session, support: support))
+        var receipt = await GuardEngine.tick(config: config, network: network,
+            stop: { await stopClaude(session: authorized, support: support) }, desktopScope: currentScope,
+            desktopManaged: isManaged(authorized, support: support))
+        receipt.supportsUnchangedModeMarker = true
         do { try files.save(receipt, to: files.receiptURL) }
         catch { exit(1) }
     }

@@ -15,15 +15,19 @@ public struct ManagedDesktopSession: Codable, Equatable, Sendable {
     public let pid: Int32
     public let launchedAt: Date
     public let modeRevision: String?
-    public init(pid: Int32, launchedAt: Date, modeRevision: String? = nil) {
+    public let subscriptionModeMarker: String?
+    public init(pid: Int32, launchedAt: Date, modeRevision: String? = nil, subscriptionModeMarker: String? = nil) {
         self.pid = pid; self.launchedAt = launchedAt; self.modeRevision = modeRevision
+        self.subscriptionModeMarker = subscriptionModeMarker
     }
     public func matches(pid: Int32, launchedAt: Date?) -> Bool {
         guard let launchedAt else { return false }
         return self.pid == pid && abs(self.launchedAt.timeIntervalSince(launchedAt)) < 0.001
     }
-    public func authorizes(_ evidence: DesktopModeEvidence) -> Bool {
-        evidence.scope == .subscription && modeRevision != nil && modeRevision == evidence.revision
+    public func authorizes(_ evidence: DesktopModeEvidence, allowUnchangedModeMarker: Bool = true) -> Bool {
+        guard evidence.scope == .subscription, let modeRevision, let observedRevision = evidence.revision else { return false }
+        return modeRevision == observedRevision || (allowUnchangedModeMarker &&
+            subscriptionModeMarker != nil && subscriptionModeMarker == evidence.subscriptionModeMarker)
     }
 }
 

@@ -138,9 +138,10 @@ final class ProtectionController: ObservableObject {
 
     func refreshScope() {
         guard !demo else { return }
-        desktopScope = DesktopModeInspector.read(support: files.directory.deletingLastPathComponent())
+        let evidence = DesktopModeInspector.evidence(support: files.directory.deletingLastPathComponent())
+        desktopScope = evidence.scope
         apiConfiguration = APIConfigurationInspector.read(support: files.directory.deletingLastPathComponent(), scope: desktopScope)
-        desktopManaged = managedDesktopApplication(files) != nil
+        desktopManaged = managedDesktopApplication(files, evidence: evidence) != nil
         switch desktopScope {
         case .api: desktopScopeDetail = "API 配置不纳入订阅桌面守护；从原工具启动的进程不会被接管。"
         case .unknown: desktopScopeDetail = "无法确认订阅配置，桌面入口暂停；不会按进程名关闭现有客户端。"

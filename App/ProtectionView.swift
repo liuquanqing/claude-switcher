@@ -462,32 +462,55 @@ struct TerminalProtectionCard: View {
         .accessibilityHint(t("protection.settingsHint"))
     }
 
-    /// The column header: what the guard means for the desktop right now (line 1) and the one fact or
-    /// next step that matters in that state (line 2). The whole block is the settings disclosure; its
-    /// only open/close affordance is the chevron beside the title, and the open panel visually extends
-    /// from this column, so entry and fold belong to the same place.
+    /// The normal protected state combines its title and saved country when they fit; every other state
+    /// keeps the title and a detail line. The whole block is the settings disclosure; its only open/close
+    /// affordance is the chevron beside the title, and the open panel visually extends from this column.
     private var statusButton: some View {
         Button { showSettings.toggle() } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 5) {
-                    Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
-                        .frame(width: 14, height: 14)
-                    Text(statusTitle).font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1).minimumScaleFactor(0.85)
-                    Spacer(minLength: 2)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .semibold))
-                        .rotationEffect(.degrees(showSettings ? 180 : 0))
-                        .foregroundColor(settingsHover || showSettings ? .txt : .sub)
-                        .frame(width: 12)
+            ViewThatFits(in: .horizontal) {
+                if protectedDesktop, statusTitle == t("protection.active"),
+                   let country = controller.activeCountry?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !country.isEmpty {
+                    HStack(spacing: 5) {
+                        Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
+                            .frame(width: 14, height: 14)
+                        (Text(statusTitle)
+                            + Text(" · ").foregroundColor(.sub)
+                            + Text(country).foregroundColor(.sub))
+                            .font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                        Spacer(minLength: 2)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .rotationEffect(.degrees(showSettings ? 180 : 0))
+                            .foregroundColor(settingsHover || showSettings ? .txt : .sub)
+                            .frame(width: 12)
+                    }
+                    .frame(height: 22)
+                    .foregroundColor(statusColor)
                 }
-                .frame(height: 22)
-                .foregroundColor(statusColor)
-                // Keep the detail inside the 164pt column without shrinking the rest of the panel.
-                Text(statusDetail)
-                    .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                    .lineLimit(1).minimumScaleFactor(0.78)
-                    .padding(.leading, 20)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 5) {
+                        Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
+                            .frame(width: 14, height: 14)
+                        Text(statusTitle).font(.system(size: 11, weight: .semibold))
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                        Spacer(minLength: 2)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .rotationEffect(.degrees(showSettings ? 180 : 0))
+                            .foregroundColor(settingsHover || showSettings ? .txt : .sub)
+                            .frame(width: 12)
+                    }
+                    .frame(height: 22)
+                    .foregroundColor(statusColor)
+                    // Keep the detail inside the 164pt column without shrinking the rest of the panel.
+                    Text(statusDetail)
+                        .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                        .lineLimit(1).minimumScaleFactor(0.78)
+                        .padding(.leading, 20)
+                }
             }
             .padding(.horizontal, 6).padding(.vertical, 6)
             .frame(maxWidth: .infinity, alignment: .topLeading)

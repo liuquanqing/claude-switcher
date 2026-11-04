@@ -77,7 +77,10 @@ public struct AuthenticationConfiguration: Equatable, Sendable {
 public struct DesktopModeEvidence: Equatable, Sendable {
     public let scope: DesktopProtectionScope
     public let revision: String?
-    public init(scope: DesktopProtectionScope, revision: String?) { self.scope = scope; self.revision = revision }
+    public let subscriptionModeMarker: String?
+    public init(scope: DesktopProtectionScope, revision: String?, subscriptionModeMarker: String? = nil) {
+        self.scope = scope; self.revision = revision; self.subscriptionModeMarker = subscriptionModeMarker
+    }
 }
 
 public enum DesktopModeInspector {
@@ -103,6 +106,7 @@ public enum DesktopModeInspector {
     /// from API to 1p does not silently re-authorize an old process record.
     public static func evidence(support: URL) -> DesktopModeEvidence {
         var documents: [Data] = [], generations = Data()
+        var primaryHasNoMode = false, subscriptionMarker: String?
         for root in ["Claude", "Claude-3p"] {
             let path = support.appendingPathComponent(root + "/claude_desktop_config.json")
             do {
@@ -122,8 +126,15 @@ public enum DesktopModeInspector {
                     return .init(scope: .unknown, revision: nil)
                 }
                 documents.append(data)
-                generations.append(Data((root + ":" + generation(after) + ":").utf8))
-                generations.append(contentsOf: SHA256.hash(data: data))
+                var fileGeneration = Data((root + ":" + generation(after) + ":").utf8)
+                fileGeneration.append(contentsOf: SHA256.hash(data: data))
+                generations.append(fileGeneration)
+                if let object = try? CLIJSON.object(data) {
+                    if root == "Claude" { primaryHasNoMode = object["deploymentMode"] == nil }
+                    else if object["deploymentMode"] as? String == "1p" {
+                        subscriptionMarker = SHA256.hash(data: fileGeneration).map { String(format: "%02x", $0) }.joined()
+                    }
+                }
             }
             catch let e as CocoaError where e.code == .fileReadNoSuchFile || e.code == .fileNoSuchFile {
                 generations.append(Data((root + ":absent;").utf8))
@@ -132,6 +143,10 @@ public enum DesktopModeInspector {
         }
         let scope = classify(documents)
         let revision = scope == .unknown ? nil : SHA256.hash(data: generations).map { String(format: "%02x", $0) }.joined()
-        return .init(scope: scope, revision: revision)
+        // Only the ordinary, mode-less preferences file can be rewritten without
+        // revoking consent. Keep the complete generation of the explicit 1p
+        // marker, including inode and timestamps, to detect an API round trip.
+        return .init(scope: scope, revision: revision,
+                     subscriptionModeMarker: scope == .subscription && primaryHasNoMode ? subscriptionMarker : nil)
     }
 }
