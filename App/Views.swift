@@ -339,13 +339,16 @@ struct TerminalStrip: View {
     @ObservedObject var store: Store
     @ObservedObject private var protection: ProtectionController
     @Environment(\.appLanguage) private var language
-    @State private var hover = false
+    @State private var syncHover = false
+    @State private var copyHover = false
     @State private var showHelp = false
     @State private var confirmSync = false
     /// Account name pinned when the dialog opens, so a background refresh or external switch
     /// can't make the user confirm X and sync Y.
     @State private var syncTarget = ""
     @State private var syncStale = false
+    @State private var copyFeedback: Bool?
+    @State private var copyFeedbackSequence = 0
 
     init(store: Store) {
         self.store = store
@@ -380,6 +383,7 @@ struct TerminalStrip: View {
     /// Sync is only offered after a check found a difference, and only against a subscription
     /// desktop; API / unknown desktops have no subscription account to sync to.
     private var canSync: Bool { store.cliStatus == .different && protection.desktopScope == .subscription }
+    private var canCopyScoped: Bool { protection.desktopScope == .subscription }
 
     /// Green needs a real comparison against a subscription desktop. A `matched` seen under another
     /// scope is stale (the backend invalidates on scope change) and is never shown as a match.
@@ -450,8 +454,25 @@ struct TerminalStrip: View {
         }
     }
 
-    /// The only inline action row is the sync remedy; the status button opens the existing detail popover.
-    private var showsActions: Bool { canSync }
+    private var showsActions: Bool { canCopyScoped || canSync }
+
+    private var copyTitle: String {
+        if copyFeedback == true { return t("cli.scopedCopied") }
+        if copyFeedback == false { return t("cli.scopedCopyFailed") }
+        return t("cli.copyScoped")
+    }
+
+    private func copyScopedCommand() {
+        guard canCopyScoped, !controlsLocked, !checking else { return }
+        copyFeedback = store.copyScopedCLICommand()
+        copyFeedbackSequence += 1
+        let sequence = copyFeedbackSequence
+        Task {
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard copyFeedbackSequence == sequence else { return }
+            copyFeedback = nil
+        }
+    }
 
     var body: some View {
         // Two tiers inside the strip: identity (icon + title/status + detail) on top, actions on
@@ -524,23 +545,44 @@ struct TerminalStrip: View {
         }
     }
 
-    /// Shown only for a confirmed difference against a subscription desktop: the sync remedy.
-    /// Disabled (not hidden) while a check runs, so the row doesn't flicker mid-refresh.
+    /// Copy is available for subscription desktops; the sync remedy still requires a confirmed difference.
+    /// Both actions remain visible but disabled while a check runs, so the row doesn't flicker mid-refresh.
     private var actions: some View {
         HStack(spacing: 6) {
-            Button { syncTarget = store.current; confirmSync = true } label: {
-                Text(t("cli.syncTo", arguments: ["account": store.current])).font(.system(size: 10.5, weight: .semibold))
-                    .lineLimit(1).truncationMode(.middle)
-                    .padding(.horizontal, 9).padding(.vertical, 4)
-                    .foregroundColor(.claude)
-                    .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.claude.opacity(hover ? 0.26 : 0.16)))
-                    .contentShape(Rectangle())
+            if canSync {
+                Button { syncTarget = store.current; confirmSync = true } label: {
+                    Text(t("cli.syncTo")).font(.system(size: 10.5, weight: .semibold))
+                        .lineLimit(1).truncationMode(.middle)
+                        .padding(.horizontal, 9).padding(.vertical, 4)
+                        .foregroundColor(.claude)
+                        .background(RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.claude.opacity(syncHover ? 0.26 : 0.16)))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(controlsLocked || checking)
+                .opacity(controlsLocked || checking ? 0.45 : 1)
+                .help(t("cli.syncHelp", arguments: ["account": store.current]))
+                .onHover { syncHover = $0 }
             }
-            .buttonStyle(.plain).disabled(controlsLocked || checking)
-            .opacity(controlsLocked || checking ? 0.45 : 1)
-            .help(t("cli.syncHelp", arguments: ["account": store.current]))
-            .onHover { hover = $0 }
+            if canCopyScoped {
+                Button(action: copyScopedCommand) {
+                    HStack(spacing: 4) {
+                        Image(systemName: copyFeedback == true ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 9))
+                        Text(copyTitle).font(.system(size: 10.5, weight: .medium))
+                    }
+                    .lineLimit(1)
+                    .padding(.horizontal, 7).padding(.vertical, 4)
+                    .foregroundColor(copyFeedback == false ? .warn : .sub)
+                    .background(RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.sub.opacity(copyHover ? 0.12 : 0.06)))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(controlsLocked || checking)
+                .opacity(controlsLocked || checking ? 0.45 : 1)
+                .help(t("cli.copyScopedHelp"))
+                .onHover { copyHover = $0 }
+            }
             Spacer(minLength: 0)
         }
     }

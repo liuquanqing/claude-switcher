@@ -15,56 +15,29 @@ import SwitcherCore
             "utilization":["seven_day":["utilization":49]]]])
         return try OfficialCLIUsageCache.read(data)!
     }
-    let old=try cache(at:now.addingTimeInterval(-1200))
-    var recoveries=0,bootstraps=0,fetches=0
-    let operations=StatusRefreshOperations(recover:{recoveries += 1;return .renewed},gate:{true},bootstrap:{_ in bootstraps += 1},readCache:{old},fetchFresh:{
-        fetches += 1;var sample=store.active!.snapshot!;sample.fetchedAt=now;sample.weekly=Window(used:49,resetsAt:nil)
-        store.acceptSubscriptionUsageResult(.success(sample),for:store.current,contextUnchanged:true)
+    let recent = try cache(at: now.addingTimeInterval(-1))
+    store.profiles[0].snapshot!.fetchedAt = now.addingTimeInterval(-300)
+    await store.refreshAllStatuses(operations: .init(observe: {}, readCache: { recent }))
+    require(store.lastRefresh == recent.fetchedAt, "footer adopts the actual time of a matching native sample")
+    require(store.lastRefreshDiagnostics?.nativeHelperRuns == 0 && !store.statusRefreshInProgress,
+            "cache refresh does not run a native helper and releases its operation slot")
+    let prior = store.active?.snapshot?.weekly?.used
+    await store.refreshAllStatuses(operations: .init(observe: {}, readCache: { nil }))
+    require(store.lastRefresh == recent.fetchedAt && store.active?.snapshot?.weekly?.used == prior && store.usageNotice != nil,
+            "missing native cache preserves existing quota and its timestamp")
+    var finish: CheckedContinuation<OfficialCLIUsageCache?, Never>?
+    var reads = 0
+    let heldRead = StatusRefreshOperations(observe: {}, readCache: {
+        reads += 1
+        return await withCheckedContinuation { finish = $0 }
     })
-    await store.refreshAllStatuses(operations:operations,now:now)
-    require(recoveries==1 && fetches==1 && bootstraps==1 && store.lastRefresh==now,"renewed login plus stale cache completes one fresh quota read in the actual footer orchestration")
-    require(!store.statusRefreshInProgress && !store.refreshing,"the completed footer releases its operation slot")
-    let recent=try cache(at:now.addingTimeInterval(-1))
-    var unused=0
-    let cachedStore=Store(demo:true)
-    cachedStore.profiles[0].snapshot!.fetchedAt=now.addingTimeInterval(-300)
-    await cachedStore.refreshAllStatuses(operations:.init(recover:{.notNeeded},gate:{true},bootstrap:{_ in},readCache:{recent},fetchFresh:{unused += 1}),now:now)
-    require(unused==0 && cachedStore.lastRefresh==recent.fetchedAt,"a genuinely new account-matched native sample is reused without another request")
-    let afterAuthorization=Store(demo:true)
-    afterAuthorization.profiles[0].snapshot!.fetchedAt=now.addingTimeInterval(-300)
-    let newAfterWait=try cache(at:now.addingTimeInterval(44))
-    await afterAuthorization.refreshAllStatuses(operations:.init(recover:{.renewed},gate:{true},bootstrap:{_ in},readCache:{newAfterWait},fetchFresh:{preconditionFailure("just-written native sample must be reused")}),now:now,clock:{now.addingTimeInterval(45)})
-    require(afterAuthorization.lastRefresh==newAfterWait.fetchedAt,"freshness uses the post-authorization clock instead of rejecting a sample written after the click began")
-    let cancelled=Store(demo:true)
-    await cancelled.refreshAllStatuses(operations:.init(recover:{.authorizationRequired},gate:{preconditionFailure("no gate after cancelled authorization")},bootstrap:{_ in preconditionFailure("no second prompt")},readCache:{preconditionFailure("no follow-up after denial")},fetchFresh:{preconditionFailure("no follow-up after denial")}),now:now)
-    require(!cancelled.statusRefreshInProgress,"authorization denial ends the entire click without chasing another object")
-    let networkHeld=Store(demo:true)
-    await networkHeld.refreshAllStatuses(operations:.init(recover:{.notNeeded},gate:{false},bootstrap:{_ in preconditionFailure("unsafe network cannot request credentials")},readCache:{nil},fetchFresh:{preconditionFailure("no request after unknown route")}),now:now)
-    require(networkHeld.usageNotice != nil,"network hold preserves quota and explains why no request was sent")
-    let limited=Store(demo:true)
-    var attempts=0
-    let limitedOperations=StatusRefreshOperations(recover:{attempts += 1;return .notNeeded},gate:{true},bootstrap:{_ in},readCache:{nil},fetchFresh:{throw UsageHTTPFailure(code:429,retryAfter:now.addingTimeInterval(900))})
-    await limited.refreshAllStatuses(operations:limitedOperations,now:now)
-    limited.usageRefreshPolicy.credentialsChanged(profile:limited.current)
-    await limited.refreshAllStatuses(operations:limitedOperations,now:now.addingTimeInterval(15))
-    require(attempts==1,"manual refresh and a new credential generation cannot bypass server Retry-After")
-    var finish:CheckedContinuation<Void,Never>?
-    let coalesced=Store(demo:true);var rounds=0
-    let delayed=StatusRefreshOperations(recover:{rounds += 1;return .notNeeded},gate:{true},bootstrap:{_ in},readCache:{nil},fetchFresh:{await withCheckedContinuation {finish=$0}})
-    let first=Task {@MainActor in await coalesced.refreshAllStatuses(operations:delayed,now:now)}
-    while finish==nil {await Task.yield()}
-    await coalesced.refreshAllStatuses(operations:delayed,now:now)
-    finish!.resume();await first.value
-    require(rounds==1 && !coalesced.statusRefreshInProgress,"overlapping footer actions share the in-flight operation instead of starting another authorization round")
-
-    let switchingDuringRefresh=Store(demo:true)
-    var gateCompletion:CheckedContinuation<Bool,Never>?
-    let heldGate=StatusRefreshOperations(recover:{.notNeeded},gate:{await withCheckedContinuation {gateCompletion=$0}},bootstrap:{_ in},readCache:{nil},fetchFresh:{})
-    let heldTask=Task {@MainActor in await switchingDuringRefresh.refreshAllStatuses(operations:heldGate,now:now)}
-    while gateCompletion==nil {await Task.yield()}
-    await switchingDuringRefresh.switchTo("Business")
-    require(switchingDuringRefresh.current=="Personal","a second manual account action cannot start another authorization flow during footer preparation")
-    gateCompletion!.resume(returning:true);await heldTask.value
+    let first = Task { @MainActor in await store.refreshAllStatuses(operations: heldRead) }
+    while finish == nil { await Task.yield() }
+    await store.refreshAllStatuses(operations: heldRead)
+    await store.switchTo("Business")
+    require(store.current == "Personal" && reads == 1, "overlapping refresh or switch does not start a second operation")
+    finish!.resume(returning: recent)
+    await first.value
 
     let home=root.appendingPathComponent("home"),document=home.appendingPathComponent(".claude.json")
     try FileManager.default.createDirectory(at:home.appendingPathComponent(".claude"),withIntermediateDirectories:true)
@@ -81,11 +54,6 @@ import SwitcherCore
     credential=try CLIJSON.encode(["claudeAiOauth":["accessToken":"fictional-rotated","refreshToken":"fictional-next","expiresAt":now.addingTimeInterval(7200).timeIntervalSince1970*1000]])
     let changed=await cold.recoverCurrentCLI(io:io,context:{true},gate:{true},native:{preconditionFailure("natural rotation is already complete")},verify:{_ in identity},now:now.addingTimeInterval(61))
     require(changed == .renewed && cold.usageCatchUpPending && cold.usageRefreshPolicy.shouldRequest(profile:cold.current,sampledAt:now,resetsAt:[],active:true,trigger:.identityChanged,now:now.addingTimeInterval(61)),"same-account native rotation schedules quota catch-up and clears the repaired ordinary failure")
-    require(try cold.verifiedQuietCLILogin(matching:identity,io:io)?.1 == "fictional-rotated","quota can use the exact verified CLI generation when the desktop token has not caught up")
-    let staleProof=cold.currentCLIObservedLogin!
-    cold.currentCLIObservedLogin=(staleProof.name,staleProof.identity,"different-generation")
-    require(try cold.verifiedQuietCLILogin(matching:identity,io:io)==nil,"a remembered identity without the exact credential-generation proof cannot supply quota")
-    cold.currentCLIObservedLogin=staleProof
     let retrying=Store(demo:true)
     _ = await retrying.recoverCurrentCLI(io:io,context:{true},gate:{true},native:{preconditionFailure("healthy")},verify:{_ in identity},now:now)
     credential=try CLIJSON.encode(["claudeAiOauth":["accessToken":"fictional-rotated-again","refreshToken":"fictional-next-again","expiresAt":now.addingTimeInterval(7200).timeIntervalSince1970*1000]])
@@ -103,7 +71,6 @@ import SwitcherCore
         return .completed
     },verify:{_ in identity},now:now)
     require(backupResult == .backupPending && backupDeferred.cliStatus == .matched,"a denied backup write does not misrepresent a verified usable login as a login failure")
-    require(try backupDeferred.verifiedQuietCLILogin(matching:identity,io:blockedBackupIO)?.1 == "fictional-verified-backup-pending","quota may finish with the verified current credential even while only the backup needs permission")
     var locked=true
     let lockIO=NativeCLIStorage(identity:document,marker:home.appendingPathComponent("marker"),credentialFile:home.appendingPathComponent(".claude/.credentials.json"),secretReader:{service,account in
         if locked {throw CLIInteractionRequired()};return service==cliService ? credential : backups[account]

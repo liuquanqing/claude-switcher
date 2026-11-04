@@ -52,7 +52,7 @@ import SwitcherCore
         }
         let sample = try await (readUsage ?? {
             try await OfficialCLIUsageReader.read(home: FileManager.default.homeDirectoryForCurrentUser,
-                                                  manual: allowInteraction)
+                                                  manual: false)
         })()
         guard current == originalCurrent, protection.desktopScope == scope else {
             throw err("读取期间桌面账号发生变化，未采纳旧身份。")

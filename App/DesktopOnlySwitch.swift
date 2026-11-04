@@ -8,27 +8,30 @@ struct DesktopOnlySwitchOffer: Equatable {
 }
 
 @MainActor extension Store {
-    /// An explicit exception, never an automatic fallback from a linked switch.
-    /// This path does not construct a CLI storage adapter or mutate CLI login/backups.
     func confirmDesktopOnlySwitch() async {
         guard busy == nil, !refreshing, let offer = desktopOnlyOffer else { return }
         desktopOnlyOffer = nil
+        await switchDesktopOnly(from: offer.source, to: offer.target, announce: true)
+    }
+
+    /// A desktop switch never opens the default CLI credential store.
+    func switchDesktopOnly(from source: String, to target: String, announce: Bool = false) async {
         banner = nil; busy = "检查网络与桌面档案…"
         defer { busy = nil }
         if isDemo {
             let gate = await protection.preflight()
             guard gate.allowed else { banner = gate.message; return }
-            guard current == offer.source else { banner = "当前档案已变化，请重新选择。"; return }
-            current = offer.target
+            guard current == source else { banner = "当前档案已变化，请重新选择。"; return }
+            current = target
             cliStatus = .unverified
             cliStatusDetail = nil; cliStatusCheckedAt = nil; cliStandaloneVerified = false
-            banner = "仅切换了桌面；CLI 登录保持原样，可核验后同步到当前账号。"
+            if announce { banner = "仅切换了桌面；CLI 登录保持原样，可核验后同步到当前账号。" }
             return
         }
         do {
-            let targetConfig = parkDir.appendingPathComponent(offer.target).appendingPathComponent("claude_desktop_config.json")
+            let targetConfig = parkDir.appendingPathComponent(target).appendingPathComponent("claude_desktop_config.json")
             try await DesktopOnlyFlow.run(transaction: ProfileTransaction(live: liveDir, parked: parkDir, marker: currentFile),
-                from: offer.source, to: offer.target, current: confirmedCurrentProfile, subscriptionMode: {
+                from: source, to: target, current: confirmedCurrentProfile, subscriptionMode: {
                     let documents: [Data]
                     do { documents = [try Data(contentsOf: targetConfig)] }
                     catch let e as CocoaError where e.code == .fileReadNoSuchFile { documents = [] }
@@ -38,7 +41,7 @@ struct DesktopOnlySwitchOffer: Equatable {
                 self.protection.refreshStatus()
             })
             reloadList(); await refreshCLI(verify: false)
-            banner = "桌面已切换；CLI 登录保持原样。请核验后同步，或在 CLI 完成登录。"
+            if announce { banner = "桌面已切换；CLI 登录保持原样。请核验后同步，或在 CLI 完成登录。" }
         } catch {
             reloadList(); await refreshCLI(verify: false)
             let outcome = (error as? DesktopOnlyFailure)?.directoryChanged
