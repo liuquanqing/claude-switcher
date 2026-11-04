@@ -38,14 +38,15 @@ struct LocalAccountObservation: Equatable {
         return changed
     }
 
-    func observeAccountMetadata() async -> Bool {
+    func observeAccountMetadata(importUsage: Bool = true) async -> Bool {
         reloadList(); protection.refreshScope()
         let observation = LocalAccountObservation.read(desktop: liveDir.appendingPathComponent("config.json"),
                                                        cli: claudeJSON, profile: current, scope: protection.desktopScope)
         let changed = applyLocalAccountObservation(observation)
         await refreshCLI(verify: false)
         // A running official CLI may have written a new sample between network polls.
-        if let data = try? Data(contentsOf: claudeJSON), let sample = try? OfficialCLIUsageCache.read(data),
+        if importUsage, let data = try? Data(contentsOf: claudeJSON), let sample = try? OfficialCLIUsageCache.read(data),
+           sample.fetchedAt <= Date(),
            profiles.contains(where: { $0.snapshot?.identity.samePrincipal(as: sample.identity) == true
                && ($0.snapshot?.fetchedAt ?? .distantPast) < sample.fetchedAt }) {
             applyOfficialUsage(sample)
@@ -54,32 +55,12 @@ struct LocalAccountObservation: Equatable {
         return changed
     }
 
-    func automaticRefresh(trigger: UsageRefreshPolicy.Trigger = .periodic, now: Date = Date()) async {
+    func automaticRefresh() async {
         guard !isDemo, busy == nil, !refreshing, !cliStatusRefreshing, !automaticRefreshInProgress, !statusRefreshInProgress else { return }
         automaticRefreshInProgress = true
         defer { automaticRefreshInProgress = false }
-        let changed = await observeAccountMetadata()
-        await recoverCurrentCLI()
-        let name = current
-        let snapshot = active?.snapshot
-        let resetDates = [snapshot?.session?.resetsAt, snapshot?.weekly?.resetsAt].compactMap { $0 }
-        guard usageRefreshPolicy.shouldRequest(profile: name, sampledAt: snapshot?.fetchedAt, resetsAt: resetDates,
-            active: claudeRunning || panelIsVisible() || trigger == .panel,
-            trigger: changed || usageCatchUpPending ? .identityChanged : trigger, now: now) else { return }
-        guard busy == nil, !refreshing else { return }
-        refreshing = true
-        defer { refreshing = false }
-        usageRefreshPolicy.began(profile: name, now: now)
-        do { try await refreshQuietUsage(); usageCatchUpPending = false }
-        catch {
-            usageRefreshPolicy.failed(profile: name, now: Date(), retryAfter: (error as? UsageHTTPFailure)?.retryAfter)
-            usageNotice = error.localizedDescription
-            if let index = profiles.firstIndex(where: { $0.name == name }), profiles[index].snapshot != nil {
-                profiles[index].usageState = .cached
-            }
-        }
-        // The first desktop observation may establish a previously missing identity.
-        await refreshCLI(verify: false)
-        onChange?()
+        // Startup, wake and timer observe only metadata and an existing quota
+        // sample. They never launch Claude Code, touch Keychain or recover a login.
+        _ = await observeAccountMetadata()
     }
 }

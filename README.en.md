@@ -33,29 +33,28 @@ Accounts, usage, sessions and network checks meet in one place.
 
 Multiple Claude accounts often mean repeated sign-ins and a terminal that no longer shares the same working identity as Desktop.
 
-Claude Switcher keeps that work in the menu bar: see the current account, check the conditions before a move, and let Desktop and the saved default CLI login stay in step.
+Claude Switcher keeps that work in the menu bar: see the current account, check the conditions before a move, and use a dedicated Claude Code directory for each Desktop profile.
 
 ## Features
 
 | | |
 | --- | --- |
 | **Account switching** | Keep separate Claude Desktop data directories for different working identities. |
-| **Desktop + CLI** | Synchronize the saved default OAuth login used by Claude Code. |
+| **Desktop + CLI** | Copy a dedicated CLI launch command or explicitly replace the default CLI login. [Details](docs/design/cli-directory-link/README.md) |
 | **Preflight** | Inspect the proxy, TUN interface, Claude domains and expected region before changing accounts. |
 | **Background guard** | Observe explicitly confirmed subscription desktops while the panel is closed. |
 | **Session copying** | Copy, update, back up, undo and restore supported local desktop session indexes. |
 | **Config awareness** | Detect Magpie and CC Switch configuration sources without taking over their secrets or exit flow. |
-| **Usage at a glance** | Show account usage windows and reset times without adding another dashboard. |
+| **Usage at a glance** | Show existing Claude Code quota samples and their original timestamps. |
 
 ## Switch flow
 
 ```mermaid
 flowchart LR
-    A[Choose account] --> B[Check network and CLI]
+    A[Choose account] --> B[Check network and Desktop]
     B --> C[Preserve current state]
     C --> D[Switch Desktop account]
-    D --> E[Sync saved CLI login]
-    E --> F[Verify and continue]
+    D --> E[Optional: use the dedicated CLI command]
 ```
 
 Known failures, unknown states and unresolved conflicts stop the operation before account data is moved.
@@ -113,7 +112,7 @@ No. Claude Switcher changes the active account by rotating local Claude Desktop 
 <details>
 <summary><strong>Why might an already-running CLI task keep the previous identity?</strong></summary>
 
-Claude Switcher synchronizes the saved default CLI login. A running task may continue with the credentials it obtained at startup, and the switcher does not force that task to stop.
+Desktop switching leaves the default CLI login in place. A dedicated command selects the configuration directory for a new session. Running tasks can keep their original identity even after a manual default-login replacement.
 
 </details>
 
@@ -135,7 +134,7 @@ Rename or back up the original first to avoid replacing an app with the same fil
 
 This release operates as a **switch gate and periodic observer**, alongside host-level network controls. Network isolation and immediate enforcement are still under separate validation and are not part of this release.
 
-- Only the saved default CLI login is synchronized; running tasks are not guaranteed to change identity immediately.
+- The default CLI login is replaced only after explicit confirmation. Claude Code manages sign-in for dedicated directories.
 - API-mode and unknown-mode desktops are not enrolled automatically.
 - Session copying supports adapted local desktop indexes, not complete cloud chat migration.
 - The background guard checks approximately every 10 seconds, so it cannot observe every event between checks.

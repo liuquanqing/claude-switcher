@@ -345,7 +345,7 @@ final class Store: ObservableObject {
         desktopObservation = DesktopLifecycleObservation(center: NSWorkspace.shared.notificationCenter) { [weak self] note in
             MainActor.assumeIsolated {
                 if note.name == NSWorkspace.didWakeNotification {
-                    Task { @MainActor in await self?.automaticRefresh(trigger: .wake) }
+                    Task { @MainActor in await self?.automaticRefresh() }
                     return
                 }
                 guard let application = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
@@ -371,7 +371,7 @@ final class Store: ObservableObject {
         reloadList()
         protection.refreshScope()
         protection.refreshStatus()
-        Task { await automaticRefresh(trigger: .panel) }
+        Task { await automaticRefresh() }
     }
 
 
@@ -406,6 +406,7 @@ final class Store: ObservableObject {
     }
 
     func refresh(allowInteraction: Bool = false) async {
+        if !allowInteraction { await automaticRefresh(); return }
         guard !isDemo, !refreshing, busy == nil, !statusRefreshInProgress else { return }
         if allowInteraction && !usageRefreshPolicy.permitsExplicitRequest(profile: current, now: Date()) {
             usageNotice = "额度查询受限，将按服务器指定时间重试。";return
@@ -421,8 +422,8 @@ final class Store: ObservableObject {
             profiles[index].usageState = profiles[index].snapshot == nil ? .notRequested : .cached
             profiles[index].error = nil
         }
-        // Automatic refresh reads only the official client's own cache. A manual
-        // /usage run is network-gated and never swaps another account into the CLI.
+        // Desktop identity verification can require an explicit route check.
+        // Quota only consumes the CLI’s existing local sample.
         if allowInteraction {
             let decision = await protection.preflight(target: .subscriptionUsage)
             guard decision.allowed else {
@@ -502,19 +503,7 @@ final class Store: ObservableObject {
         banner = nil
         guard !refreshing else { banner = "用量正在刷新，请稍后切换账号。"; return }
         if isDemo {
-            let decision = await protection.preflight()
-            if decision.allowed {
-                if Bundle.main.object(forInfoDictionaryKey: "CSPreviewCLIFailure") as? Bool == true {
-                    let reason = "演示：目标 CLI 备份需要重新登录；账号目录和 CLI 登录尚未改变。"
-                    banner = reason
-                    desktopOnlyOffer = DesktopOnlySwitchOffer(source: current, target: target, reason: reason)
-                    return
-                }
-                current = target
-                cliProfile = target
-                cliEmail = profiles.first { $0.name == target }?.snapshot?.email
-                cliStatus = cliEmail == nil ? .needsLogin : .matched
-            } else { banner = decision.message }
+            await switchDesktopOnly(from: current, to: target)
             return
         }
         guard let cur = try? confirmedCurrentProfile() else {
@@ -524,24 +513,7 @@ final class Store: ObservableObject {
             banner = "档案标记或目标名称无效，未修改登录和目录。"; return
         }
         if target == cur { await openProtectedClaude(); return }
-        busy = "检查网络与地区…"
-        defer { busy = nil }
-        do {
-            try await LaunchGate.run(check: { await self.protection.preflight() }, prepare: {
-                try await self.performLinkedDesktopSwitch(from: cur, to: target)
-            }, launch: { try await launchProtectedDesktop(files: self.protection.files); self.protection.refreshStatus() })
-            reloadList()
-            busy = nil
-            // The native cache can still belong to the account we just left.
-            // Recovery and usage share a single native run when renewal is due.
-            await refreshAfterLinkedCLIOperation()
-        } catch {
-            banner = error.localizedDescription
-            if error is CLIPreparationFailure {
-                desktopOnlyOffer = DesktopOnlySwitchOffer(source: cur, target: target, reason: error.localizedDescription)
-            }
-            reloadList(); await refreshCLI(verify: false)
-        }
+        await switchDesktopOnly(from: cur, to: target)
     }
 
     private func reloadAfterOperation() { if !isDemo { reloadList() } }
