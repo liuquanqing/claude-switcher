@@ -11,8 +11,8 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE = "1.3.6-rc.6"
-BUILD = "20261104.6.0"
-CANDIDATE_COMMIT = "a415117ffd709e5857ff6e87fac8a2ec23daf242"
+BUILD = "20261104.6.1"
+CANDIDATE_COMMIT = "d7463adfa1aafa301ef9cbff61a1779dde606b32"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.5"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
