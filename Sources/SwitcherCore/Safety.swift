@@ -123,6 +123,7 @@ public struct GuardReceipt: Codable, Equatable {
     public var termination: String
     public var desktopScope: DesktopProtectionScope?
     public var desktopManaged: Bool?
+    public var supportsUnchangedModeMarker: Bool?
     public init(checkedAt: Date = Date(), config: SafetyConfig, decision: SafetyDecision, termination: String = "not_needed",
                 desktopScope: DesktopProtectionScope = .subscription, desktopManaged: Bool = false) {
         self.checkedAt = checkedAt; self.config = config; self.decision = decision; self.termination = termination
@@ -200,6 +201,11 @@ public struct SafetyFiles: Sendable {
     }
     public func loadManagedDesktop() -> ManagedDesktopSession? {
         (try? Data(contentsOf: managedDesktopURL)).flatMap { try? JSONDecoder().decode(ManagedDesktopSession.self, from: $0) }
+    }
+    public func guardSupportsUnchangedModeMarker() -> Bool {
+        guard let config = try? loadConfig(), config.enabled,
+              let receipt = loadReceipt(), receipt.isFresh(for: config) else { return false }
+        return receipt.supportsUnchangedModeMarker == true
     }
     public func save<T: Encodable>(_ value: T, to url: URL) throws {
         let fm = FileManager.default

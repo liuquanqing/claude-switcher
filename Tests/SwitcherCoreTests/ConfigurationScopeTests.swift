@@ -168,6 +168,87 @@ final class ConfigurationScopeTests: FixtureTest {
         XCTAssertEqual(rewritten.scope, .subscription)
         XCTAssertFalse(session.authorizes(rewritten))
     }
+
+    func testOrdinaryPreferencesRewriteKeepsSameDesktopWithUnchangedExplicitMarker() async throws {
+        let preferences = folder.appendingPathComponent("Claude/claude_desktop_config.json")
+        let marker = folder.appendingPathComponent("Claude-3p/claude_desktop_config.json")
+        try writeJSON(["locale": "en"], preferences)
+        try writeJSON(["deploymentMode": "1p"], marker)
+        let before = DesktopModeInspector.evidence(support: folder), launchedAt = Date()
+        XCTAssertNotNil(before.subscriptionModeMarker)
+        let session = ManagedDesktopSession(pid: 123, launchedAt: launchedAt, modeRevision: before.revision,
+                                            subscriptionModeMarker: before.subscriptionModeMarker)
+        // Both an identical atomic replacement and an edit of ordinary preferences
+        // are real causes of the old false revocation.
+        try Data(contentsOf: preferences).write(to: preferences, options: .atomic)
+        XCTAssertTrue(session.authorizes(DesktopModeInspector.evidence(support: folder)))
+        try CLIJSON.encode(["locale": "zh"]).write(to: preferences, options: .atomic)
+        let after = DesktopModeInspector.evidence(support: folder)
+        XCTAssertNotEqual(before.revision, after.revision)
+        XCTAssertTrue(session.authorizes(after))
+        XCTAssertFalse(session.authorizes(after, allowUnchangedModeMarker: false), "old guard still uses the strict revision")
+        XCTAssertFalse(session.matches(pid: 123, launchedAt: launchedAt.addingTimeInterval(1)))
+
+        let config = SafetyConfig(enabled: true, expectedCountry: "SG")
+        let wrongCountry = NetworkObservation(proxyConnected: true, tunOnline: true, country: "JP")
+        let receipt = await GuardEngine.tick(config: config, network: wrongCountry, stop: { "fixture_closed" },
+            desktopScope: after.scope, desktopManaged: session.authorizes(after) && session.matches(pid: 123, launchedAt: launchedAt))
+        XCTAssertEqual(receipt.termination, "fixture_closed", "the isolated guard still requests a stop after a harmless save")
+    }
+
+    func testMarkerChangeAndAPIRoundTripNeverReuseTheStableMarker() throws {
+        let preferences = folder.appendingPathComponent("Claude/claude_desktop_config.json")
+        let marker = folder.appendingPathComponent("Claude-3p/claude_desktop_config.json")
+        try writeJSON(["locale": "en"], preferences)
+        try writeJSON(["deploymentMode": "1p"], marker)
+        let before = DesktopModeInspector.evidence(support: folder), original = try Data(contentsOf: marker)
+        let session = ManagedDesktopSession(pid: 123, launchedAt: Date(), modeRevision: before.revision,
+                                            subscriptionModeMarker: before.subscriptionModeMarker)
+        try CLIJSON.encode(["deploymentMode": "3p"]).write(to: marker, options: .atomic)
+        let conflict = DesktopModeInspector.evidence(support: folder)
+        XCTAssertEqual(conflict.scope, .unknown)
+        XCTAssertFalse(session.authorizes(conflict))
+        try CLIJSON.encode(["deploymentMode": "3p"]).write(to: preferences, options: .atomic)
+        XCTAssertEqual(DesktopModeInspector.evidence(support: folder).scope, .api)
+        XCTAssertFalse(session.authorizes(DesktopModeInspector.evidence(support: folder)))
+        try original.write(to: marker, options: .atomic)
+        try CLIJSON.encode(["locale": "en"]).write(to: preferences, options: .atomic)
+        let restored = DesktopModeInspector.evidence(support: folder)
+        XCTAssertEqual(restored.scope, .subscription)
+        XCTAssertFalse(session.authorizes(restored), "restoring identical marker bytes does not restore consent")
+    }
+
+    func testMissingMarkerOrUnreadablePreferencesDoNotUseStableMarker() throws {
+        let preferences = folder.appendingPathComponent("Claude/claude_desktop_config.json")
+        let marker = folder.appendingPathComponent("Claude-3p/claude_desktop_config.json")
+        try writeJSON(["locale": "en"], preferences)
+        try writeJSON(["deploymentMode": "1p"], marker)
+        let before = DesktopModeInspector.evidence(support: folder)
+        let session = ManagedDesktopSession(pid: 123, launchedAt: Date(), modeRevision: before.revision,
+                                            subscriptionModeMarker: before.subscriptionModeMarker)
+        try Data("invalid json".utf8).write(to: preferences, options: .atomic)
+        XCTAssertFalse(session.authorizes(DesktopModeInspector.evidence(support: folder)))
+        try CLIJSON.encode(["deploymentMode": "1p"]).write(to: preferences, options: .atomic)
+        XCTAssertFalse(session.authorizes(DesktopModeInspector.evidence(support: folder)), "an explicit primary mode is not an ordinary preference")
+        try CLIJSON.encode(["locale": "en"]).write(to: preferences, options: .atomic)
+        try FileManager.default.removeItem(at: marker)
+        XCTAssertFalse(session.authorizes(DesktopModeInspector.evidence(support: folder)))
+    }
+
+    func testAppRequiresFreshGuardCapabilityForStableMarker() throws {
+        let files = SafetyFiles(directory: folder)
+        let config = SafetyConfig(enabled: true, expectedCountry: "SG")
+        try files.save(config, to: files.configURL)
+        var receipt = GuardReceipt(config: config, decision: SafetyDecision(.allowed))
+        try files.save(receipt, to: files.receiptURL)
+        XCTAssertFalse(files.guardSupportsUnchangedModeMarker(), "legacy receipts cannot enable the new rule")
+        receipt.supportsUnchangedModeMarker = true
+        try files.save(receipt, to: files.receiptURL)
+        XCTAssertTrue(files.guardSupportsUnchangedModeMarker())
+        receipt.checkedAt = Date().addingTimeInterval(-SafetyConfig.maximumReceiptAge - 1)
+        try files.save(receipt, to: files.receiptURL)
+        XCTAssertFalse(files.guardSupportsUnchangedModeMarker())
+    }
 }
 
 final class ProfileUndoTests: FixtureTest {

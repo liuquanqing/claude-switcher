@@ -1,9 +1,10 @@
 import AppKit
 import SwitcherCore
 
-@MainActor func managedDesktopApplication(_ files: SafetyFiles) -> NSRunningApplication? {
+@MainActor func managedDesktopApplication(_ files: SafetyFiles, evidence: DesktopModeEvidence? = nil) -> NSRunningApplication? {
     guard let session = files.loadManagedDesktop() else { return nil }
-    guard session.authorizes(DesktopModeInspector.evidence(support: files.directory.deletingLastPathComponent())) else { return nil }
+    let observed = evidence ?? DesktopModeInspector.evidence(support: files.directory.deletingLastPathComponent())
+    guard session.authorizes(observed, allowUnchangedModeMarker: files.guardSupportsUnchangedModeMarker()) else { return nil }
     return NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first {
         session.matches(pid: $0.processIdentifier, launchedAt: $0.launchDate)
     }
@@ -18,7 +19,8 @@ import SwitcherCore
     guard applications.count == 1, let application = applications.first, let date = application.launchDate else {
         throw err("当前桌面实例不唯一或身份无法确认；请保留一个订阅桌面后重试。")
     }
-    return ManagedDesktopSession(pid: application.processIdentifier, launchedAt: date, modeRevision: revision)
+    return ManagedDesktopSession(pid: application.processIdentifier, launchedAt: date, modeRevision: revision,
+                                 subscriptionModeMarker: evidence.subscriptionModeMarker)
 }
 
 @MainActor func launchProtectedDesktop(files: SafetyFiles) async throws {
@@ -37,7 +39,8 @@ import SwitcherCore
         throw err("启动时模式变化，未纳入保护；已请求退出本次新启动，请确认客户端状态。")
     }
     do {
-        try files.save(ManagedDesktopSession(pid: application.processIdentifier, launchedAt: date, modeRevision: revision), to: files.managedDesktopURL)
+        try files.save(ManagedDesktopSession(pid: application.processIdentifier, launchedAt: date, modeRevision: revision,
+                                            subscriptionModeMarker: evidence.subscriptionModeMarker), to: files.managedDesktopURL)
     } catch {
         application.terminate()
         throw err("本次新启动的桌面未能记录保护归属，已请求退出；原有档案保留。")
