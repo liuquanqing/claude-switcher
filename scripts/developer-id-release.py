@@ -10,10 +10,10 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.6-rc.5"
-BUILD = "20261104.5.0"
-CANDIDATE_COMMIT = "10e9e33fa3b49be0d0b224495b566300b8b34911"
-DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.4-r2"
+RELEASE = "1.3.6-rc.6"
+BUILD = "20261104.6.0"
+CANDIDATE_COMMIT = "a415117ffd709e5857ff6e87fac8a2ec23daf242"
+DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.5"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
 APP_NAME = "Claude Switcher Preview.app"
@@ -179,7 +179,7 @@ def main():
                      staple={"app": "NOT_RUN", "dmg": "NOT_RUN"},
                      gatekeeper={"app": "NOT_RUN", "dmg": "NOT_RUN"},
                      installation="NOT_RUN", realAccountValidation="NOT_RUN",
-                     designatedRequirement={"status": "NOT_RUN", "baselineRelease": "1.3.6-rc.4", "baselineBuild": "20261103.4.1"},
+                     designatedRequirement={"status": "NOT_RUN", "baselineRelease": "1.3.6-rc.5", "baselineBuild": "20261104.5.0"},
                      distributionReady=False, files={}, phase="prepared")
         save(manifest, state)
     else:
@@ -211,19 +211,19 @@ def main():
             state.update(identitySHA1=args.identity.upper(), teamID=args.team_id,
                          signing="Developer ID Application; Hardened Runtime; secure timestamp", phase="signed")
             comparison = compare_designated_requirements(DR_BASELINE_DIRECTORY / DR_BASELINE_APP_NAME, app)
-            comparison.update(baselineRelease="1.3.6-rc.4", baselineBuild="20261103.4.1",
+            comparison.update(baselineRelease="1.3.6-rc.5", baselineBuild="20261104.5.0",
                               candidateRelease=RELEASE, candidateBuild=BUILD)
             save(evidence / "gui-designated-requirement-comparison.json", comparison)
             state["designatedRequirement"] = comparison
             save(manifest, state)
-            require(comparison["same"], "GUI designated requirement differs from RC4; stop for review")
+            require(comparison["same"], "GUI designated requirement differs from RC5; stop for review")
         elif phase.startswith("submit-"):
             kind = phase.removeprefix("submit-")
             require(args.profile, "Existing local Keychain profile required")
             require(state["phase"] == ("signed" if kind == "app" else "packaged"), "Unexpected submission phase")
             require(state["notarization"][kind]["status"] == "NOT_RUN", "Submission already exists")
             require(state["designatedRequirement"].get("same") is True,
-                    "RC4/RC5 GUI designated requirement equality must be reviewed before submission")
+                    "RC5/RC6 GUI designated requirement equality must be reviewed before submission")
             verify_app(app, state["teamID"], evidence)
             if kind == "app":
                 archive = directory / "app-submission.zip"
