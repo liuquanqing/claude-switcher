@@ -93,8 +93,8 @@ This prerelease is Developer ID signed and notarized by Apple. Normal first-open
 ## Quick start
 
 1. Download and verify the archive.
-2. Move `Claude Switcher.app` to Applications.
-3. If macOS blocks the app, use Open Anyway in System Settings → Privacy & Security for this app. See [the first-launch guide](docs/INSTALL.md#3-首次打开).
+2. Move `Claude Switcher Preview.app` to Applications and keep the original app.
+3. Follow the macOS first-launch prompts. System and Keychain permissions remain managed by macOS. See [installation guidance](docs/INSTALL.md).
 4. Add an account, or switch to an empty account and sign in through Claude.
 5. If you want background protection, confirm the region, proxy mode and desktop scope in Settings.
 

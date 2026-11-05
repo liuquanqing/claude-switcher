@@ -138,7 +138,7 @@ English
 ## 快速开始
 
 1. 下载并校验安装包。
-2. 将 `Claude Switcher.app` 拖入“应用程序”。
+2. 将 `Claude Switcher Preview.app` 拖入“应用程序”，保留原版。
 3. 按 macOS 提示完成首次打开；系统及钥匙串授权仍由 macOS 管理，详见[安装说明](docs/INSTALL.md)。
 4. 添加账号，或切换到一个空账号后在 Claude 中完成登录。
 5. 如需后台保护，在设置中确认目标地区、代理方式和桌面范围。
