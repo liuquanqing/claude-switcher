@@ -106,7 +106,7 @@ def wait_for(predicate, timeout=15):
     raise RuntimeError("Fictional application did not reach the expected state")
 
 
-def run_case(name, old_template, new_template, expected, corrupt=False):
+def run_case(name, old_template, new_template, expected, corrupt=False, helper=None):
     home = QA / "cases" / (name + "-" + uuid.uuid4().hex) / "home"
     applications = home / "Applications"
     applications.mkdir(parents=True)
@@ -144,7 +144,8 @@ def run_case(name, old_template, new_template, expected, corrupt=False):
         initial = wait_for(lambda: json.loads((directory / "initial-start.json").read_text())
                            if (directory / "initial-start.json").exists() else None)
         assert initial["application"] == str(app) and initial["build"] == OLD
-        process = subprocess.Popen([str(app / "Contents/Helpers/ClaudeUpdater"), "--install", str(directory / "plan.json")],
+        runner = helper or app / "Contents/Helpers/ClaudeUpdater"
+        process = subprocess.Popen([str(runner), "--install", str(directory / "plan.json")],
                                    env=environment, stdout=subprocess.DEVNULL, stderr=(directory / "helper-stderr.txt").open("w"))
         first = wait_for(lambda: result(), timeout=20)
         if first["state"] == "waitingForExit":
@@ -163,7 +164,8 @@ def run_case(name, old_template, new_template, expected, corrupt=False):
             assert info(stage)["CFBundleVersion"] == NEW
         answer = {"case": name, "state": outcome["state"], "installedBuild": expected_build,
                   "helperExit": return_code, "actualSignedHelper": True, "nativeLaunch": True,
-                  "guardConfig": "fictional-disabled", "realGuardQueriedOrChanged": False}
+                  "guardConfig": "fictional-disabled", "realGuardQueriedOrChanged": False,
+                  "helperSHA256": sha(runner), "distributionHelper": helper is not None}
         save(directory / "case-result.json", answer)
         return answer
     finally:
@@ -174,10 +176,14 @@ def run_case(name, old_template, new_template, expected, corrupt=False):
         command("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-u", app)
 
 
-def run_tests(only=None):
+def run_tests(only=None, helper=None):
     state = json.loads((QA / "manifest.json").read_text())
     assert state["notarization"] == "Accepted" and state.get("gatekeeper") == "PASS"
     assert state["helperSourceSHA256"] == sha(ROOT / "Sources/ClaudeUpdater/UpdaterMain.swift")
+    if helper:
+        helper = Path(helper).resolve()
+        assert helper.is_relative_to(ROOT / "dist") and helper.name == "ClaudeUpdater"
+        command("codesign", "--verify", "--strict", helper)
     cases = [("upgrade", "old", "new", "complete", False),
              ("no-startup-confirmation", "old", "no-ack", "rolledBack", False),
              ("old-refuses-quit", "old-refuse", "new", "failed", False),
@@ -186,7 +192,7 @@ def run_tests(only=None):
     for case in cases:
         if only and case[0] != only:
             continue
-        outcome = run_case(*case)
+        outcome = run_case(*case, helper=helper)
         state["testResults"] = [r for r in state["testResults"] if r["case"] != outcome["case"]] + [outcome]
         save(QA / "manifest.json", state)
         print(json.dumps(outcome), flush=True)
@@ -198,6 +204,7 @@ def main():
     parser.add_argument("--identity")
     parser.add_argument("--profile")
     parser.add_argument("--case")
+    parser.add_argument("--helper", help="Exact signed distribution helper in this clone's dist/ directory")
     args = parser.parse_args()
     if args.phase == "prepare":
         prepare(args.identity)
@@ -205,7 +212,7 @@ def main():
         assert args.profile
         notarize(args.profile, submit=args.phase == "submit")
     else:
-        run_tests(args.case)
+        run_tests(args.case, args.helper)
 
 
 if __name__ == "__main__":
