@@ -1,5 +1,7 @@
 # Developer ID 独立签名预览
 
+当前 RC7 使用四组件签名及独立的签名更新验收，见 [RC7 说明](RC7.md)。
+
 此文记录 RC1 历史管线。RC1 固定在分支 `codex/developer-id-signing`、
 提交 `aa5f98c406c545e3bad514d3bbd8af7782a79c8a`；其最终产物保持不可变。
 当前 RC2 分支的脚本与操作范围请见 [RC2 准备说明](RC2.md)，不要照 RC1 历史路径重建或重签。
