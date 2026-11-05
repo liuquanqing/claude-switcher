@@ -2,7 +2,7 @@
 
 Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账号设置，或主动开启保护后，才会参与相应的切换与检查流程。
 
-适用版本：`v1.3.1`（正式版）。
+适用版本：`v1.3.6-rc.4`（预览版）；1.3.5 正式版入口保留。
 
 ## 系统要求
 
@@ -11,7 +11,7 @@ Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账
 
 ## 1. 下载并校验
 
-推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.1/ClaudeSwitcher-1.3.1-arm64.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.1)下载：
+推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.4/ClaudeSwitcher-1.3.6-rc.4-arm64-developer-id-preview.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.4)下载：
 
 - `.dmg` 或 `.zip`（二选一）
 - `SHA256SUMS`
@@ -25,17 +25,21 @@ cat SHA256SUMS
 
 把第一条命令输出的哈希值和 `SHA256SUMS` 里同名文件的那一行对比，完全一致才继续。不一致时，请删除文件并重新下载。
 
+## 预览版与已有守卫
+
+本页默认下载 RC4 预览版；需要旧正式版可到 [1.3.5 Release](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5)。旧附件保留原签名状态。已经注册守卫的用户，请先核对 LaunchAgent 引用的组件路径，不能为了清理旧 GUI 直接删除它。手动迁移或停用服务须按具体升级方案执行，本页不提供自动停止守卫操作。[已有守卫兼容路径说明](releases/1.3.6-rc.2-delivery.md)解释了如何保留兼容运行组件。
+
 ## 2. 拖进“应用程序”
 
-打开 DMG（或解压 ZIP），把 **`Claude Switcher.app`** 拖进 **应用程序（/Applications）** 文件夹。
+打开 DMG（或解压 ZIP），把 **`Claude Switcher Preview.app`** 拖进 **应用程序（/Applications）** 文件夹。
 
-- 应用名现为 `Claude Switcher.app`。若要保留同名原版，请先将原版改名或备份，再拖入；不要直接确认覆盖。内部 Bundle ID 保留 `dev.claudeswitcher.candidate`，以延续既有应用身份。
+- 预览包名称为 `Claude Switcher Preview.app`，可与原版 `Claude Switcher.app` 并存；不要覆盖原版。内部 Bundle ID 保留 `dev.claudeswitcher.candidate`，以延续既有应用身份。
 - **不要直接在磁盘映像或下载/临时目录里运行。** 独立守卫会记录 App 内 helper 的路径。磁盘映像推出后或临时目录被清理后，这个路径就会失效。
 - **本版和原版共享同一个账号目录。** 两者可以并存，但不要同时用两个管理器切号，也不要在两个管理器里同时开启保护。
 
 ## 3. 首次打开
 
-当前包使用 ad-hoc 本地签名，尚无 Developer ID 签名和 Apple 公证。macOS 可能提示“无法验证开发者”或“Apple 无法检查此应用”。
+当前 RC4 预览包已完成 Developer ID 签名与 Apple 公证，正常首次打开仍可能要求确认；钥匙串或后台项目授权按实际系统提示处理。下面“仍要打开”的步骤仅供旧 ad-hoc 版本参考，不是本版必须操作。
 
 确认下载来自本仓库并完成哈希校验后：
 
@@ -48,7 +52,7 @@ cat SHA256SUMS
 
 [Apple 的首次打开说明](https://support.apple.com/102445)。请保留 Gatekeeper，不对整个下载目录或“应用程序”批量移除隔离属性。如果提示文件损坏或恶意软件，请先停止打开并重新核对来源与校验值。
 
-签名、公证的准备要求与本版 `1.3.1` 的命名见 [macOS 分发说明](MACOS-DISTRIBUTION.md)。正式版仍采用 ad-hoc 签名，未经过 Apple 公证。
+各版本的签名状态见 [macOS 分发说明](MACOS-DISTRIBUTION.md) 与对应 Release；不要将新预览版的公证状态套用到旧正式版附件。
 
 ## 4. 开启保护（可选）
 
@@ -66,7 +70,7 @@ cat SHA256SUMS
 2. 如果界面无法操作，可以在终端运行（路径按你的实际安装位置填写）：
 
    ```bash
-   "/Applications/Claude Switcher.app/Contents/MacOS/ClaudeSwitcher" --stop-protection
+   "/Applications/Claude Switcher Preview.app/Contents/MacOS/ClaudeSwitcher" --stop-protection
    ```
 
    源码仓库里的 `scripts/stop-protection.sh` 做的是同一件事，它接受 App 路径作为参数。
