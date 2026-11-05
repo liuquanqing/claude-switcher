@@ -2,7 +2,7 @@
 
 Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账号设置，或主动开启保护后，才会参与相应的切换与检查流程。
 
-适用版本：`v1.3.6-rc.7`（预览版）；1.3.5 正式版入口保留。
+适用版本：`v1.3.6-rc.8`（预览版）；1.3.5 正式版入口保留。
 
 ## 系统要求
 
@@ -11,7 +11,7 @@ Claude Switcher 常驻菜单栏，安装后不会自动接管 Claude。完成账
 
 ## 1. 下载并校验
 
-推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.7/ClaudeSwitcher-1.3.6-rc.7-arm64-developer-id-preview.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.7)下载：
+推荐直接[下载 macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.8/ClaudeSwitcher-1.3.6-rc.8-arm64-developer-id-preview.dmg)，打开后将应用拖入“应用程序”。也可以在[当前版本的 Release 页面](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.8)下载：
 
 - `.dmg` 或 `.zip`（二选一）
 - `SHA256SUMS`
@@ -27,9 +27,9 @@ cat SHA256SUMS
 
 ## 预览版与已有守卫
 
-RC6 及更早的 Preview 需先安装一次完整 RC7 包，此后可在设置中「检查更新」，下载验证后安装并重启。普通升级不替换账号登录或迁移会话。
+RC6 及更早的 Preview 需先安装一次完整 RC8 包，此后可在设置中「检查更新」，下载验证后安装并重启。普通升级不替换账号登录或迁移会话。
 
-本页默认下载 RC7 预览版；需要旧正式版可到 [1.3.5 Release](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5)。旧附件保留原签名状态。已经注册守卫的用户，请先核对 LaunchAgent 引用的组件路径，不能为了清理旧 GUI 直接删除它。手动迁移或停用服务须按具体升级方案执行，本页不提供自动停止守卫操作。[已有守卫兼容路径说明](releases/1.3.6-rc.2-delivery.md)解释了如何保留兼容运行组件。
+本页默认下载 RC8 预览版；需要旧正式版可到 [1.3.5 Release](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5)。旧附件保留原签名状态。已经注册守卫的用户，请先核对 LaunchAgent 引用的组件路径，不能为了清理旧 GUI 直接删除它。手动迁移或停用服务须按具体升级方案执行，本页不提供自动停止守卫操作。[已有守卫兼容路径说明](releases/1.3.6-rc.2-delivery.md)解释了如何保留兼容运行组件。
 
 ## 2. 拖进“应用程序”
 
@@ -41,7 +41,7 @@ RC6 及更早的 Preview 需先安装一次完整 RC7 包，此后可在设置�
 
 ## 3. 首次打开
 
-当前 RC7 预览包已完成 Developer ID 签名与 Apple 公证，正常首次打开仍可能要求确认；钥匙串或后台项目授权按实际系统提示处理。下面“仍要打开”的步骤仅供旧 ad-hoc 版本参考，不是本版必须操作。
+当前 RC8 预览包已完成 Developer ID 签名与 Apple 公证，正常首次打开仍可能要求确认；钥匙串或后台项目授权按实际系统提示处理。下面“仍要打开”的步骤仅供旧 ad-hoc 版本参考，不是本版必须操作。
 
 确认下载来自本仓库并完成哈希校验后：
 

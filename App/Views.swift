@@ -351,7 +351,7 @@ struct TerminalStrip: View {
     @State private var openHover = false
     @State private var showHelp = false
     @State private var choiceTarget: ChoiceTarget?
-    @State private var attemptedChoice: CLIBindingChoice?
+    @State private var officialReportActive = false
     @State private var confirmSync = false
     /// Account name pinned when the dialog opens, so a background refresh or external switch
     /// can't make the user confirm X and sync Y.
@@ -382,25 +382,54 @@ struct TerminalStrip: View {
         return profile.isEmpty ? t("cli.currentAccount") : profile
     }
 
-    private func modeName(_ choice: CLIBindingChoice) -> String {
-        switch choice {
-        case .defaultLogin: return t("cli.modeDefault")
-        case .isolated: return t("cli.modeIsolated")
+    private var subscriptionDesktop: Bool { protection.desktopScope == .subscription }
+    private var showsConnectionPhase: Bool { officialReportActive && subscriptionDesktop }
+
+    private var summaryTitle: String {
+        switch protection.desktopScope {
+        case .subscription: return t("cli.title")
+        case .api: return t("api.desktopTitle")
+        case .unknown: return t("api.desktopConfiguration")
         }
     }
 
-    private var reportedModeName: String {
-        if let choice = connection.choice { return modeName(choice) }
-        if let attemptedChoice { return modeName(attemptedChoice) }
-        return "CLI"
+    private var summaryIcon: String {
+        subscriptionDesktop ? "terminal" : "desktopcomputer"
+    }
+
+    private var apiSourceName: String? {
+        guard protection.desktopScope == .api else { return nil }
+        switch protection.apiConfiguration {
+        case .magpie: return "Magpie"
+        case .ccSwitch: return "CC Switch"
+        case .subscription, .unknownAPI, .conflict, .unconfirmed: return nil
+        }
+    }
+
+    private var apiSourceTag: String {
+        if let apiSourceName { return apiSourceName }
+        if protection.desktopScope == .unknown { return t("api.unrecognized") }
+        return t(protection.apiConfiguration == .conflict ? "api.sourceConflict" : "api.sourceUnconfirmed")
+    }
+
+    private var apiSourceColor: Color {
+        apiSourceName == nil ? .warn : .sub
+    }
+
+    private var apiDetail: String {
+        guard protection.desktopScope == .api else { return t("api.unknownDetail") }
+        if let apiSourceName {
+            return t("api.desktopManagedBy", arguments: ["source": apiSourceName])
+        }
+        return t(protection.apiConfiguration == .conflict ? "api.desktopSourceConflict" : "api.desktopSourceUnknown")
     }
 
     private var verifiedMatch: Bool {
         connection.phase == .matched && connection.choice != nil && connection.checkedAt != nil
     }
 
-    private var bindingCheckedLine: String {
-        guard let checkedAt = connection.checkedAt else { return t("cli.notChecked") }
+    private var bindingCheckedLine: String? {
+        guard let checkedAt = connection.checkedAt else { return nil }
         let date = AppLocalization.date(checkedAt, language: language, dateStyle: .short, timeStyle: .short, relative: true)
         return t("cli.lastCheck", arguments: ["date": date])
     }
@@ -414,7 +443,7 @@ struct TerminalStrip: View {
         case .waitingForLogin: return t("cli.waitingForLogin")
         case .matched:
             return verifiedMatch ? t("cli.matchShort") : t("cli.unconfirmedIdentity")
-        case .mismatched: return reportedModeName + " · " + t("cli.accountMismatch")
+        case .mismatched: return t("cli.accountMismatch")
         case .unconfirmed: return t("cli.unconfirmedIdentity")
         case .failed: return t("cli.openFailed")
         }
@@ -422,10 +451,9 @@ struct TerminalStrip: View {
 
     private var connectionStatusColor: Color {
         switch connection.phase {
-        case .matched: return verifiedMatch ? .good : .sub
-        case .mismatched: return .warn
+        case .mismatched, .waitingForLogin: return .warn
         case .failed: return .bad
-        case .unlinked, .checking, .choosing, .opening, .waitingForLogin, .unconfirmed: return .sub
+        case .unlinked, .checking, .choosing, .opening, .matched, .unconfirmed: return .sub
         }
     }
 
@@ -452,18 +480,84 @@ struct TerminalStrip: View {
         }
     }
 
-    private var primaryTitle: String {
-        switch connection.phase {
-        case .waitingForLogin: return t("cli.confirmLogin")
-        case .failed: return t("cli.retry")
-        default: return t("cli.open")
+    private var terminalStatus: String {
+        if showsConnectionPhase { return connectionStatus }
+        switch connection.localRecord {
+        case .sameAccount: return t("cli.recordMatch")
+        case .differentAccount: return t("cli.recordDifferent")
+        case .notPrepared: return t("cli.recordMissing")
+        case .unconfirmed: return t("cli.recordUnconfirmed")
         }
     }
 
+    private var terminalStatusColor: Color {
+        if showsConnectionPhase { return connectionStatusColor }
+        if case .differentAccount = connection.localRecord { return .warn }
+        return .sub
+    }
+
+    private var terminalDetail: String {
+        if showsConnectionPhase { return connectionDetail ?? accountName }
+        switch connection.localRecord {
+        case .sameAccount:
+            return accountName
+        case .differentAccount:
+            return t("cli.recordDifferentDetail", arguments: ["account": accountName])
+        case .notPrepared:
+            return t("cli.recordMissingDetail", arguments: ["account": accountName])
+        case .unconfirmed:
+            return t("cli.recordUnconfirmedDetail", arguments: ["account": accountName])
+        }
+    }
+
+    private var terminalBoundary: String? {
+        if showsConnectionPhase {
+            switch connection.phase {
+            case .matched where verifiedMatch: return t("cli.officialMatchHelp")
+            case .waitingForLogin, .mismatched, .unconfirmed: return t("cli.officialReportHelp")
+            default: return nil
+            }
+        }
+        switch connection.localRecord {
+        case .sameAccount: return t("cli.recordMatchHelp")
+        case .differentAccount: return t("cli.recordDifferentHelp")
+        case .notPrepared: return t("cli.recordMissingHelp")
+        case .unconfirmed: return t("cli.recordUnconfirmedHelp")
+        }
+    }
+
+    private var needsPreparation: Bool {
+        if showsConnectionPhase {
+            return connection.phase == .choosing || connection.phase == .mismatched
+        }
+        switch connection.localRecord {
+        case .differentAccount, .notPrepared: return true
+        case .sameAccount, .unconfirmed: return false
+        }
+    }
+
+    private var primaryTitle: String {
+        if showsConnectionPhase {
+            switch connection.phase {
+            case .waitingForLogin: return t("cli.confirmLogin")
+            case .failed: return t("cli.retry")
+            default: break
+            }
+        }
+        return t(needsPreparation ? "cli.prepare" : "cli.open")
+    }
+
+    private var primaryActionHelp: String {
+        if showsConnectionPhase, connection.phase == .waitingForLogin { return t("cli.confirmLoginHelp") }
+        return t(needsPreparation ? "cli.prepareHelp" : "cli.openHelp")
+    }
+
     private func runPrimaryAction() {
-        guard !controlsLocked, !connection.isBusy else { return }
+        guard subscriptionDesktop, !controlsLocked, !connection.isBusy else { return }
+        showHelp = false
+        officialReportActive = true
         Task {
-            if connection.phase == .waitingForLogin {
+            if showsConnectionPhase, connection.phase == .waitingForLogin {
                 await connection.confirmLogin()
             } else {
                 await connection.open()
@@ -581,47 +675,53 @@ struct TerminalStrip: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "terminal").font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
+            Image(systemName: summaryIcon).font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(0.1)))
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(t("cli.title")).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+                    Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
                         .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    Button { showHelp.toggle() } label: {
-                        HStack(spacing: 4) {
-                            Text(connectionStatus).font(.system(size: 10, weight: .medium))
-                                .foregroundColor(connectionStatusColor).lineLimit(1).minimumScaleFactor(0.8)
-                            Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
+                    if subscriptionDesktop {
+                        Button { showHelp.toggle() } label: {
+                            HStack(spacing: 4) {
+                                Text(terminalStatus).font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(terminalStatusColor).lineLimit(1).minimumScaleFactor(0.8)
+                                Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
+                            }
+                            .frame(height: 22)
+                            .contentShape(Rectangle())
                         }
-                        .frame(height: 22)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .help(t("cli.statusHelp"))
+                        .accessibilityLabel("\(t("cli.statusAccessibility")): \(terminalStatus)")
+                        .accessibilityHint(t("cli.statusHelp"))
+                        .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
+                    } else {
+                        Text(apiSourceTag).font(.system(size: 10, weight: .medium))
+                            .foregroundColor(apiSourceColor).lineLimit(1).minimumScaleFactor(0.8)
                     }
-                    .buttonStyle(.plain)
-                    .help(t("cli.statusHelp"))
-                    .accessibilityLabel("\(t("cli.statusAccessibility")): \(connectionStatus)")
-                    .accessibilityHint(t("cli.statusHelp"))
-                    .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
                     Spacer(minLength: 4)
                 }
                 .frame(height: 22)
-                Text(connectionDetail ?? " ").font(.system(size: 10.5)).foregroundColor(.sub)
-                    .lineLimit(1).truncationMode(.middle).help(connectionDetail ?? "")
-                    .opacity(connectionDetail == nil ? 0 : 1)
-                    .accessibilityHidden(connectionDetail == nil)
-                primaryAction
+                Text(subscriptionDesktop ? terminalDetail : apiDetail)
+                    .font(.system(size: 10.5)).foregroundColor(.sub)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                    .help(subscriptionDesktop ? terminalDetail : apiDetail)
             }
         }
         .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear { connection.contextDidChange() }
         .onChange(of: store.current) { _ in
-            attemptedChoice = nil
+            officialReportActive = false
+            showHelp = false
             choiceTarget = nil
             connection.contextDidChange()
         }
         .onChange(of: protection.desktopScope) { _ in
-            attemptedChoice = nil
+            officialReportActive = false
+            showHelp = false
             choiceTarget = nil
             connection.contextDidChange()
         }
@@ -633,14 +733,28 @@ struct TerminalStrip: View {
         }
         .onChange(of: connection.expectedProfile) { profile in
             if let choiceTarget, profile != choiceTarget.profile {
-                attemptedChoice = nil
+                officialReportActive = false
+                showHelp = false
                 self.choiceTarget = nil
             }
         }
         .onChange(of: store.active?.snapshot?.identity) { identity in
+            officialReportActive = false
+            showHelp = false
             if let choiceTarget, identity != choiceTarget.identity {
-                attemptedChoice = nil
                 self.choiceTarget = nil
+            }
+            connection.contextDidChange()
+        }
+        .onChange(of: connection.localRecord) { _ in
+            if connection.phase != .waitingForLogin, !connection.isBusy,
+               connection.phase == .unconfirmed || connection.checkedAt == nil {
+                officialReportActive = false
+            }
+        }
+        .onChange(of: connection.checkedAt) { checkedAt in
+            if checkedAt == nil, connection.phase != .waitingForLogin, !connection.isBusy {
+                officialReportActive = false
             }
         }
         .onChange(of: connection.phase) { phase in
@@ -649,7 +763,6 @@ struct TerminalStrip: View {
                 choiceTarget = (store.active?.snapshot?.identity).map {
                     ChoiceTarget(profile: connection.expectedProfile, identity: $0)
                 }
-                attemptedChoice = nil
             case .mismatched:
                 choiceTarget = (store.active?.snapshot?.identity).map {
                     ChoiceTarget(profile: connection.expectedProfile, identity: $0)
@@ -657,7 +770,7 @@ struct TerminalStrip: View {
             case .opening, .waitingForLogin, .matched:
                 choiceTarget = nil
             case .unlinked:
-                attemptedChoice = nil
+                officialReportActive = false
             case .checking, .unconfirmed, .failed:
                 break
             }
@@ -690,34 +803,38 @@ struct TerminalStrip: View {
         Button(action: runPrimaryAction) {
             HStack(spacing: 5) {
                 if connection.isBusy { ProgressView().controlSize(.mini) }
-                Text(primaryTitle).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+                Text(primaryTitle).font(.system(size: 10.5, weight: .medium)).lineLimit(1)
             }
-            .padding(.horizontal, 12)
-            .frame(minWidth: 88)
+            .padding(.horizontal, 10)
             .frame(height: 28)
-            .foregroundColor(.white)
+            .foregroundColor(.claude)
             .background(RoundedRectangle(cornerRadius: 7)
-                .fill(Color.claude.opacity(openHover ? 0.9 : 0.78)))
+                .fill(Color.claude.opacity(openHover ? 0.16 : 0.08)))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(controlsLocked || connection.isBusy)
         .opacity(controlsLocked || connection.isBusy ? 0.55 : 1)
         .onHover { openHover = $0 }
-        .help(t(connection.phase == .waitingForLogin ? "cli.confirmLoginHelp" : "cli.openHelp"))
+        .help(primaryActionHelp)
         .accessibilityLabel(primaryTitle)
     }
 
     private var helpPopover: some View {
         VStack(alignment: .leading, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(connectionStatus).font(.system(size: 11, weight: .semibold)).foregroundColor(connectionStatusColor)
-                if let connectionDetail {
-                    Text(connectionDetail).font(.system(size: 10.5)).foregroundColor(.sub)
-                        .fixedSize(horizontal: false, vertical: true)
+                Text(terminalStatus).font(.system(size: 11, weight: .semibold)).foregroundColor(terminalStatusColor)
+                Text(terminalDetail).font(.system(size: 10.5)).foregroundColor(.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let terminalBoundary {
+                    Text(terminalBoundary).font(.system(size: 10)).foregroundColor(.sub)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 }
-                Text(bindingCheckedLine).font(.system(size: 10)).foregroundColor(.sub)
+                if showsConnectionPhase, let bindingCheckedLine {
+                    Text(bindingCheckedLine).font(.system(size: 10)).foregroundColor(.sub)
+                }
             }
+            primaryAction
             Divider().opacity(0.5)
             DisclosureGroup(t("cli.advanced")) {
                 VStack(alignment: .leading, spacing: 8) {
@@ -761,7 +878,7 @@ struct TerminalStrip: View {
             }
             .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
         }
-        .frame(width: 310, alignment: .leading).padding(12)
+        .frame(width: 320, alignment: .leading).padding(12)
     }
 
     private func choiceActionsDisabled(for target: ChoiceTarget) -> Bool {
@@ -806,10 +923,10 @@ struct TerminalStrip: View {
         guard !choiceActionsDisabled(for: target) else { return }
         let profile = target.profile
         let identity = target.identity
-        attemptedChoice = choice
+        officialReportActive = true
         choiceTarget = nil
         Task {
-            guard !controlsLocked, profile == connection.expectedProfile, profile == store.current,
+            guard subscriptionDesktop, !controlsLocked, profile == connection.expectedProfile, profile == store.current,
                   let currentIdentity = store.active?.snapshot?.identity,
                   currentIdentity == identity else {
                 connection.contextDidChange()

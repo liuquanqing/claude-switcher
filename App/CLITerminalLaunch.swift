@@ -108,6 +108,37 @@ enum CLITerminalLaunch {
         }, existingDirectory: { [weak self] binding in
             guard self?.isDemo != true else { return false }
             return FileManager.default.fileExists(atPath: binding.directory.path)
+        }, localRecord: { [weak self] identity, binding in
+            guard let self else { return .unconfirmed }
+            if self.isDemo {
+                if let binding { return .sameAccount(binding.choice) }
+                return self.current == "Personal" ? .sameAccount(.defaultLogin) : .notPrepared
+            }
+            func metadata(_ url: URL) throws -> CLIIdentity? {
+                let data: Data
+                do { data = try Data(contentsOf: url) }
+                catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile { return nil }
+                return try CLIIdentity.metadata(CLIJSON.field(data, key: "oauthAccount"))
+            }
+            func document(for directory: URL, choice: CLIBindingChoice) -> URL {
+                choice == .defaultLogin ? home.appendingPathComponent(".claude.json") : directory.appendingPathComponent(".claude.json")
+            }
+            do {
+                if let binding {
+                    return CLILocalRecordPolicy.assess(binding: binding,
+                        bindingMetadata: try metadata(document(for: binding.directory, choice: binding.choice)),
+                        defaultMetadata: nil, isolatedMetadata: nil, expected: identity)
+                }
+                var isolated: CLIIdentity?
+                let candidate = try CLIBinding.directory(for: .isolated, identity: identity, home: home)
+                isolated = try metadata(candidate.appendingPathComponent(".claude.json"))
+                if isolated == nil, ProfileTransaction.validName(self.current) {
+                    isolated = try metadata(home.appendingPathComponent(".claude-switcher-cli/\(self.current)/.claude.json"))
+                }
+                return CLILocalRecordPolicy.assess(binding: nil, bindingMetadata: nil,
+                    defaultMetadata: try metadata(home.appendingPathComponent(".claude.json")),
+                    isolatedMetadata: isolated, expected: identity)
+            } catch { return .unconfirmed }
         }))
     }
 }

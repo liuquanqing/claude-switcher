@@ -1,6 +1,6 @@
 # Developer ID 独立签名预览
 
-当前 RC7 使用四组件签名及独立的签名更新验收，见 [RC7 说明](RC7.md)。
+当前 RC8 沿用四组件签名，交付结果见 [RC8 说明](../releases/1.3.6-rc.8-delivery.md)；更新助手的隔离跨版本方法见 [RC7 说明](RC7.md)。
 
 此文记录 RC1 历史管线。RC1 固定在分支 `codex/developer-id-signing`、
 提交 `aa5f98c406c545e3bad514d3bbd8af7782a79c8a`；其最终产物保持不可变。

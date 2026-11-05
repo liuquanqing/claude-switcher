@@ -50,8 +50,10 @@ struct LocalAccountObservation: Equatable {
                                                        cli: claudeJSON, profile: current, scope: protection.desktopScope)
         let changed = applyLocalAccountObservation(observation)
         await refreshCLI(verify: false)
+        cliConnection.contextDidChange()
+        cliConnection.refreshLocalRecord()
         // A running official CLI may have written a new sample between network polls.
-        if importUsage, let data = try? Data(contentsOf: claudeJSON), let sample = try? OfficialCLIUsageCache.read(data),
+        if importUsage, let sample = try? await readSelectedCLIUsageCache(),
            sample.fetchedAt <= Date(),
            profiles.contains(where: { $0.snapshot?.identity.samePrincipal(as: sample.identity) == true
                && ($0.snapshot?.fetchedAt ?? .distantPast) < sample.fetchedAt }) {

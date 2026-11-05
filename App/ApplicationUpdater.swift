@@ -43,7 +43,7 @@ import SwitcherCore
     private let architecture:String
     init(demo:Bool=false,operations:UpdateOperations?=nil,currentVersion:String?=nil,currentBuild:String?=nil,architecture:String?=nil) {
         self.demo=demo;self.operations=operations
-        self.currentVersion=currentVersion ?? (demo ? "1.3.6-rc.7" : Bundle.main.object(forInfoDictionaryKey:"CSReleaseVersion") as? String ?? Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "0.0.0")
+        self.currentVersion=currentVersion ?? (demo ? "1.3.6-rc.8" : Bundle.main.object(forInfoDictionaryKey:"CSReleaseVersion") as? String ?? Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "0.0.0")
         self.currentBuild=currentBuild ?? Bundle.main.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? "0"
         #if arch(arm64)
         self.architecture=architecture ?? "arm64"

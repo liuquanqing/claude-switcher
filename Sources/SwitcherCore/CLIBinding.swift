@@ -72,6 +72,34 @@ public struct CLIBindingRepository {
 }
 
 public enum CLIBindingStatus: Equatable, Sendable { case matched, notLoggedIn, different, unconfirmed }
+
+/// A local metadata observation. It never proves that saved tokens remain valid.
+public enum CLILocalRecord: Equatable, Sendable {
+    case sameAccount(CLIBindingChoice)
+    case differentAccount
+    case notPrepared
+    case unconfirmed
+}
+
+public enum CLILocalRecordPolicy {
+    public static func assess(binding: CLIBinding?, bindingMetadata: CLIIdentity?,
+                              defaultMetadata: CLIIdentity?, isolatedMetadata: CLIIdentity?,
+                              expected: CLIIdentity) -> CLILocalRecord {
+        guard expected.isComplete else { return .unconfirmed }
+        if let binding {
+            guard binding.identity.samePrincipal(as: expected) else { return .unconfirmed }
+            guard let bindingMetadata, bindingMetadata.isComplete else { return .unconfirmed }
+            return bindingMetadata.samePrincipal(as: expected) ? .sameAccount(binding.choice) : .differentAccount
+        }
+        if isolatedMetadata?.samePrincipal(as: expected) == true { return .sameAccount(.isolated) }
+        if defaultMetadata?.samePrincipal(as: expected) == true { return .sameAccount(.defaultLogin) }
+        if isolatedMetadata != nil && isolatedMetadata?.isComplete != true { return .unconfirmed }
+        if defaultMetadata != nil && defaultMetadata?.isComplete != true { return .unconfirmed }
+        if isolatedMetadata?.isComplete == true || defaultMetadata?.isComplete == true { return .differentAccount }
+        return .notPrepared
+    }
+}
+
 public enum CLIBindingPolicy {
     public static func assess(_ report: CLIReportedStatus, binding: CLIBinding, metadata: CLIIdentity?) -> CLIBindingStatus {
         guard report.usesConfigurationDirectory(binding.directory) else { return .unconfirmed }

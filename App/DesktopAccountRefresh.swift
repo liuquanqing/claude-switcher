@@ -51,10 +51,7 @@ import SwitcherCore
                 try applyVerifiedDesktopIdentity(name: originalCurrent, identity: identity)
             }
         }
-        let sample = try await (readUsage ?? {
-            try await OfficialCLIUsageReader.read(home: FileManager.default.homeDirectoryForCurrentUser,
-                                                  manual: false)
-        })()
+        let sample = try await (readUsage ?? { try await self.readSelectedCLIUsageCache() })()
         guard current == originalCurrent, protection.desktopScope == scope else {
             throw err("读取期间桌面账号发生变化，未采纳旧身份。")
         }

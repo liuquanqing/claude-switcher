@@ -2,6 +2,19 @@ import Foundation
 import SwitcherCore
 
 enum OfficialCLIUsageReader {
+    static func readBoundCache(home: URL, binding: CLIBinding, expected: CLIIdentity) async throws -> OfficialCLIUsageCache? {
+        try await Task.detached(priority: .utility) { () throws -> OfficialCLIUsageCache? in
+            guard binding.identity.samePrincipal(as: expected) else { return nil }
+            try binding.validate(home: home)
+            let file = binding.choice == .defaultLogin ? home.appendingPathComponent(".claude.json")
+                : binding.directory.appendingPathComponent(".claude.json")
+            let data: Data
+            do { data = try Data(contentsOf: file) }
+            catch let failure as CocoaError where failure.code == .fileNoSuchFile || failure.code == .fileReadNoSuchFile { return nil }
+            guard let sample = try OfficialCLIUsageCache.read(data), sample.identity.samePrincipal(as: expected) else { return nil }
+            return sample
+        }.value
+    }
     /// Automatic reads inspect only the native JSON cache. Only a manual request
     /// starts one unmodified CLI. This adapter does not read OAuth credentials.
     /// The separate automatic adapter uses only noninteractive, already-authorized reads.
@@ -51,5 +64,17 @@ enum OfficialCLIUsageReader {
             }
             return try OfficialCLIUsageCache.read(after)
         }.value
+    }
+}
+
+@MainActor extension Store {
+    func readSelectedCLIUsageCache() async throws -> OfficialCLIUsageCache? {
+        cliConnection.contextDidChange()
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        if protection.desktopScope == .subscription, let expected = active?.snapshot?.identity,
+           let binding = cliConnection.bindingForCachedUsage(), binding.identity.samePrincipal(as: expected) {
+            return try await OfficialCLIUsageReader.readBoundCache(home: home, binding: binding, expected: expected)
+        }
+        return try await OfficialCLIUsageReader.read(home: home, manual: false)
     }
 }

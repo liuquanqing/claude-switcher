@@ -17,7 +17,7 @@ struct TerminalProtectionCard: View {
     /// Manual checks re-expand the result block; operation reports preserve the user's fold state.
     @State private var resultsExpanded = true
     @State private var resultsHover = false
-    /// Shared by the open column and the panel beneath it, so the two read as one region.
+    /// Shared by the status column and the panel beneath it, so the two read as one region.
     private let panelTint = Color.white.opacity(0.03)
     private var operationLocked: Bool { busy || store.updating }
 
@@ -379,14 +379,18 @@ struct TerminalProtectionCard: View {
                 }
             } else {
                 statusRow
-                Text(statusDetail.isEmpty ? " " : statusDetail)
-                    .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                    .lineLimit(1).minimumScaleFactor(0.75)
-                    .padding(.leading, 26)
-                    .opacity(statusDetail.isEmpty ? 0 : 1)
-                    .accessibilityHidden(statusDetail.isEmpty)
+                if controller.desktopScope != .api {
+                    Text(statusDetail.isEmpty ? " " : statusDetail)
+                        .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .padding(.leading, 26)
+                        .opacity(statusDetail.isEmpty ? 0 : 1)
+                        .accessibilityHidden(statusDetail.isEmpty)
+                }
             }
-            protectionAction
+            if controller.desktopScope == .subscription && needsRetry {
+                protectionAction
+            }
         }
         .padding(.horizontal, 2).padding(.vertical, 4)
         .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -576,6 +580,7 @@ struct TerminalProtectionCard: View {
     /// Titles describe the guard against the desktop only. "Protected" always names the desktop, so it
     /// can't be read as covering the terminal strip beside it or the account as a whole.
     private var statusTitle: String {
+        if controller.desktopScope == .api { return t("protection.notApplicable") }
         if controller.working {
             switch controller.operationPhase {
             case .starting: return t("protection.starting")
@@ -587,7 +592,6 @@ struct TerminalProtectionCard: View {
         if !controller.enabled { return t("protection.disabled") }
         if !controller.guardOnline { return t("protection.unconfirmedStatus") }
         if controller.lastDecision.reason == .terminationFailed { return t("protection.terminationFailed") }
-        if controller.desktopScope == .api { return t("protection.notApplicable") }
         if controller.desktopScope == .unknown { return t("protection.scopeUnknown") }
         if desktopPendingTakeover { return t("protection.unmanaged") }
         if !controller.lastDecision.allowed { return t("protection.blocked") }
@@ -598,18 +602,13 @@ struct TerminalProtectionCard: View {
     /// The one useful fact per state. The target shown is always the saved one the guard runs with,
     /// never the draft in the settings field.
     private var statusDetail: String {
+        if controller.desktopScope == .api { return "" }
         let target = t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")])
         if controller.working { return target }
         if !controller.enabled { return controller.activeCountry == nil ? "" : target }
         if !controller.guardOnline || controller.lastDecision.reason == .terminationFailed { return target }
         switch controller.desktopScope {
-        case .api:
-            switch controller.apiConfiguration {
-            case .magpie: return "API · " + t("api.source", arguments: ["source": "Magpie"])
-            case .ccSwitch: return "API · " + t("api.source", arguments: ["source": "CC Switch"])
-            case .conflict: return t("protection.apiConflict")
-            case .subscription, .unknownAPI, .unconfirmed: return t("protection.apiUnconfirmed")
-            }
+        case .api: return ""
         case .unknown: return t("protection.unconfirmedNotProtected")
         case .subscription: break
         }
@@ -618,10 +617,10 @@ struct TerminalProtectionCard: View {
         return target
     }
     private var statusIcon: String {
+        if controller.desktopScope == .api { return "shield" }
         if controller.working { return "arrow.triangle.2.circlepath" }
         if !controller.enabled { return "shield" }
         if !controller.guardOnline { return "exclamationmark.triangle.fill" }
-        if controller.desktopScope == .api { return "shield" }
         if controller.desktopScope == .unknown || desktopPendingTakeover || !controller.lastDecision.allowed {
             return "shield.lefthalf.filled"
         }
@@ -654,25 +653,31 @@ struct TerminalProtectionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                TerminalStrip(store: store)
-                    // Open: the line closes off the terminal side only, so the tinted column runs
-                    // straight into the panel below it like a tab.
-                    .overlay(alignment: .bottom) {
-                        if showSettings { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
+            if controller.desktopScope == .api {
+                protectionHeader
+                    .padding(.horizontal, 10).padding(.vertical, 2)
+                    .background(showSettings ? panelTint : Color.clear)
+            } else {
+                HStack(spacing: 0) {
+                    TerminalStrip(store: store)
+                        // The divider closes off the summary side only, so the tinted column runs
+                        // straight into the panel below it like a tab.
+                        .overlay(alignment: .bottom) {
+                            if showSettings { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
+                        }
+                    Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
+                        .padding(.vertical, showSettings ? 0 : 10)
+                    VStack(alignment: .leading, spacing: 0) {
+                        protectionHeader
+                        Spacer(minLength: 0)
                     }
-                Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
-                    .padding(.vertical, showSettings ? 0 : 10)
-                VStack(alignment: .leading, spacing: 0) {
-                    protectionHeader
-                    Spacer(minLength: 0)
+                    .padding(.horizontal, 4).padding(.vertical, 4)
+                    .frame(width: 164)
+                    .frame(maxHeight: .infinity)
+                    .background(showSettings ? panelTint : Color.clear)
                 }
-                .padding(.horizontal, 4).padding(.vertical, 4)
-                .frame(width: 164)
-                .frame(maxHeight: .infinity)
-                .background(showSettings ? panelTint : Color.clear)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .fixedSize(horizontal: false, vertical: true)
 
             if showSettings {
                 settings.background(panelTint)
@@ -826,6 +831,16 @@ struct TerminalProtectionCard: View {
                 .popover(isPresented: $showCheckHelp, arrowEdge: .bottom) { checkHelpContent }
             }
             checkResults
+            if controller.desktopScope == .api {
+                Text(t("protection.apiServiceControlHelp"))
+                    .font(.system(size: 9.5)).foregroundColor(.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Divider().opacity(0.5)
+            HStack {
+                Spacer(minLength: 0)
+                protectionAction
+            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

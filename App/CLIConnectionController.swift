@@ -15,6 +15,7 @@ struct CLIConnectionContext: Equatable {
     let status: (CLIBinding) async throws -> CLIBindingStatus
     let launch: (CLIBinding) async throws -> Void
     var existingDirectory: (CLIBinding) -> Bool = { _ in false }
+    var localRecord: (CLIIdentity, CLIBinding?) -> CLILocalRecord = { _, _ in .unconfirmed }
 }
 
 @MainActor final class CLIConnectionController: ObservableObject {
@@ -25,10 +26,17 @@ struct CLIConnectionContext: Equatable {
     @Published private(set) var defaultMatches = false
     @Published private(set) var expectedProfile = ""
     @Published private(set) var checkedAt: Date?
+    @Published private(set) var localRecord: CLILocalRecord = .unconfirmed
     var isBusy: Bool { phase == .checking || phase == .opening }
     private let operations: CLIConnectionOperations
     private var binding: CLIBinding?
     var currentBinding: CLIBinding? { binding }
+    func bindingForCachedUsage() -> CLIBinding? {
+        guard let context else { return nil }
+        if let binding { return binding }
+        guard case .sameAccount(let choice) = localRecord else { return nil }
+        return try? operations.make(choice, context.identity)
+    }
     private var context: CLIConnectionContext?
     private var generation = 0
     init(operations: CLIConnectionOperations) { self.operations = operations }
@@ -37,11 +45,21 @@ struct CLIConnectionContext: Equatable {
         let observed = operations.context()
         guard observed != context else { return }
         generation += 1; context = observed
-        expectedProfile = observed?.profile ?? ""; detail = nil; defaultMatches = false; checkedAt = nil
+        expectedProfile = observed?.profile ?? ""; detail = nil; defaultMatches = false; checkedAt = nil; localRecord = .unconfirmed
         do { binding = try observed.flatMap { try operations.load($0.identity) } }
         catch { binding = nil; choice = nil; phase = .failed; detail = error.localizedDescription; return }
         choice = binding?.choice
+        if let observed { localRecord = operations.localRecord(observed.identity, binding) }
         phase = binding == nil ? .unlinked : .unconfirmed
+    }
+    func refreshLocalRecord() {
+        guard let context else { localRecord = .unconfirmed; return }
+        let observed = operations.localRecord(context.identity, binding)
+        guard observed != localRecord else { return }
+        localRecord = observed
+        if phase == .matched {
+            generation += 1; phase = .unconfirmed; checkedAt = nil
+        }
     }
     private func stillCurrent(_ captured: CLIConnectionContext, generation: Int) -> Bool {
         guard generation == self.generation, operations.context() == captured else {
@@ -68,7 +86,7 @@ struct CLIConnectionContext: Equatable {
                 guard stillCurrent(context, generation: generation) else { return }
                 defaultMatches = status == .matched
                 if status == .matched {
-                    try operations.save(existing); binding = existing; choice = existing.choice
+                    try operations.save(existing); binding = existing; choice = existing.choice; refreshLocalRecord()
                     try await complete(status, binding: existing, context: context, generation: generation)
                 } else {
                     let isolated = try operations.make(.isolated, context.identity)
@@ -76,14 +94,14 @@ struct CLIConnectionContext: Equatable {
                         let isolatedStatus = try await operations.status(isolated)
                         guard stillCurrent(context, generation: generation) else { return }
                         if isolatedStatus == .matched {
-                            try operations.save(isolated); binding = isolated; choice = isolated.choice
+                            try operations.save(isolated); binding = isolated; choice = isolated.choice; refreshLocalRecord()
                             try await complete(isolatedStatus, binding: isolated, context: context, generation: generation)
                             return
                         }
                     }
                     // The existing default belongs to another account or has no
                     // reusable sign-in. Offer a single isolated-login setup.
-                    phase = status == .unconfirmed ? .unconfirmed : .choosing
+                    phase = .choosing
                 }
             }
         } catch {
@@ -108,7 +126,7 @@ struct CLIConnectionContext: Equatable {
             guard status == .matched || status == .notLoggedIn else {
                 phase = status == .different ? .mismatched : .unconfirmed; return
             }
-            try operations.save(chosen); binding = chosen; choice = chosen.choice
+            try operations.save(chosen); binding = chosen; choice = chosen.choice; refreshLocalRecord()
             try await complete(status, binding: chosen, context: context, generation: generation)
         } catch {
             guard stillCurrent(context, generation: generation) else { return }
@@ -124,7 +142,8 @@ struct CLIConnectionContext: Equatable {
             try await operations.launch(binding)
             guard stillCurrent(context, generation: generation) else { return }
             phase = status == .matched ? .matched : .waitingForLogin
-        case .different: phase = .mismatched
+            if status == .matched { localRecord = .sameAccount(binding.choice) }
+        case .different: phase = .mismatched; localRecord = .differentAccount
         case .unconfirmed: phase = .unconfirmed
         }
     }
@@ -137,9 +156,9 @@ struct CLIConnectionContext: Equatable {
             guard stillCurrent(context, generation: generation) else { return }
             checkedAt = Date()
             switch status {
-            case .matched: phase = .matched
+            case .matched: phase = .matched; localRecord = .sameAccount(binding.choice)
             case .notLoggedIn: phase = .waitingForLogin
-            case .different: phase = .mismatched
+            case .different: phase = .mismatched; localRecord = .differentAccount
             case .unconfirmed: phase = .unconfirmed
             }
         } catch {
@@ -152,6 +171,7 @@ struct CLIConnectionContext: Equatable {
         generation += 1; phase = .choosing; detail = nil
     }
     func defaultLoginDidChange() {
+        refreshLocalRecord()
         guard choice == .defaultLogin else { return }
         if phase == .waitingForLogin { checkedAt = nil; return }
         generation += 1; phase = .unconfirmed; checkedAt = nil; detail = nil

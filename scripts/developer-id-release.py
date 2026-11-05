@@ -10,8 +10,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.6-rc.7"
-BUILD = "20261105.7.2"
+RELEASE = "1.3.6-rc.8"
+BUILD = "20261105.8.0"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.6-final"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
@@ -233,7 +233,7 @@ def main():
             require(state["phase"] == ("signed" if kind == "app" else "packaged"), "Unexpected submission phase")
             require(state["notarization"][kind]["status"] == "NOT_RUN", "Submission already exists")
             require(state["designatedRequirement"].get("same") is True,
-                    "RC6/RC7 GUI designated requirement equality must be reviewed before submission")
+                    "Baseline/candidate GUI designated requirement equality must be reviewed before submission")
             verify_app(app, state["teamID"], evidence)
             if kind == "app":
                 archive = directory / "app-submission.zip"

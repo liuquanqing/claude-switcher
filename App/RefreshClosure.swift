@@ -25,7 +25,7 @@ import SwitcherCore
         let name = current, scope = protection.desktopScope
         let operations = supplied ?? StatusRefreshOperations(
             observe: { _ = await self.observeAccountMetadata(importUsage: false) },
-            readCache: { try await OfficialCLIUsageReader.read(home: FileManager.default.homeDirectoryForCurrentUser, manual: false) })
+            readCache: { try await self.readSelectedCLIUsageCache() })
         await operations.observe()
         do {
             let sample = try await operations.readCache()
