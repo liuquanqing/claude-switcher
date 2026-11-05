@@ -21,31 +21,33 @@ private enum ApplicationUpdateLocalization {
             "detail.idle": "可检查是否有适用于此 Mac 的新版本。",
             "detail.checking": "正在检查更新…",
             "detail.current": "当前版本已是最新版。",
-            "detail.available": "下载并校验后，可手动打开安装包更新。",
-            "detail.downloading": "正在下载并校验；关闭窗口会继续下载。",
-            "detail.ready": "安装包已下载并通过校验，不会自动安装。",
+            "detail.available": "更新完成后将自动重启切换器。",
+            "detail.downloading": "正在下载；关闭窗口只隐藏进度。",
+            "detail.ready": "已下载并校验，可以安装并重启。",
+            "detail.installing": "正在准备或安装，完成后自动重启…",
             "detail.failedCheck": "检查更新未完成，请重试。",
             "detail.failedDownload": "下载或校验未完成，请重试。",
+            "detail.failedInstall": "更新未完成，可重试安装。",
             "download.progress": "下载进度",
             "failure.unknown": "未提供详细原因。",
             "action.releaseNotes": "发布说明",
             "action.later": "稍后",
+            "action.cancelUpdate": "取消更新",
+            "action.hideProgress": "隐藏进度",
             "action.close": "关闭",
-            "action.download": "下载",
-            "action.cancelDownload": "取消下载",
             "action.retryCheck": "重新检查",
-            "action.retryDownload": "重试下载",
-            "action.openInstaller": "打开安装包",
-            "action.showFinder": "在 Finder 中显示",
+            "action.updateAndRelaunch": "更新并重启",
+            "action.retryUpdate": "重试更新",
+            "action.openInstaller": "手动打开安装包",
             "help.releaseNotes": "在浏览器中查看发布说明。",
-            "help.close": "仅关闭更新窗口，不取消其他任务。",
-            "help.download": "下载并校验所选版本；关闭窗口不会取消下载。",
-            "help.cancelDownload": "取消当前下载，窗口保持打开。",
+            "help.close": "仅关闭更新窗口，不取消已提交的任务。",
+            "help.cancelUpdate": "取消下载，不进入安装。",
+            "help.hideProgress": "仅隐藏窗口，安装会继续。",
             "help.retryCheck": "重新检查是否有新版本。",
-            "help.retryDownload": "重新下载并校验所选版本。",
-            "help.openInstaller": "打开已下载的 DMG，并手动继续安装。",
-            "help.openUnavailable": "安装包路径不可用，请重新下载。",
-            "help.showFinder": "在 Finder 中显示已下载文件。"
+            "help.updateAndRelaunch": "下载、校验并安装此版本，然后自动重启。",
+            "help.retryUpdate": "从仍可复用的阶段继续更新。",
+            "help.openInstaller": "仅手动打开已下载的 DMG，不会自动安装或重启。",
+            "help.openUnavailable": "安装包路径不可用，请重新下载。"
         ],
         "en": [
             "window.title": "Software Update",
@@ -55,31 +57,33 @@ private enum ApplicationUpdateLocalization {
             "detail.idle": "Check for a new version for this Mac.",
             "detail.checking": "Checking for updates…",
             "detail.current": "This version is up to date.",
-            "detail.available": "Download and verify the update, then open the installer manually.",
-            "detail.downloading": "Downloading and verifying. Closing this window won’t cancel the download.",
-            "detail.ready": "The installer is downloaded and verified. It won’t install automatically.",
+            "detail.available": "The switcher will relaunch after the update.",
+            "detail.downloading": "Downloading. Closing the window only hides progress.",
+            "detail.ready": "Downloaded and verified. Ready to install and relaunch.",
+            "detail.installing": "Preparing or installing. The app will relaunch automatically…",
             "detail.failedCheck": "The update check didn’t finish. Try again.",
             "detail.failedDownload": "The download or verification didn’t finish. Try again.",
+            "detail.failedInstall": "The update didn’t finish. You can retry installation.",
             "download.progress": "Download progress",
             "failure.unknown": "No details were provided.",
             "action.releaseNotes": "Release Notes",
             "action.later": "Later",
+            "action.cancelUpdate": "Cancel Update",
+            "action.hideProgress": "Hide Progress",
             "action.close": "Close",
-            "action.download": "Download",
-            "action.cancelDownload": "Cancel Download",
             "action.retryCheck": "Check Again",
-            "action.retryDownload": "Retry Download",
-            "action.openInstaller": "Open Installer",
-            "action.showFinder": "Show in Finder",
+            "action.updateAndRelaunch": "Update and Relaunch",
+            "action.retryUpdate": "Retry Update",
+            "action.openInstaller": "Open Installer Manually",
             "help.releaseNotes": "View the release notes in your browser.",
-            "help.close": "Only closes this update window. Other tasks are not cancelled.",
-            "help.download": "Download and verify this version. Closing the window won’t cancel the download.",
-            "help.cancelDownload": "Cancel the current download and keep this window open.",
+            "help.close": "Only closes this update window. Submitted tasks are not cancelled.",
+            "help.cancelUpdate": "Cancel the download before installation.",
+            "help.hideProgress": "Only hides the window. Installation continues.",
             "help.retryCheck": "Check for a new version again.",
-            "help.retryDownload": "Download and verify this version again.",
-            "help.openInstaller": "Open the downloaded DMG and continue installation manually.",
-            "help.openUnavailable": "The installer path is unavailable. Download the update again.",
-            "help.showFinder": "Reveal the downloaded file in Finder."
+            "help.updateAndRelaunch": "Download, verify, and install this version, then relaunch automatically.",
+            "help.retryUpdate": "Continue from the latest reusable update stage.",
+            "help.openInstaller": "Only opens the downloaded DMG. It does not install or relaunch automatically.",
+            "help.openUnavailable": "The installer path is unavailable. Download the update again."
         ]
     ]
 }
@@ -125,7 +129,10 @@ struct ApplicationUpdateView: View {
         case .available: return t("detail.available")
         case .downloading: return t("detail.downloading")
         case .ready: return t("detail.ready")
-        case .failed: return t(release == nil ? "detail.failedCheck" : "detail.failedDownload")
+        case .installing: return t("detail.installing")
+        case .failed:
+            if release == nil { return t("detail.failedCheck") }
+            return t(updater.canRetryInstall ? "detail.failedInstall" : "detail.failedDownload")
         }
     }
 
@@ -173,6 +180,16 @@ struct ApplicationUpdateView: View {
                 }
             }
 
+            if updater.phase == .ready {
+                Button(action: updater.openDownloadedDMG) {
+                    Label(t("action.openInstaller"), systemImage: "arrow.up.right")
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+                .disabled(updater.downloadedURL == nil)
+                .help(updater.downloadedURL == nil ? t("help.openUnavailable") : t("help.openInstaller"))
+            }
+
             if updater.phase == .failed {
                 Text(failureMessage)
                     .font(.callout)
@@ -206,41 +223,36 @@ struct ApplicationUpdateView: View {
     private var actions: some View {
         HStack(spacing: 10) {
             switch updater.phase {
-            case .available, .downloading:
+            case .available, .ready:
                 secondaryAction(t("action.later"), help: t("help.close"), action: close)
                     .keyboardShortcut(.cancelAction)
-            case .idle, .checking, .current, .ready, .failed:
+            case .downloading:
+                secondaryAction(t("action.cancelUpdate"), help: t("help.cancelUpdate")) {
+                    updater.cancelDownload()
+                }
+                .keyboardShortcut(.cancelAction)
+            case .installing:
+                secondaryAction(t("action.hideProgress"), help: t("help.hideProgress"), action: close)
+                    .keyboardShortcut(.cancelAction)
+            case .idle, .checking, .current, .failed:
                 secondaryAction(t("action.close"), help: t("help.close"), action: close)
                     .keyboardShortcut(.cancelAction)
             }
             Spacer(minLength: 0)
             switch updater.phase {
-            case .available:
-                primaryAction(t("action.download"), help: t("help.download"), action: downloadUpdate)
-                    .disabled(release == nil)
-            case .downloading:
-                secondaryAction(t("action.cancelDownload"), help: t("help.cancelDownload")) {
-                    updater.cancelDownload()
-                }
-            case .ready:
-                secondaryAction(t("action.showFinder"), help: t("help.showFinder")) {
-                    updater.showDownloadedFile()
-                }
-                .disabled(updater.downloadedURL == nil)
-                primaryAction(
-                    t("action.openInstaller"),
-                    help: updater.downloadedURL == nil ? t("help.openUnavailable") : t("help.openInstaller")
-                ) {
-                    updater.openDownloadedDMG()
-                }
-                .disabled(updater.downloadedURL == nil)
+            case .available, .ready:
+                primaryAction(t("action.updateAndRelaunch"), help: t("help.updateAndRelaunch"), action: updateAndRelaunch)
+                    .disabled(release == nil || (updater.phase == .ready && !updater.canInstall))
             case .failed:
                 if release == nil {
                     primaryAction(t("action.retryCheck"), help: t("help.retryCheck"), action: checkForUpdates)
                 } else {
-                    primaryAction(t("action.retryDownload"), help: t("help.retryDownload"), action: downloadUpdate)
+                    primaryAction(t("action.retryUpdate"), help: t("help.retryUpdate"), action: updateAndRelaunch)
+                        .disabled(updater.canRetryInstall && !updater.canInstall)
                 }
-            case .idle, .checking, .current:
+            case .installing:
+                ProgressView().controlSize(.small)
+            case .idle, .checking, .current, .downloading:
                 EmptyView()
             }
         }
@@ -275,8 +287,14 @@ struct ApplicationUpdateView: View {
         Task { await updater.check(manual: true) }
     }
 
-    private func downloadUpdate() {
-        Task { await updater.download() }
+    private func updateAndRelaunch() {
+        Task {
+            if updater.phase == .available || (updater.phase == .failed && !updater.canRetryInstall) {
+                await updater.download()
+            }
+            guard updater.canInstall else { return }
+            await updater.installAndRelaunch()
+        }
     }
 }
 
@@ -291,7 +309,8 @@ final class ApplicationUpdateWindowController: NSObject {
     }
 
     func show(updater: ApplicationUpdater, language: String) {
-        guard [.available, .downloading, .ready].contains(updater.phase) else { return }
+        guard [.available, .downloading, .ready, .installing].contains(updater.phase)
+                || (updater.phase == .failed && updater.release != nil) else { return }
         let language = AppLocalization.normalized(language)
         let window: NSWindow
         let isNewWindow: Bool

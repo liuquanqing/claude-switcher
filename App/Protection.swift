@@ -3,6 +3,7 @@ import SwiftUI
 import SwitcherCore
 
 enum NetworkCheckOrigin { case manualInput, operation }
+enum GuardOperationPhase { case idle, starting, stopping, retrying }
 
 struct ManualNetworkCheck {
     let checkedAt: Date
@@ -25,6 +26,9 @@ final class ProtectionController: ObservableObject {
     @Published var enabled = false
     @Published var guardOnline = false
     @Published var working = false
+    @Published private(set) var operationPhase: GuardOperationPhase = .idle
+    private var failedOperation: GuardOperationPhase?
+    private var requestedConfig: SafetyConfig?
     @Published private(set) var checking = false
     @Published private(set) var lastCheckSummary: String?
     @Published private(set) var lastCheckedAt: Date?
@@ -45,6 +49,12 @@ final class ProtectionController: ObservableObject {
     let service: GuardService
     var hasUnsavedChanges: Bool {
         country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != activeCountry || mode != activeProxyMode
+    }
+    var hasEditedSettings: Bool {
+        if activeCountry != nil || activeProxyMode != nil { return hasUnsavedChanges }
+        let defaults = SafetyConfig()
+        return country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != defaults.expectedCountry
+            || mode != defaults.proxyMode
     }
     var exitStatusText: String {
         if !enabled { return "保护未启用" }
@@ -207,13 +217,17 @@ final class ProtectionController: ObservableObject {
             } catch { operationError = error.localizedDescription }
             return
         }
-        working = true; defer { working = false }
+        working = true; operationPhase = .starting
+        defer { working = false; operationPhase = .idle }
         do {
             let config = try SafetyConfig(enabled: true, expectedCountry: country, proxyMode: mode).validated()
+            requestedConfig = config
             try await worker.enable(config)
+            failedOperation = nil
             country = config.expectedCountry
             await refreshStatusAsync(afterOperation: true)
         } catch {
+            failedOperation = .starting
             await refreshStatusAsync(afterOperation: true)
             operationError = error.localizedDescription
         }
@@ -222,11 +236,30 @@ final class ProtectionController: ObservableObject {
         guard !working else { return }
         operationError = nil
         if demo { enabled = false; guardOnline = false; lastDecision = SafetyDecision(.disabled); status = "演示：保护已停止"; return }
-        working = true
+        working = true; operationPhase = .stopping
         Task {
-            defer { working = false }
-            do { try await worker.disable(); await refreshStatusAsync(afterOperation: true) }
-            catch { await refreshStatusAsync(afterOperation: true); operationError = error.localizedDescription }
+            defer { working = false; operationPhase = .idle }
+            do { try await worker.disable(); failedOperation = nil; await refreshStatusAsync(afterOperation: true) }
+            catch { failedOperation = .stopping; await refreshStatusAsync(afterOperation: true); operationError = error.localizedDescription }
+        }
+    }
+    func retryProtection() async {
+        guard !working else { return }
+        if failedOperation == .stopping { disable(); return }
+        if demo { await enable(); return }
+        guard let saved = (try? files.loadConfig()).flatMap({ $0.enabled ? $0 : nil }) ?? requestedConfig else {
+            await enable(); return
+        }
+        working = true; operationPhase = .retrying; operationError = nil
+        defer { working = false; operationPhase = .idle }
+        do {
+            try await worker.retry(saved)
+            failedOperation = nil
+            await refreshStatusAsync(afterOperation: true)
+        } catch {
+            failedOperation = .starting
+            await refreshStatusAsync(afterOperation: true)
+            operationError = error.localizedDescription
         }
     }
 

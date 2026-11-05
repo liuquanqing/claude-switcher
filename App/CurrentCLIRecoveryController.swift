@@ -31,7 +31,7 @@ import SwitcherCore
         verify suppliedVerify: ((String) async throws -> CLIIdentity)? = nil,
         now: Date = Date()) async -> CLICurrentRecoveryOutcome {
         guard !isDemo || (provided != nil && suppliedContext != nil && suppliedGate != nil && suppliedNative != nil && suppliedVerify != nil) else { return .unsupported }
-        guard busy == nil, !refreshing, !currentCLIRecoveryRunning else { return .notNeeded }
+        guard !updating, busy == nil, !refreshing, !currentCLIRecoveryRunning else { return .notNeeded }
         currentCLIRecoveryDidRunNative = false
         if !isDemo && !cliConfiguration().allowsSubscriptionMutation {
             clearCurrentCLIRecoveryNotice();currentCLIRecoveryOutcome=nil;currentCLIBackupPending=nil;currentCLIObservedLogin=nil

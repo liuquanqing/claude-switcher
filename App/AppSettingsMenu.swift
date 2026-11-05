@@ -24,10 +24,15 @@ struct AppSettingsMenu: View {
         )
     }
 
+    private var installationInProgress: Bool { store.updating || updater.phase == .installing }
+
     private var prereleaseBinding: Binding<Bool> {
         Binding(
             get: { updater.includePrereleases },
-            set: { updater.includePrereleases = $0 }
+            set: {
+                guard !installationInProgress else { return }
+                updater.includePrereleases = $0
+            }
         )
     }
 
@@ -46,7 +51,8 @@ struct AppSettingsMenu: View {
             .disabled(updatePresentation.isChecking)
             Toggle(t("settings.includePrereleases"), isOn: prereleaseBinding)
                 .toggleStyle(.checkbox)
-                .help(t("settings.includePrereleasesHelp"))
+                .disabled(installationInProgress)
+                .help(t(installationInProgress ? "settings.updateChannelLockedHelp" : "settings.includePrereleasesHelp"))
             if let notice = store.applicationUpdateNotice {
                 Text(notice)
                     .font(.callout)

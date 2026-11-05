@@ -5,6 +5,7 @@ import SwitcherCore
 struct LocalAccountObservation: Equatable {
     let desktopAccountID: String?
     let fingerprint: String
+    var cliIdentityFingerprint: String? = nil
 
     static func read(desktop: URL, cli: URL, profile: String, scope: DesktopProtectionScope) -> Self {
         // Select auth metadata only: quota-cache or unrelated preference writes are not a login change.
@@ -15,15 +16,19 @@ struct LocalAccountObservation: Equatable {
             "desktopAccount": account ?? "", "desktopToken": config?["oauth:tokenCacheV2"] as? String ?? "",
             "cliIdentity": document?["oauthAccount"] ?? NSNull()]
         let data = (try? JSONSerialization.data(withJSONObject: fields, options: .sortedKeys)) ?? Data()
-        return Self(desktopAccountID: account, fingerprint: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined())
+        let cliData = (try? JSONSerialization.data(withJSONObject: ["identity": document?["oauthAccount"] ?? NSNull()], options: .sortedKeys)) ?? Data()
+        return Self(desktopAccountID: account, fingerprint: SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined(),
+                    cliIdentityFingerprint: SHA256.hash(data: cliData).map { String(format: "%02x", $0) }.joined())
     }
 }
 
 @MainActor extension Store {
     func applyLocalAccountObservation(_ observation: LocalAccountObservation) -> Bool {
         let changed = localAccountObservation != nil && localAccountObservation != observation
+        let cliChanged = localAccountObservation != nil && localAccountObservation?.cliIdentityFingerprint != observation.cliIdentityFingerprint
         localAccountObservation = observation
         if changed { usageRefreshPolicy.credentialsChanged(profile: current); usageCatchUpPending = true }
+        if cliChanged { cliConnection.defaultLoginDidChange() }
         if protection.desktopScope == .subscription,
            let actual = observation.desktopAccountID, let saved = active?.snapshot?.identity.accountID,
            CLIReportedStatus.sameAccountRecord(CLIIdentity(accountID: actual, organizationID: nil, email: nil),
@@ -34,6 +39,7 @@ struct LocalAccountObservation: Equatable {
             profiles[index].snapshot = nil; profiles[index].usageState = .notRequested
             resetCurrentCLIRecoveryObservation()
             invalidateCLIStatus()
+            cliConnection.contextDidChange()
         }
         return changed
     }
@@ -56,7 +62,7 @@ struct LocalAccountObservation: Equatable {
     }
 
     func automaticRefresh() async {
-        guard !isDemo, busy == nil, !refreshing, !cliStatusRefreshing, !automaticRefreshInProgress, !statusRefreshInProgress else { return }
+        guard !isDemo, !updating, busy == nil, !refreshing, !cliStatusRefreshing, !automaticRefreshInProgress, !statusRefreshInProgress else { return }
         automaticRefreshInProgress = true
         defer { automaticRefreshInProgress = false }
         // Startup, wake and timer observe only metadata and an existing quota

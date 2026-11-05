@@ -137,5 +137,20 @@ import SwitcherCore
             "an explicit click joining an offline daily check gets failure feedback rather than silence")
     require(panelDismissals == presentations,
             "only actionable update presentations dismiss the menu panel before fronting a normal window")
+    let installUpdater = ApplicationUpdater(demo: true, operations: operations, currentVersion: "1.3.6", architecture: "arm64")
+    await installUpdater.check(); await installUpdater.download()
+    var installs = 0
+    installUpdater.installHandler = { file, selected, hash, _ in
+        installs += 1
+        require(file.lastPathComponent == selected.asset.name && hash == digest, "installation receives the verified selected package")
+        throw SafetyError("fixture application refused to quit")
+    }
+    require(installUpdater.canInstall, "a verified package and real handler are both needed before installing")
+    await installUpdater.installAndRelaunch()
+    require(installs == 1 && installUpdater.phase == .failed && installUpdater.canRetryInstall,
+            "failed installation retains the verified download for a retry without claiming success")
+    try Data("tampered fixture".utf8).write(to: installUpdater.downloadedURL!)
+    await installUpdater.installAndRelaunch()
+    require(installs == 1 && !installUpdater.canRetryInstall, "a changed downloaded package never reaches the installer")
     return checks
 }

@@ -19,6 +19,18 @@ public struct GuardService {
     public var registered: Bool {
         (try? command("/bin/launchctl", ["print", domain + "/" + Self.label]).0) == 0
     }
+    public var registeredHelper: URL? {
+        guard let result = try? command("/bin/launchctl", ["print", domain + "/" + Self.label]), result.0 == 0,
+              let line = result.1.split(separator: "\n").map({ $0.trimmingCharacters(in: .whitespaces) })
+                .first(where: { $0.hasPrefix("program = /") }) else { return nil }
+        return URL(fileURLWithPath: String(line.dropFirst("program = ".count)))
+    }
+    /// Start an idle job without killing or restarting an invocation already running.
+    public func requestCheck() throws {
+        guard try command("/bin/launchctl", ["kickstart", domain + "/" + Self.label]).0 == 0 else {
+            throw SafetyError("未能请求守卫检查，请重试。")
+        }
+    }
     public func enable(_ requested: SafetyConfig) throws {
         guard !FileManager.default.fileExists(atPath: legacyPlist.path) else {
             throw SafetyError("检测到旧版保镖，请先按迁移文档停用旧服务，避免两套守卫同时运行。")

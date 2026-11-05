@@ -6,7 +6,6 @@ struct TerminalProtectionCard: View {
     @ObservedObject var controller: ProtectionController
     @Environment(\.appLanguage) private var language
     let busy: Bool
-    @State private var confirmStop = false
     @State private var confirmProtectCurrentDesktop = false
     @State private var showSettings = false
     @State private var showCheckHelp = false
@@ -14,11 +13,13 @@ struct TerminalProtectionCard: View {
     @State private var helpHover = false
     @State private var takeoverHover = false
     @State private var settingsHover = false
+    @State private var protectionHover = false
     /// Manual checks re-expand the result block; operation reports preserve the user's fold state.
     @State private var resultsExpanded = true
     @State private var resultsHover = false
     /// Shared by the open column and the panel beneath it, so the two read as one region.
     private let panelTint = Color.white.opacity(0.03)
+    private var operationLocked: Bool { busy || store.updating }
 
     private func t(_ key: String, arguments: [String: String] = [:]) -> String {
         appText(key, language: language, arguments: arguments)
@@ -324,8 +325,7 @@ struct TerminalProtectionCard: View {
 
     // MARK: Scope
 
-    /// The scope is spelled out only on demand (column hover, switch hover, check help), never as a
-    /// standing line: the column title already names the desktop where it matters.
+    /// The scope is spelled out only on demand (settings hover and check help), never as a standing line.
     private var desktopScopeHelp: String {
         let summary: String
         switch controller.desktopScope {
@@ -340,8 +340,6 @@ struct TerminalProtectionCard: View {
 
     // MARK: Notices
 
-    /// The live problem behind an exception title (guard offline / blocked), with its next step.
-    /// API / unknown scope already say everything in the column, so their generic message is skipped.
     private var issueText: String? {
         guard controller.enabled, !controller.working else { return nil }
         guard !controller.guardOnline || !controller.lastDecision.allowed else { return nil }
@@ -350,100 +348,131 @@ struct TerminalProtectionCard: View {
         return generated(controller.status)
     }
 
-    /// Problems first, then a dismissible failed-operation note. Placed under the header when folded and
-    /// at the top of the settings panel when open, so the panel stays attached to the column above it.
+    private var noticeText: String? {
+        if let message = controller.operationError?.trimmingCharacters(in: .whitespacesAndNewlines), !message.isEmpty {
+            return generated(message)
+        }
+        return issueText
+    }
+
+    private var hasNotices: Bool { noticeText != nil }
+
     @ViewBuilder private var notices: some View {
-        if let issueText {
+        if let noticeText {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "exclamationmark.circle.fill").font(.system(size: 10)).padding(.top, 1)
-                Text(issueText).fixedSize(horizontal: false, vertical: true)
+                Text(noticeText).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .font(.system(size: 10)).foregroundColor(statusColor)
-            .help(issueText)
+            .font(.system(size: 10)).foregroundColor(controller.operationError == nil ? statusColor : .bad)
+            .help(noticeText)
             .accessibilityElement(children: .combine)
         }
-        operationErrorFeedback
     }
 
-    private var hasNotices: Bool { issueText != nil || controller.operationError != nil }
-
-    /// A failed save/enable/takeover is history, not the live state: say so and let the user dismiss it.
-    /// Nothing here clears it automatically, a passing network check included.
-    @ViewBuilder private var operationErrorFeedback: some View {
-        if let message = controller.operationError {
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10)).foregroundColor(.bad)
-                    .padding(.top, 2)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t("protection.lastOperationFailed"))
-                        .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.bad)
-                    Text(generated(message))
-                        .font(.system(size: 10)).foregroundColor(.sub)
-                        .fixedSize(horizontal: false, vertical: true)
+    private var protectionHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if protectedSummaryCountry != nil {
+                ViewThatFits(in: .horizontal) {
+                    protectedSummary(inlineCountry: true)
+                    protectedSummary(inlineCountry: false)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
-                Button { controller.clearOperationError() } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .frame(width: 26, height: 26)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.sub)
-                .help(t("protection.dismissNotice"))
-                .accessibilityLabel(t("protection.dismissAccessibility"))
+            } else {
+                statusRow
+                Text(statusDetail.isEmpty ? " " : statusDetail)
+                    .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                    .padding(.leading, 26)
+                    .opacity(statusDetail.isEmpty ? 0 : 1)
+                    .accessibilityHidden(statusDetail.isEmpty)
             }
-            .padding(.leading, 10).padding(.trailing, 2).padding(.vertical, 4)
-            .background(RoundedRectangle(cornerRadius: 7).fill(Color.bad.opacity(0.08)))
+            protectionAction
         }
+        .padding(.horizontal, 2).padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .accessibilityLabel(t("protection.statusAccessibility", arguments: ["title": statusTitle, "detail": statusDetail]))
     }
 
-    /// While the desktop can be taken over, the state and the action are one control: the tinted
-    /// unmanaged-desktop pill only opens the confirmation dialog. The settings fold is a separate
-    /// chevron button beside it, so the two hit areas cannot intercept each other.
-    private var offerHeader: some View {
-        let disabled = busy || controller.working
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
+    private var statusRow: some View {
+        HStack(spacing: 4) {
+            if offerDesktopProtection {
                 Button { confirmProtectCurrentDesktop = true } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
-                            .frame(width: 14, height: 14)
-                        Text(statusTitle).font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1).minimumScaleFactor(0.85)
-                        Spacer(minLength: 2)
+                    HStack(spacing: 4) {
+                        statusContent
                         Image(systemName: "plus").font(.system(size: 8, weight: .bold))
                     }
-                    .foregroundColor(statusColor)
-                    .padding(.horizontal, 7)
+                    .padding(.horizontal, 6)
                     .frame(maxWidth: .infinity, minHeight: 26)
                     .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(statusColor.opacity(disabled ? 0.06 : (takeoverHover ? 0.24 : 0.15))))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(statusColor.opacity(0.35), lineWidth: 1))
+                        .fill(statusColor.opacity(takeoverHover ? 0.2 : 0.1)))
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(disabled)
-                .opacity(disabled ? 0.5 : 1)
+                .disabled(operationLocked || controller.working)
                 .onHover { takeoverHover = $0 }
                 .help(t("protection.takeoverHelp"))
                 .accessibilityLabel(t("protection.unmanagedAccessibility", arguments: ["country": controller.activeCountry ?? t("common.notSet")]))
                 .accessibilityHint(t("protection.takeoverHint"))
-                settingsToggleButton
+            } else {
+                statusContent.padding(.horizontal, 6)
             }
-            Text(t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")]))
-                .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                .lineLimit(1).fixedSize()
-                .padding(.leading, 7)
+            settingsToggleButton
         }
-        .padding(.horizontal, 2).padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
-    /// Chevron-only settings disclosure used beside the merged pill.
+    private func protectedSummary(inlineCountry: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 4) {
+                if inlineCountry {
+                    inlineStatusContent
+                } else {
+                    statusContent.padding(.horizontal, 6)
+                }
+                settingsToggleButton
+            }
+            if !inlineCountry, let country = protectedSummaryCountry {
+                Text(country)
+                    .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                    .lineLimit(1).padding(.leading, 32)
+            }
+        }
+    }
+
+    private var inlineStatusContent: some View {
+        HStack(spacing: 5) {
+            Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
+                .frame(width: 14, height: 14)
+            if let country = protectedSummaryCountry {
+                (Text(statusTitle) + Text(" · " + country).foregroundColor(.sub))
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 26)
+        .foregroundColor(statusColor)
+    }
+
+    private var protectedSummaryCountry: String? {
+        guard controller.enabled, !controller.working, protectedDesktop,
+              let country = controller.activeCountry?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !country.isEmpty else { return nil }
+        return country
+    }
+
+    private var statusContent: some View {
+        HStack(spacing: 5) {
+            Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
+                .frame(width: 14, height: 14)
+            Text(statusTitle).font(.system(size: 11, weight: .semibold))
+                .lineLimit(1).minimumScaleFactor(0.72)
+            Spacer(minLength: 0)
+        }
+        .frame(height: 26)
+        .foregroundColor(statusColor)
+    }
+
     private var settingsToggleButton: some View {
         Button { showSettings.toggle() } label: {
             Image(systemName: "chevron.down")
@@ -462,79 +491,65 @@ struct TerminalProtectionCard: View {
         .accessibilityHint(t("protection.settingsHint"))
     }
 
-    /// The normal protected state combines its title and saved country when they fit; every other state
-    /// keeps the title and a detail line. The whole block is the settings disclosure; its only open/close
-    /// affordance is the chevron beside the title, and the open panel visually extends from this column.
-    private var statusButton: some View {
-        Button { showSettings.toggle() } label: {
-            ViewThatFits(in: .horizontal) {
-                if protectedDesktop, statusTitle == t("protection.active"),
-                   let country = controller.activeCountry?.trimmingCharacters(in: .whitespacesAndNewlines),
-                   !country.isEmpty {
-                    HStack(spacing: 5) {
-                        Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
-                            .frame(width: 14, height: 14)
-                        (Text(statusTitle)
-                            + Text(" · ").foregroundColor(.sub)
-                            + Text(country).foregroundColor(.sub))
-                            .font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                        Spacer(minLength: 2)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .semibold))
-                            .rotationEffect(.degrees(showSettings ? 180 : 0))
-                            .foregroundColor(settingsHover || showSettings ? .txt : .sub)
-                            .frame(width: 12)
-                    }
-                    .frame(height: 22)
-                    .foregroundColor(statusColor)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 5) {
-                        Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
-                            .frame(width: 14, height: 14)
-                        Text(statusTitle).font(.system(size: 11, weight: .semibold))
-                            .lineLimit(1).minimumScaleFactor(0.85)
-                        Spacer(minLength: 2)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .semibold))
-                            .rotationEffect(.degrees(showSettings ? 180 : 0))
-                            .foregroundColor(settingsHover || showSettings ? .txt : .sub)
-                            .frame(width: 12)
-                    }
-                    .frame(height: 22)
-                    .foregroundColor(statusColor)
-                    // Keep the detail inside the 164pt column without shrinking the rest of the panel.
-                    Text(statusDetail)
-                        .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                        .lineLimit(1).minimumScaleFactor(0.78)
-                        .padding(.leading, 20)
-                }
+    private var protectionActionIsSecondary: Bool {
+        controller.enabled && !needsRetry && controller.operationPhase == .idle
+    }
+
+    private var protectionAction: some View {
+        Button(action: runProtectionAction) {
+            HStack(spacing: 5) {
+                if controller.working { ProgressView().controlSize(.mini) }
+                Text(primaryProtectionTitle).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
             }
-            .padding(.horizontal, 6).padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, protectionActionIsSecondary ? 9 : 12)
+            .frame(maxWidth: protectionActionIsSecondary ? nil : .infinity)
+            .frame(height: 28)
+            .foregroundColor(protectionActionIsSecondary ? .sub : .white)
             .background(RoundedRectangle(cornerRadius: 7)
-                .fill(Color.white.opacity(settingsHover && !showSettings ? 0.045 : 0)))
+                .fill(protectionActionIsSecondary
+                      ? Color.sub.opacity(protectionHover ? 0.14 : 0.07)
+                      : Color.claude.opacity(protectionHover ? 0.9 : 0.78)))
+            .overlay(RoundedRectangle(cornerRadius: 7)
+                .stroke(Color.stroke.opacity(protectionActionIsSecondary ? 1 : 0), lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { settingsHover = $0 }
-        .help(t(showSettings ? "protection.collapseSettings" : "protection.expandSettings") + "\n" + desktopScopeHelp)
-        .accessibilityLabel(t("protection.statusAccessibility", arguments: ["title": statusTitle, "detail": statusDetail]))
-        .accessibilityHint(t(showSettings ? "protection.collapseSettings" : "protection.expandSettings") + ": " + t("protection.settingsHint"))
+        .disabled(operationLocked || controller.working)
+        .opacity(operationLocked || controller.working ? 0.55 : 1)
+        .onHover { protectionHover = $0 }
+        .help(t(needsRetry ? "protection.retryHelp" : "protection.primaryHelp"))
+        .accessibilityLabel(primaryProtectionTitle)
     }
 
     // MARK: State
 
-    private var protectionEnabled: Binding<Bool> {
-        Binding(get: { controller.enabled }, set: { requested in
-            if requested {
-                Task { await controller.enable() }
-            } else {
-                confirmStop = true
-            }
-        })
+    private var needsRetry: Bool {
+        guard !controller.working else { return false }
+        if controller.lastDecision.reason == .terminationFailed { return true }
+        if controller.enabled && !controller.guardOnline { return true }
+        return controller.operationError != nil && !desktopPendingTakeover
+    }
+
+    private var primaryProtectionTitle: String {
+        switch controller.operationPhase {
+        case .starting: return t("protection.starting")
+        case .stopping: return t("protection.stopping")
+        case .retrying: return t("protection.retrying")
+        case .idle:
+            if needsRetry { return t("protection.retry") }
+            return t(controller.enabled ? "protection.pause" : "protection.enable")
+        }
+    }
+
+    private func runProtectionAction() {
+        guard !operationLocked, !controller.working else { return }
+        if needsRetry {
+            Task { await controller.retryProtection() }
+        } else if controller.enabled {
+            controller.disable()
+        } else {
+            Task { await controller.enable() }
+        }
     }
 
     private var protectedDesktop: Bool {
@@ -552,9 +567,8 @@ struct TerminalProtectionCard: View {
         if controller.working || !controller.enabled { return .sub }
         if !controller.guardOnline { return .warn }
         if controller.lastDecision.reason == .terminationFailed { return .bad }
-        // API is a normal mode the guard simply doesn't cover; only an unknown desktop is a warning.
-        if controller.desktopScope == .api { return .sub }
-        if controller.desktopScope == .unknown || desktopPendingTakeover { return .warn }
+        if controller.desktopScope == .api || controller.desktopScope == .unknown { return .sub }
+        if desktopPendingTakeover { return .warn }
         if protectedDesktop { return .good }
         if !store.claudeRunning && controller.lastDecision.allowed { return .good }
         return .warn
@@ -562,7 +576,14 @@ struct TerminalProtectionCard: View {
     /// Titles describe the guard against the desktop only. "Protected" always names the desktop, so it
     /// can't be read as covering the terminal strip beside it or the account as a whole.
     private var statusTitle: String {
-        if controller.working { return t("protection.updating") }
+        if controller.working {
+            switch controller.operationPhase {
+            case .starting: return t("protection.starting")
+            case .stopping: return t("protection.stopping")
+            case .retrying: return t("protection.retrying")
+            case .idle: return t("protection.updating")
+            }
+        }
         if !controller.enabled { return t("protection.disabled") }
         if !controller.guardOnline { return t("protection.unconfirmedStatus") }
         if controller.lastDecision.reason == .terminationFailed { return t("protection.terminationFailed") }
@@ -579,7 +600,7 @@ struct TerminalProtectionCard: View {
     private var statusDetail: String {
         let target = t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")])
         if controller.working { return target }
-        if !controller.enabled { return t(showSettings ? "protection.enableBelow" : "protection.clickToEnable") }
+        if !controller.enabled { return controller.activeCountry == nil ? "" : target }
         if !controller.guardOnline || controller.lastDecision.reason == .terminationFailed { return target }
         switch controller.desktopScope {
         case .api:
@@ -592,8 +613,6 @@ struct TerminalProtectionCard: View {
         case .unknown: return t("protection.unconfirmedNotProtected")
         case .subscription: break
         }
-        // Guard-online is implied by reaching here; when takeover is offered, `offerHeader` shows
-        // its own target line instead of this one.
         if !controller.lastDecision.allowed { return target }
         if !store.claudeRunning { return target + " · " + t("desktop.stopped") }
         return target
@@ -644,14 +663,8 @@ struct TerminalProtectionCard: View {
                     }
                 Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
                     .padding(.vertical, showSettings ? 0 : 10)
-                // Offered: one merged state+action pill plus a separate fold chevron (siblings).
-                // Otherwise the whole status block is the settings disclosure.
                 VStack(alignment: .leading, spacing: 0) {
-                    if offerDesktopProtection {
-                        offerHeader
-                    } else {
-                        statusButton
-                    }
+                    protectionHeader
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 4).padding(.vertical, 4)
@@ -677,20 +690,19 @@ struct TerminalProtectionCard: View {
                 resultsExpanded = true
             }
         }
+        .onChange(of: store.updating) { updating in
+            if updating { confirmProtectCurrentDesktop = false }
+        }
         .confirmationDialog(t("protection.takeoverTitle"), isPresented: $confirmProtectCurrentDesktop,
                             titleVisibility: .visible) {
             Button(t("protection.takeoverAction")) {
                 // Re-validate at confirm time; the desktop, network or guard may have changed meanwhile.
-                guard offerDesktopProtection, !busy else { return }
+                guard offerDesktopProtection, !operationLocked else { return }
                 Task { await controller.protectCurrentDesktop() }
             }
             Button(t("common.cancel"), role: .cancel) {}
         } message: {
             Text(t("protection.takeoverBody"))
-        }
-        .confirmationDialog(t("protection.stopTitle"), isPresented: $confirmStop) {
-            Button(t("protection.stopAction"), role: .destructive) { controller.disable() }
-            Button(t("common.cancel"), role: .cancel) {}
         }
     }
 
@@ -699,23 +711,6 @@ struct TerminalProtectionCard: View {
         VStack(alignment: .leading, spacing: 10) {
             if hasNotices {
                 VStack(alignment: .leading, spacing: 8) { notices }
-            }
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t("protection.background"))
-                        .font(.system(size: 11.5, weight: .semibold)).foregroundColor(.txt)
-                    if !controller.enabled {
-                        Text(t("protection.setupPrompt"))
-                            .font(.system(size: 9.5)).foregroundColor(.sub)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                Spacer()
-                Toggle(t("protection.background"), isOn: protectionEnabled)
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .disabled(busy || controller.working)
-                    .help(t("protection.toggleHelp", arguments: ["scope": desktopScopeHelp]))
             }
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -731,7 +726,7 @@ struct TerminalProtectionCard: View {
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
                         .help(t("protection.countryHelp"))
                         .accessibilityLabel(t("protection.targetCountry"))
-                        .disabled(busy || controller.working || controller.checking)
+                        .disabled(operationLocked || controller.working || controller.checking)
                 }
                 .frame(width: 78, alignment: .leading)
                 VStack(alignment: .leading, spacing: 4) {
@@ -762,7 +757,7 @@ struct TerminalProtectionCard: View {
                     .font(.system(size: 11))
                     .frame(maxWidth: .infinity)
                     .frame(height: 28)
-                    .disabled(busy || controller.working || controller.checking)
+                    .disabled(operationLocked || controller.working || controller.checking)
                     .help(t("protection.saveToApply"))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -779,8 +774,8 @@ struct TerminalProtectionCard: View {
                         .fill(controller.hasUnsavedChanges ? Color.claude : Color.cardHi))
                     .overlay(RoundedRectangle(cornerRadius: 7)
                         .stroke(Color.stroke.opacity(controller.hasUnsavedChanges ? 0 : 1), lineWidth: 1))
-                    .disabled(busy || controller.working || !controller.hasUnsavedChanges)
-                    .opacity(busy || controller.working ? 0.55 : 1)
+                    .disabled(operationLocked || controller.working || !controller.hasUnsavedChanges)
+                    .opacity(operationLocked || controller.working ? 0.55 : 1)
                     .help(t(controller.hasUnsavedChanges ? "protection.saveHelp" : "protection.savedHelp"))
                 }
             }
@@ -804,8 +799,8 @@ struct TerminalProtectionCard: View {
                     .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).disabled(busy || controller.working || controller.checking)
-                .opacity(busy || controller.working || controller.checking ? 0.55 : 1)
+                .buttonStyle(.plain).disabled(operationLocked || controller.working || controller.checking)
+                .opacity(operationLocked || controller.working || controller.checking ? 0.55 : 1)
                 .help(t("protection.checkOnlyHelp"))
                 .accessibilityHint(t("protection.checkOnlyHelp"))
                 if controller.lastCheckReport == nil && !controller.checking {

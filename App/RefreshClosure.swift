@@ -10,7 +10,7 @@ import SwitcherCore
     /// Footer refresh consumes the CLI's existing sample. It never starts
     /// a native CLI process, requests credentials or attempts login repair.
     func refreshAllStatuses(operations supplied: StatusRefreshOperations? = nil) async {
-        guard busy == nil, !refreshing, !cliStatusRefreshing,
+        guard !updating, busy == nil, !refreshing, !cliStatusRefreshing,
               !statusRefreshInProgress, !automaticRefreshInProgress else { return }
         if isDemo && supplied == nil { await verifyDefaultCLI(); return }
         statusRefreshInProgress = true

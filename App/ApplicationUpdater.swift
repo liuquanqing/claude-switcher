@@ -12,14 +12,18 @@ import SwitcherCore
 
 @MainActor final class ApplicationUpdater: ObservableObject {
     static let shared=ApplicationUpdater(demo: demoMode)
-    enum Phase {case idle, checking, current, available, downloading, ready, failed}
+    enum Phase {case idle, checking, current, available, downloading, ready, installing, failed}
     @Published private(set) var phase:Phase = .idle
     @Published private(set) var release:AppRelease?
     @Published private(set) var progress:Double = 0
     @Published private(set) var message:String?
     @Published private(set) var lastCheckedAt:Date?
+    @Published private(set) var canRetryInstall = false
+    var installHandler: ((URL, AppRelease, String, String) async throws -> Void)?
+    var canInstall: Bool { downloadedURL != nil && installHandler != nil && (phase == .ready || phase == .failed && canRetryInstall) }
     @Published var includePrereleases:Bool = false {
         didSet {
+            if phase == .installing { includePrereleases = oldValue; return }
             if !demo {UserDefaults.standard.set(includePrereleases,forKey:"includePreviewUpdates")}
             checkID=nil
             if phase == .downloading {cancelDownload()}
@@ -35,10 +39,11 @@ import SwitcherCore
     private var checkID:UUID?
     private var downloadID:UUID?
     private(set) var downloadedURL:URL?
+    private var downloadedChecksum: String?
     private let architecture:String
     init(demo:Bool=false,operations:UpdateOperations?=nil,currentVersion:String?=nil,currentBuild:String?=nil,architecture:String?=nil) {
         self.demo=demo;self.operations=operations
-        self.currentVersion=currentVersion ?? (demo ? "1.3.6-rc.4" : Bundle.main.object(forInfoDictionaryKey:"CSReleaseVersion") as? String ?? Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "0.0.0")
+        self.currentVersion=currentVersion ?? (demo ? "1.3.6-rc.7" : Bundle.main.object(forInfoDictionaryKey:"CSReleaseVersion") as? String ?? Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "0.0.0")
         self.currentBuild=currentBuild ?? Bundle.main.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? "0"
         #if arch(arm64)
         self.architecture=architecture ?? "arm64"
@@ -72,7 +77,7 @@ import SwitcherCore
         return data
     }
     func check(manual:Bool=true) async {
-        guard phase != .checking,phase != .downloading else {return}
+        guard phase != .checking,phase != .downloading,phase != .installing else {return}
         if !manual,let lastCheckedAt,Date().timeIntervalSince(lastCheckedAt)<86400 {return}
         let id=UUID();checkID=id
         let previous=phase,channel=includePrereleases
@@ -107,7 +112,7 @@ import SwitcherCore
     func download() async {
         guard let release,phase == .available || phase == .failed else {return}
         guard !demo || operations != nil else {message="演示模式不下载或打开安装包。";phase = .failed;return}
-        let id=UUID();downloadID=id;phase = .downloading;progress=0;message=nil;downloadedURL=nil
+        let id=UUID();downloadID=id;phase = .downloading;progress=0;message=nil;downloadedURL=nil;canRetryInstall=false
         let parent=operations?.directory ?? FileManager.default.urls(for:.cachesDirectory,in:.userDomainMask)[0].appendingPathComponent(AppReleasePolicy.bundleID+"/Updates")
         let directory=parent.appendingPathComponent(id.uuidString)
         do {
@@ -135,7 +140,7 @@ import SwitcherCore
             if let operations {try await operations.verify(file,release,checksum,currentBuild)}
             else {try await UpdatePackageVerifier.verify(file,release:release,checksum:checksum,currentBuild:currentBuild)}
             guard downloadID==id else {return}
-            downloadedURL=file;keepDirectory=true;progress=1;phase = .ready
+            downloadedURL=file;downloadedChecksum=checksum;keepDirectory=true;progress=1;phase = .ready
         } catch {
             if downloadID==id {phase = .failed;message=error.localizedDescription}
         }
@@ -144,6 +149,21 @@ import SwitcherCore
     func cancelDownload() {
         guard phase == .downloading else {return}
         downloadID=nil;transport?.cancel();transport=nil;phase = .available;progress=0;message=nil
+    }
+    func installAndRelaunch() async {
+        guard canInstall, let file = downloadedURL, let checksum = downloadedChecksum,
+              let release, let installHandler, !demo || operations != nil else { return }
+        phase = .installing; message = nil; canRetryInstall = false
+        do {
+            guard try UpdatePackageVerifier.sha256(file) == checksum else { throw SafetyError("安装包已变化，请重新下载。") }
+            try await installHandler(file, release, checksum, currentBuild)
+            // A real successful request ends this process. Returning without a
+            // restart cannot be reported as an installed update.
+            throw SafetyError("更新尚未完成重启确认，请重试。")
+        } catch {
+            phase = .failed; message = error.localizedDescription
+            canRetryInstall = (try? UpdatePackageVerifier.sha256(file)) == checksum
+        }
     }
     private func availableDownloadedFile() -> URL? {
         guard phase == .ready,let file=downloadedURL else {return nil}

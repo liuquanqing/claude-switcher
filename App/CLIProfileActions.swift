@@ -10,7 +10,12 @@ import SwitcherCore
         do {
             let profile = try confirmedCurrentProfile()
             guard profile == current else { return false }
-            let command = try CLIProfileLaunch.command(profile: profile, home: FileManager.default.homeDirectoryForCurrentUser)
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let command: String
+            if let binding = cliConnection.currentBinding,
+               active?.snapshot?.identity.samePrincipal(as: binding.identity) == true {
+                command = try CLITerminalLaunch.command(binding: binding, executable: CLITerminalLaunch.executable(home: home), home: home)
+            } else { command = try CLIProfileLaunch.command(profile: profile, home: home) }
             NSPasteboard.general.clearContents()
             return NSPasteboard.general.setString(command, forType: .string)
         } catch { banner = error.localizedDescription; return false }

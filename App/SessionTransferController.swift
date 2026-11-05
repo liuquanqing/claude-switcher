@@ -365,6 +365,7 @@ actor SessionTransferWorker {
     func dismissConfirmation() { confirmation = nil }
     func cancelConfirmation() { confirmation = nil; pendingPlan = nil; pendingRestore = nil; pendingPreserve = nil }
     private func beginWrite() throws {
+        guard !store.updating else { throw SessionTransferFailure("应用正在更新，请稍后复制。") }
         guard store.busy == nil else { throw SessionTransferFailure("账号操作正在进行，请稍后复制。") }
         writing = true; store.busy = "正在复制或恢复会话索引…"
     }

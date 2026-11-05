@@ -32,10 +32,11 @@ else:
 p.write_bytes(plistlib.dumps(v))
 PY
 # Remove local debug paths from distributed executables, then sign the changed helpers.
-for binary in "$APP/Contents/MacOS/ClaudeSwitcher" "$APP/Contents/Helpers/ClaudeGuard" "$APP/Contents/Helpers/ClaudeSessionTransfer"; do
+for binary in "$APP/Contents/MacOS/ClaudeSwitcher" "$APP/Contents/Helpers/ClaudeGuard" "$APP/Contents/Helpers/ClaudeSessionTransfer" "$APP/Contents/Helpers/ClaudeUpdater"; do
   strip -S "$binary"
 done
 codesign --force -s - "$APP/Contents/Helpers/ClaudeGuard"
+codesign --force -s - "$APP/Contents/Helpers/ClaudeUpdater"
 codesign --force -s - "$APP/Contents/Helpers/ClaudeSessionTransfer"
 codesign --force -s - "$APP"
 codesign --verify --deep --strict "$APP"

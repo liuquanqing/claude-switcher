@@ -22,7 +22,7 @@ final class ApplicationUpdatePresentation: ObservableObject {
     func check(updater: ApplicationUpdater, language: String,
                feedback: @escaping (Feedback) -> Void) {
         guard !isChecking else { return }
-        if updater.phase == .downloading || updater.phase == .ready {
+        if updater.phase == .downloading || updater.phase == .ready || updater.phase == .installing {
             show(updater, language: language)
             return
         }
@@ -38,7 +38,7 @@ final class ApplicationUpdatePresentation: ObservableObject {
             self.observation = nil
             self.isChecking = false
             switch phase {
-            case .available, .downloading, .ready:
+            case .available, .downloading, .ready, .installing:
                 self.show(updater, language: language)
             case .current:
                 feedback(.current)

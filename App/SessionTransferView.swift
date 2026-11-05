@@ -1067,6 +1067,7 @@ enum CopyWindow {
     static var window: NSWindow?
     private static var delegate: CopyWindowDelegate?
     private static var controllers: [ObjectIdentifier: SessionTransferController] = [:]
+    static func isWorking(for store: Store) -> Bool { controllers[ObjectIdentifier(store)]?.isWorking == true }
 
     static func controller(for store: Store) -> SessionTransferController {
         let key = ObjectIdentifier(store)

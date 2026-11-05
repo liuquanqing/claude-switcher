@@ -336,12 +336,22 @@ struct Header: View {
 
 @MainActor
 struct TerminalStrip: View {
+    private struct ChoiceTarget: Identifiable {
+        let profile: String
+        let identity: CLIIdentity
+        var id: String { profile }
+    }
+
     @ObservedObject var store: Store
     @ObservedObject private var protection: ProtectionController
+    @ObservedObject private var connection: CLIConnectionController
     @Environment(\.appLanguage) private var language
     @State private var syncHover = false
     @State private var copyHover = false
+    @State private var openHover = false
     @State private var showHelp = false
+    @State private var choiceTarget: ChoiceTarget?
+    @State private var attemptedChoice: CLIBindingChoice?
     @State private var confirmSync = false
     /// Account name pinned when the dialog opens, so a background refresh or external switch
     /// can't make the user confirm X and sync Y.
@@ -353,6 +363,7 @@ struct TerminalStrip: View {
     init(store: Store) {
         self.store = store
         self.protection = store.protection
+        self.connection = store.cliConnection
     }
 
     private func t(_ key: String, arguments: [String: String] = [:]) -> String {
@@ -366,7 +377,103 @@ struct TerminalStrip: View {
         return AppLocalization.message(message, language: language)
     }
 
-    private var controlsLocked: Bool { store.busy != nil || store.refreshing || store.statusRefreshInProgress }
+    private var accountName: String {
+        let profile = connection.expectedProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+        return profile.isEmpty ? t("cli.currentAccount") : profile
+    }
+
+    private func modeName(_ choice: CLIBindingChoice) -> String {
+        switch choice {
+        case .defaultLogin: return t("cli.modeDefault")
+        case .isolated: return t("cli.modeIsolated")
+        }
+    }
+
+    private var reportedModeName: String {
+        if let choice = connection.choice { return modeName(choice) }
+        if let attemptedChoice { return modeName(attemptedChoice) }
+        return "CLI"
+    }
+
+    private var verifiedMatch: Bool {
+        connection.phase == .matched && connection.choice != nil && connection.checkedAt != nil
+    }
+
+    private var bindingCheckedLine: String {
+        guard let checkedAt = connection.checkedAt else { return t("cli.notChecked") }
+        let date = AppLocalization.date(checkedAt, language: language, dateStyle: .short, timeStyle: .short, relative: true)
+        return t("cli.lastCheck", arguments: ["date": date])
+    }
+
+    private var connectionStatus: String {
+        switch connection.phase {
+        case .unlinked: return t("cli.unlinked")
+        case .checking: return t("cli.checkingIdentity")
+        case .choosing: return t("cli.choosing")
+        case .opening: return t("cli.opening")
+        case .waitingForLogin: return t("cli.waitingForLogin")
+        case .matched:
+            return verifiedMatch ? t("cli.matchShort") : t("cli.unconfirmedIdentity")
+        case .mismatched: return reportedModeName + " · " + t("cli.accountMismatch")
+        case .unconfirmed: return t("cli.unconfirmedIdentity")
+        case .failed: return t("cli.openFailed")
+        }
+    }
+
+    private var connectionStatusColor: Color {
+        switch connection.phase {
+        case .matched: return verifiedMatch ? .good : .sub
+        case .mismatched: return .warn
+        case .failed: return .bad
+        case .unlinked, .checking, .choosing, .opening, .waitingForLogin, .unconfirmed: return .sub
+        }
+    }
+
+    private var connectionDetail: String? {
+        if connection.phase == .matched, !verifiedMatch {
+            if let reason = connection.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+                return generated(reason)
+            }
+            return t("cli.unconfirmedDetail")
+        }
+        if [.failed, .mismatched, .unconfirmed].contains(connection.phase),
+           let reason = connection.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+            return generated(reason)
+        }
+        switch connection.phase {
+        case .unlinked, .checking, .opening, .choosing: return accountName
+        case .matched: return verifiedMatch ? accountName : t("cli.unconfirmedDetail")
+        case .waitingForLogin:
+            return t("cli.waitingDetail", arguments: ["account": accountName])
+        case .mismatched:
+            return t("cli.mismatchDetail", arguments: ["account": accountName])
+        case .unconfirmed: return t("cli.unconfirmedDetail")
+        case .failed: return t("cli.openFailedDetail")
+        }
+    }
+
+    private var primaryTitle: String {
+        switch connection.phase {
+        case .waitingForLogin: return t("cli.confirmLogin")
+        case .failed: return t("cli.retry")
+        default: return t("cli.open")
+        }
+    }
+
+    private func runPrimaryAction() {
+        guard !controlsLocked, !connection.isBusy else { return }
+        Task {
+            if connection.phase == .waitingForLogin {
+                await connection.confirmLogin()
+            } else {
+                await connection.open()
+            }
+        }
+    }
+
+    private var controlsLocked: Bool {
+        store.updating || store.busy != nil || store.refreshing || store.statusRefreshInProgress
+    }
 
     /// A background check is in flight. The strip keeps showing the last finished result; only the
     /// info popover mentions the check, so periodic refreshes never reshape the card.
@@ -454,8 +561,6 @@ struct TerminalStrip: View {
         }
     }
 
-    private var showsActions: Bool { canCopyScoped || canSync }
-
     private var copyTitle: String {
         if copyFeedback == true { return t("cli.scopedCopied") }
         if copyFeedback == false { return t("cli.scopedCopyFailed") }
@@ -475,58 +580,94 @@ struct TerminalStrip: View {
     }
 
     var body: some View {
-        // Two tiers inside the strip: identity (icon + title/status + detail) on top, actions on
-        // their own row below. The title and status never compete with buttons for width.
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "terminal").font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(0.1)))
             VStack(alignment: .leading, spacing: 5) {
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(t("cli.title")).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
-                            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                        Button { showHelp.toggle() } label: {
-                            HStack(spacing: 4) {
-                                Text(status).font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(statusColor).lineLimit(1).minimumScaleFactor(0.85)
-                                Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
-                            }
-                            .frame(height: 22)
-                            .contentShape(Rectangle())
+                HStack(spacing: 6) {
+                    Text(t("cli.title")).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    Button { showHelp.toggle() } label: {
+                        HStack(spacing: 4) {
+                            Text(connectionStatus).font(.system(size: 10, weight: .medium))
+                                .foregroundColor(connectionStatusColor).lineLimit(1).minimumScaleFactor(0.8)
+                            Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
                         }
-                        .buttonStyle(.plain)
-                        .help(t("cli.statusHelp"))
-                        .accessibilityLabel("\(t("cli.statusAccessibility")): \(status)")
-                        .accessibilityHint(t("cli.statusHelp"))
-                        .popover(isPresented: $showHelp, arrowEdge: .bottom) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(detail).font(.system(size: 10.5, weight: .medium)).foregroundColor(.txt)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
-                                    .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                                Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
-                            }
-                            .frame(width: 260, alignment: .leading).padding(12)
-                        }
-                        Spacer(minLength: 4)
+                        .frame(height: 22)
+                        .contentShape(Rectangle())
                     }
-                    .frame(height: 22)
-                    Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
-                        .lineLimit(1).truncationMode(.middle).help(detail)
-                        .accessibilityHint(detailHelp)
+                    .buttonStyle(.plain)
+                    .help(t("cli.statusHelp"))
+                    .accessibilityLabel("\(t("cli.statusAccessibility")): \(connectionStatus)")
+                    .accessibilityHint(t("cli.statusHelp"))
+                    .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
+                    Spacer(minLength: 4)
                 }
-                if showsActions { actions }
+                .frame(height: 22)
+                Text(connectionDetail ?? " ").font(.system(size: 10.5)).foregroundColor(.sub)
+                    .lineLimit(1).truncationMode(.middle).help(connectionDetail ?? "")
+                    .opacity(connectionDetail == nil ? 0 : 1)
+                    .accessibilityHidden(connectionDetail == nil)
+                primaryAction
             }
         }
-        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 9)
+        .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        // Dialog and alert live on the container, not on the sync button, so a refresh that hides
-        // the button mid-dialog can't swallow the "state changed" notice.
+        .onAppear { connection.contextDidChange() }
+        .onChange(of: store.current) { _ in
+            attemptedChoice = nil
+            choiceTarget = nil
+            connection.contextDidChange()
+        }
+        .onChange(of: protection.desktopScope) { _ in
+            attemptedChoice = nil
+            choiceTarget = nil
+            connection.contextDidChange()
+        }
+        .onChange(of: store.updating) { updating in
+            if updating {
+                choiceTarget = nil
+                confirmSync = false
+            }
+        }
+        .onChange(of: connection.expectedProfile) { profile in
+            if let choiceTarget, profile != choiceTarget.profile {
+                attemptedChoice = nil
+                self.choiceTarget = nil
+            }
+        }
+        .onChange(of: store.active?.snapshot?.identity) { identity in
+            if let choiceTarget, identity != choiceTarget.identity {
+                attemptedChoice = nil
+                self.choiceTarget = nil
+            }
+        }
+        .onChange(of: connection.phase) { phase in
+            switch phase {
+            case .choosing:
+                choiceTarget = (store.active?.snapshot?.identity).map {
+                    ChoiceTarget(profile: connection.expectedProfile, identity: $0)
+                }
+                attemptedChoice = nil
+            case .mismatched:
+                choiceTarget = (store.active?.snapshot?.identity).map {
+                    ChoiceTarget(profile: connection.expectedProfile, identity: $0)
+                }
+            case .opening, .waitingForLogin, .matched:
+                choiceTarget = nil
+            case .unlinked:
+                attemptedChoice = nil
+            case .checking, .unconfirmed, .failed:
+                break
+            }
+        }
+        .sheet(item: $choiceTarget) { target in
+            choiceSheet(for: target)
+        }
         .confirmationDialog(t("cli.syncTitle", arguments: ["account": syncTarget]), isPresented: $confirmSync,
                             titleVisibility: .visible) {
             Button(t("cli.sync")) {
-                // Re-validate at confirm time; the state may have changed while the dialog was open.
                 guard canSync, !controlsLocked, !checking, store.current == syncTarget else {
                     syncStale = true
                     return
@@ -545,45 +686,136 @@ struct TerminalStrip: View {
         }
     }
 
-    /// Copy is available for subscription desktops; the sync remedy still requires a confirmed difference.
-    /// Both actions remain visible but disabled while a check runs, so the row doesn't flicker mid-refresh.
-    private var actions: some View {
-        HStack(spacing: 6) {
-            if canSync {
-                Button { syncTarget = store.current; confirmSync = true } label: {
-                    Text(t("cli.syncTo")).font(.system(size: 10.5, weight: .semibold))
-                        .lineLimit(1).truncationMode(.middle)
-                        .padding(.horizontal, 9).padding(.vertical, 4)
-                        .foregroundColor(.claude)
-                        .background(RoundedRectangle(cornerRadius: 7)
-                            .fill(Color.claude.opacity(syncHover ? 0.26 : 0.16)))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain).disabled(controlsLocked || checking)
-                .opacity(controlsLocked || checking ? 0.45 : 1)
-                .help(t("cli.syncHelp", arguments: ["account": store.current]))
-                .onHover { syncHover = $0 }
+    private var primaryAction: some View {
+        Button(action: runPrimaryAction) {
+            HStack(spacing: 5) {
+                if connection.isBusy { ProgressView().controlSize(.mini) }
+                Text(primaryTitle).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
             }
-            if canCopyScoped {
-                Button(action: copyScopedCommand) {
-                    HStack(spacing: 4) {
-                        Image(systemName: copyFeedback == true ? "checkmark" : "doc.on.doc")
-                            .font(.system(size: 9))
-                        Text(copyTitle).font(.system(size: 10.5, weight: .medium))
+            .padding(.horizontal, 12)
+            .frame(minWidth: 88)
+            .frame(height: 28)
+            .foregroundColor(.white)
+            .background(RoundedRectangle(cornerRadius: 7)
+                .fill(Color.claude.opacity(openHover ? 0.9 : 0.78)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(controlsLocked || connection.isBusy)
+        .opacity(controlsLocked || connection.isBusy ? 0.55 : 1)
+        .onHover { openHover = $0 }
+        .help(t(connection.phase == .waitingForLogin ? "cli.confirmLoginHelp" : "cli.openHelp"))
+        .accessibilityLabel(primaryTitle)
+    }
+
+    private var helpPopover: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(connectionStatus).font(.system(size: 11, weight: .semibold)).foregroundColor(connectionStatusColor)
+                if let connectionDetail {
+                    Text(connectionDetail).font(.system(size: 10.5)).foregroundColor(.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text(bindingCheckedLine).font(.system(size: 10)).foregroundColor(.sub)
+            }
+            Divider().opacity(0.5)
+            DisclosureGroup(t("cli.advanced")) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(t("cli.defaultStatus")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
+                    Text(status).font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
+                    Text(detail).font(.system(size: 10)).foregroundColor(.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
+                    Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                    if canCopyScoped {
+                        Button(action: copyScopedCommand) {
+                            HStack(spacing: 5) {
+                                Image(systemName: copyFeedback == true ? "checkmark" : "doc.on.doc")
+                                Text(copyTitle)
+                            }
+                            .font(.system(size: 10.5, weight: .medium))
+                            .padding(.horizontal, 9).frame(height: 28)
+                            .foregroundColor(copyFeedback == false ? .warn : .txt)
+                            .background(RoundedRectangle(cornerRadius: 7)
+                                .fill(Color.sub.opacity(copyHover ? 0.14 : 0.08)))
+                        }
+                        .buttonStyle(.plain).disabled(controlsLocked || checking)
+                        .help(t("cli.copyScopedHelp"))
+                        .onHover { copyHover = $0 }
                     }
-                    .lineLimit(1)
-                    .padding(.horizontal, 7).padding(.vertical, 4)
-                    .foregroundColor(copyFeedback == false ? .warn : .sub)
-                    .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.sub.opacity(copyHover ? 0.12 : 0.06)))
-                    .contentShape(Rectangle())
+                    if protection.desktopScope == .subscription {
+                        Button { syncTarget = store.current; confirmSync = true } label: {
+                            Text(t("cli.syncTo")).font(.system(size: 10.5, weight: .semibold))
+                                .padding(.horizontal, 9).frame(height: 28)
+                                .foregroundColor(canSync ? .claude : .sub)
+                                .background(RoundedRectangle(cornerRadius: 7)
+                                    .fill(Color.claude.opacity(syncHover && canSync ? 0.22 : 0.1)))
+                        }
+                        .buttonStyle(.plain).disabled(!canSync || controlsLocked || checking)
+                        .help(t("cli.syncHelp", arguments: ["account": store.current]))
+                        .onHover { syncHover = $0 }
+                    }
                 }
-                .buttonStyle(.plain).disabled(controlsLocked || checking)
-                .opacity(controlsLocked || checking ? 0.45 : 1)
-                .help(t("cli.copyScopedHelp"))
-                .onHover { copyHover = $0 }
+                .padding(.top, 8)
             }
-            Spacer(minLength: 0)
+            .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
+        }
+        .frame(width: 310, alignment: .leading).padding(12)
+    }
+
+    private func choiceActionsDisabled(for target: ChoiceTarget) -> Bool {
+        target.profile.isEmpty || controlsLocked || connection.isBusy
+    }
+
+    private func choiceSheet(for target: ChoiceTarget) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(t("cli.choiceTitle")).font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
+                Text(t("cli.choiceFor", arguments: ["account": target.profile]))
+                    .font(.system(size: 11)).foregroundColor(.sub).lineLimit(1)
+                Text(t("cli.recommendedIsolated")).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
+            }
+            if connection.phase == .mismatched {
+                Text(t("cli.choiceMismatch")).font(.system(size: 11)).foregroundColor(.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
+                .buttonStyle(.borderedProminent)
+                .tint(.claude)
+                .keyboardShortcut(.defaultAction)
+                .frame(maxWidth: .infinity)
+                .disabled(choiceActionsDisabled(for: target))
+            HStack(spacing: 10) {
+                Button(t("common.cancel")) { choiceTarget = nil }
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button(t("cli.defaultAction")) { chooseAndOpen(.defaultLogin, target: target) }
+                    .buttonStyle(.bordered)
+                    .disabled(choiceActionsDisabled(for: target))
+            }
+            Text(t("cli.choiceBoundary")).font(.system(size: 10.5)).foregroundColor(.sub)
+                .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(20).frame(width: 390, alignment: .leading)
+        .background(Color.bg)
+        .preferredColorScheme(.dark)
+    }
+
+    private func chooseAndOpen(_ choice: CLIBindingChoice, target: ChoiceTarget) {
+        guard !choiceActionsDisabled(for: target) else { return }
+        let profile = target.profile
+        let identity = target.identity
+        attemptedChoice = choice
+        choiceTarget = nil
+        Task {
+            guard !controlsLocked, profile == connection.expectedProfile, profile == store.current,
+                  let currentIdentity = store.active?.snapshot?.identity,
+                  currentIdentity == identity else {
+                connection.contextDidChange()
+                return
+            }
+            await connection.choose(choice)
         }
     }
 }

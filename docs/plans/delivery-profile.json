@@ -1,0 +1,11 @@
+{
+  "schema": "zhixing.delivery-profile/v1",
+  "project": "claude-switcher",
+  "planning_units": ["milestone", "slice"],
+  "source_allowlist": ["repo:", "decision:"],
+  "write_allowlist": ["docs/plans/"],
+  "authority_order": ["repository", "decision"],
+  "memory_authority": "unreviewed",
+  "confirmation_required": true,
+  "forbidden_actions": ["issue", "mr", "tag", "release", "deploy"]
+}

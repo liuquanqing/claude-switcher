@@ -22,6 +22,7 @@ import SwitcherCore
         if let tokenDigest { snapshot.identityTokenDigest = tokenDigest }
         profiles[index].snapshot = snapshot
         profiles[index].signedIn = true
+        cliConnection.contextDidChange()
         if !isDemo { saveCache(name, snapshot) }
     }
 

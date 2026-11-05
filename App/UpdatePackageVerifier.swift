@@ -29,7 +29,7 @@ enum UpdatePackageVerifier {
             guard minimum.compare(current,options:.numeric) != .orderedDescending else {throw SafetyError("此更新需要较新的 macOS。")}
         }
     }
-    static func verify(_ file:URL,release:AppRelease,checksum:String,currentBuild:String) async throws {
+    static func verify(_ file:URL,release:AppRelease,checksum:String,currentBuild:String, stageTo: URL? = nil) async throws {
         try await Task.detached(priority:.utility) {
             guard let expected=AppReleasePolicy.hash(checksum),try sha256(file)==expected else {throw SafetyError("更新包校验失败，未打开。")}
         }.value
@@ -62,7 +62,9 @@ enum UpdatePackageVerifier {
             #else
             let architecture="x86_64"
             #endif
-            for relative in ["Contents/MacOS/ClaudeSwitcher","Contents/Helpers/ClaudeGuard","Contents/Helpers/ClaudeSessionTransfer"] {
+            var binaries = ["Contents/MacOS/ClaudeSwitcher","Contents/Helpers/ClaudeGuard","Contents/Helpers/ClaudeSessionTransfer"]
+            if info["CSUpdaterProtocolVersion"] as? Int == 1 { binaries.append("Contents/Helpers/ClaudeUpdater") }
+            for relative in binaries {
                 let binary=app.appendingPathComponent(relative)
                 try await signature(binary,runtime:true)
                 let architectures=try await command("/usr/bin/lipo",["-archs",binary.path])
@@ -70,6 +72,22 @@ enum UpdatePackageVerifier {
             }
             let appAssessment=try await command("/usr/sbin/spctl",["--assess","--type","execute","--verbose=4",app.path])
             guard appAssessment.contains("source=Notarized Developer ID") else {throw SafetyError("应用尚未通过公证验证。")}
+            if let stageTo {
+                guard !FileManager.default.fileExists(atPath: stageTo.path),
+                      stageTo.lastPathComponent.hasPrefix(".claude-switcher-update-"), stageTo.pathExtension == "app" else {
+                    throw SafetyError("更新暂存位置不可用。")
+                }
+                // Only an updater-capable signed bundle can participate in the
+                // restart acknowledgement protocol.
+                guard info["CSUpdaterProtocolVersion"] as? Int == 1 else {
+                    throw SafetyError("此安装包不支持一键更新，请手动安装。")
+                }
+                try await signature(app.appendingPathComponent("Contents/Helpers/ClaudeUpdater"), runtime: true)
+                _ = try await command("/usr/bin/ditto", [app.path, stageTo.path])
+                try await signature(stageTo, runtime: false)
+                let stagedInfo = try PropertyListSerialization.propertyList(from: Data(contentsOf: stageTo.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any] ?? [:]
+                try validateInfo(stagedInfo, release: release, currentBuild: currentBuild)
+            }
         } catch {
             // Do not recursively delete a mountpoint or force unmount a volume.
             _ = try? await command("/usr/bin/hdiutil",["detach",mount.path])

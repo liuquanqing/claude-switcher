@@ -303,7 +303,7 @@ import SwitcherCore
     }
 
     func verifyDefaultCLI() async {
-        guard busy == nil, !refreshing else { return }
+        guard !updating, busy == nil, !refreshing else { return }
         busy = "核验默认 CLI 登录…"; defer { busy = nil }
         if isDemo {
             let gate = await protection.preflight(target: .cli)
@@ -315,6 +315,7 @@ import SwitcherCore
     }
 
     func moveTerminal(to target: String) async {
+        guard !updating else { return }
         if isDemo {
             guard protection.desktopScope == .subscription else { banner = "API 或未知桌面模式不执行订阅账号同步。"; return }
             let gate = await protection.preflight(target: .cli)

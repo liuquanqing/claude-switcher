@@ -173,6 +173,8 @@ final class Store: ObservableObject {
     @Published var usageNotice: String?
     @Published var openAtLogin = false
     @Published var applicationUpdateNotice: String?
+    @Published var updating = false
+    lazy var cliConnection = makeCLIConnection()
     @Published var cliProfile: String?     // profile the terminal `claude` is logged in as
     @Published var cliEmail: String?
     @Published var cliStatus: CLILoginStatus = .unverified
@@ -407,7 +409,7 @@ final class Store: ObservableObject {
 
     func refresh(allowInteraction: Bool = false) async {
         if !allowInteraction { await automaticRefresh(); return }
-        guard !isDemo, !refreshing, busy == nil, !statusRefreshInProgress else { return }
+        guard !isDemo, !updating, !refreshing, busy == nil, !statusRefreshInProgress else { return }
         if allowInteraction && !usageRefreshPolicy.permitsExplicitRequest(profile: current, now: Date()) {
             usageNotice = "额度查询受限，将按服务器指定时间重试。";return
         }
@@ -498,7 +500,7 @@ final class Store: ObservableObject {
     }
 
     func switchTo(_ target: String) async {
-        guard busy == nil, !statusRefreshInProgress else { return }
+        guard !updating, busy == nil, !statusRefreshInProgress else { return }
         desktopOnlyOffer = nil
         banner = nil
         guard !refreshing else { banner = "用量正在刷新，请稍后切换账号。"; return }
@@ -583,10 +585,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var previewNote: NSTextField?
     var previewButton: NSButton?
     private var titleModeObservation: AnyCancellable?
+    private var activeObservation: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ n: Notification) {
         MainActor.assumeIsolated {
             store = demoMode ? Store(demo: true) : Store()
+            ApplicationUpdater.shared.installHandler = { [weak self] file, release, checksum, build in
+                guard let store = self?.store else { throw SafetyError("界面未就绪，未开始安装。") }
+                try await ApplicationInstall.request(file: file, release: release, checksum: checksum, currentBuild: build, store: store)
+            }
+            Task { await ApplicationInstall.acknowledgePending(store: self.store) }
             ApplicationUpdatePresentation.shared.onWillPresent = { [weak self] in self?.popover.close() }
             if !demoMode { ApplicationUpdater.shared.startAutomaticChecks() }
             store.onChange = { [weak self] in self?.updateTitle() }
@@ -594,6 +602,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .receive(on: RunLoop.main)
                 .sink { [weak self] _ in MainActor.assumeIsolated { self?.updateTitle() } }
             store.onLanguageChange = { [weak self] in self?.updateLanguage() }
+            activeObservation = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                object: NSApp, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let connection = self?.store?.cliConnection, connection.phase == .waitingForLogin else { return }
+                    Task { await connection.confirmLogin() }
+                }
+            }
             store.onShowAccounts = { [weak self] in self?.showPanel() }
             store.panelIsVisible = { [weak self] in self?.popover.isShown == true }
             popover.behavior = .transient
@@ -727,7 +742,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            if store?.busy != nil || store?.protection.working == true {
+            if store?.busy != nil || store?.protection.working == true || store?.cliConnection.isBusy == true || (store.map { CopyWindow.isWorking(for: $0) } ?? false) {
                 store?.banner = "操作正在进行，完成后即可退出界面。"
                 return .terminateCancel
             }

@@ -3,10 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 MODE="${1:-build}"
-case "$MODE" in build|install|dmg|test) ;; *) echo 'Usage: ./build.sh [build|install|dmg|test]' >&2; exit 2 ;; esac
+case "$MODE" in build|install|dmg|test|stage-unsigned) ;; *) echo 'Usage: ./build.sh [build|install|dmg|test|stage-unsigned]' >&2; exit 2 ;; esac
 if [ "$MODE" = test ]; then exec swift test; fi
 swift build -c release --product ClaudeSwitcher
 swift build -c release --product ClaudeGuard
+swift build -c release --product ClaudeUpdater
 swift build -c release --product ClaudeSessionTransfer
 BIN="$(swift build -c release --show-bin-path)"
 APP="$PWD/build/Claude Switcher.app"
@@ -16,6 +17,7 @@ cp build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 cp assets/icon-candidates/switcher-flow-v6.png "$APP/Contents/Resources/AppIcon.png"
 cp "$BIN/ClaudeSwitcher" "$APP/Contents/MacOS/ClaudeSwitcher"
 cp "$BIN/ClaudeGuard" "$APP/Contents/Helpers/ClaudeGuard"
+cp "$BIN/ClaudeUpdater" "$APP/Contents/Helpers/ClaudeUpdater"
 cp "$BIN/ClaudeSessionTransfer" "$APP/Contents/Helpers/ClaudeSessionTransfer"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -28,17 +30,23 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleShortVersionString</key><string>1.3.6</string>
-<key>CFBundleVersion</key><string>20261103.4.1</string>
-<key>CSReleaseVersion</key><string>1.3.6-rc.4</string>
+<key>CFBundleVersion</key><string>20261105.7.0</string>
+<key>CSReleaseVersion</key><string>1.3.6-rc.7</string>
+<key>CSUpdaterProtocolVersion</key><integer>1</integer>
 <key>CSReleaseChannel</key><string>preview</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
 PLIST
+if [ "$MODE" != stage-unsigned ]; then
 codesign --force -s - "$APP/Contents/Helpers/ClaudeGuard"
+codesign --force -s - "$APP/Contents/Helpers/ClaudeUpdater"
 codesign --force -s - "$APP/Contents/Helpers/ClaudeSessionTransfer"
 codesign --force -s - "$APP"
 codesign --verify --deep --strict "$APP"
+else
+  echo "Unsigned staging only; no install or service changes."
+fi
 echo "Built $APP"
 if [ "$MODE" = install ]; then
   TARGET='/Applications/Claude Switcher.app'

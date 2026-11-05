@@ -6,11 +6,13 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [.executable(name: "ClaudeSwitcher", targets: ["ClaudeSwitcher"]),
                .executable(name: "ClaudeGuard", targets: ["ClaudeGuard"]),
+               .executable(name: "ClaudeUpdater", targets: ["ClaudeUpdater"]),
                .executable(name: "ClaudeSessionTransfer", targets: ["ClaudeSessionTransfer"])],
     targets: [
         .target(name: "SwitcherCore"),
         .executableTarget(name: "ClaudeSwitcher", dependencies: ["SwitcherCore"], path: "App"),
         .executableTarget(name: "ClaudeGuard", dependencies: ["SwitcherCore"]),
+        .executableTarget(name: "ClaudeUpdater", dependencies: ["SwitcherCore"]),
         .executableTarget(name: "ClaudeSessionTransfer", dependencies: ["SwitcherCore"]),
         .testTarget(name: "SwitcherCoreTests", dependencies: ["SwitcherCore"])
     ]

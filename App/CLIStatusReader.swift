@@ -2,7 +2,7 @@ import Foundation
 import SwitcherCore
 
 enum CLIStatusReader {
-    static func read(home: URL, timeoutSeconds: TimeInterval = 8, graceSeconds: TimeInterval = 2) async throws -> CLIReportedStatus {
+    static func read(home: URL, configurationDirectory: URL? = nil, timeoutSeconds: TimeInterval = 8, graceSeconds: TimeInterval = 2) async throws -> CLIReportedStatus {
         try await Task.detached(priority: .utility) {
             let paths = [home.appendingPathComponent(".local/bin/claude"), URL(fileURLWithPath: "/opt/homebrew/bin/claude"), URL(fileURLWithPath: "/usr/local/bin/claude")]
             guard let executable = paths.first(where: { FileManager.default.isExecutableFile(atPath: $0.path) }) else {
@@ -10,7 +10,11 @@ enum CLIStatusReader {
             }
             var environment = ProcessInfo.processInfo.environment
             environment["HOME"] = home.path
+            if let configurationDirectory {
+                environment = CLITerminalLaunch.environment(home: home, directory: configurationDirectory, inherited: environment)
+            }
             environment["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+            environment["DISABLE_AUTOUPDATER"] = "1"
             let result = try await BoundedCLICommand.run(home: home, executable: executable,
                 arguments: ["auth", "status"], inherited: environment, timeoutSeconds: timeoutSeconds,
                 graceSeconds: graceSeconds, combineStderr: false)
