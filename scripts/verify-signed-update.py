@@ -16,9 +16,9 @@ import time
 import uuid
 
 ROOT = Path(__file__).resolve().parent.parent
-QA = ROOT / "_qa/signed-update/integration"
+QA = ROOT / "_qa/signed-update/integration-r2"
 IDENTIFIER = "dev.claudeswitcher.candidate"
-OLD, NEW = "20261105.7.0", "20261105.7.1"
+OLD, NEW = "20261105.7.1", "20261105.7.2"
 TEMPLATES = {"old": (OLD, "ack"), "new": (NEW, "ack"),
              "no-ack": (NEW, "no-ack"), "old-refuse": (OLD, "refuse"),
              "new-refuse": (NEW, "refuse")}

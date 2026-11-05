@@ -28,7 +28,7 @@ import SwitcherCore
         guard !store.protection.hasEditedSettings else { throw SafetyError("保护设置尚未保存，请先保存或还原。") }
         let target = Bundle.main.bundleURL.standardizedFileURL
         let instances = NSRunningApplication.runningApplications(withBundleIdentifier: AppReleasePolicy.bundleID)
-            .filter { $0.bundleURL?.standardizedFileURL == target }
+            .filter { $0.bundleURL?.standardizedFileURL.path == target.path }
         guard instances.count == 1 else { throw SafetyError("还有其他切换器实例，请退出后再更新。") }
         let permitted = [URL(fileURLWithPath: "/Applications"), FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")]
         guard permitted.contains(target.deletingLastPathComponent()),
@@ -108,7 +108,7 @@ import SwitcherCore
                   let data = try? Data(contentsOf: directory.appendingPathComponent("plan.json")),
                   let plan = try? JSONDecoder().decode(AppUpdateInstallPlan.self, from: data),
                   plan.id.uuidString == directory.lastPathComponent,
-                  plan.application.standardizedFileURL == Bundle.main.bundleURL.standardizedFileURL else { continue }
+                  plan.application.standardizedFileURL.path == Bundle.main.bundleURL.standardizedFileURL.path else { continue }
             let resultFile = directory.appendingPathComponent("result.json")
             guard let data = try? Data(contentsOf: resultFile), let state = try? JSONDecoder().decode(AppUpdateInstallResult.self, from: data),
                   state.id == plan.id else { continue }

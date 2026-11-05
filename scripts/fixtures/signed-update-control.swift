@@ -10,7 +10,7 @@ import Foundation
         guard root.path.contains("/_qa/signed-update/"), app.path.hasPrefix(root.path + "/"),
               app.pathExtension == "app" else { exit(2) }
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: "dev.claudeswitcher.candidate")
-            .filter { $0.bundleURL?.standardizedFileURL == app }
+            .filter { $0.bundleURL?.standardizedFileURL.path == app.path }
         if args[1] == "running" { print(running.map { String($0.processIdentifier) }.joined(separator: ",")); return }
         if args[1] == "quit" { for application in running { _ = application.terminate() }; return }
         if args[1] == "cleanup" {

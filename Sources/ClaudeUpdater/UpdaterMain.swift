@@ -67,7 +67,7 @@ enum InstallTrust {
         let acknowledgement = file.deletingLastPathComponent().appendingPathComponent("acknowledged.json")
         func running() -> [NSRunningApplication] {
             NSRunningApplication.runningApplications(withBundleIdentifier: InstallTrust.bundleID).filter {
-                $0.bundleURL?.standardizedFileURL == plan.application.standardizedFileURL
+                $0.bundleURL?.standardizedFileURL.path == plan.application.standardizedFileURL.path
             }
         }
         let currentBuild = try InstallTrust.info(plan.application)["CFBundleVersion"] as? String
