@@ -211,6 +211,7 @@ struct Header: View {
     private var subscriptionDesktop: Bool { protection.desktopScope == .subscription }
 
     private var sourceName: String? {
+        guard protection.desktopScope == .api else { return nil }
         switch protection.apiConfiguration {
         case .magpie: return "Magpie"
         case .ccSwitch: return "CC Switch"
@@ -226,20 +227,23 @@ struct Header: View {
         if protection.desktopScope != .api { return appText("api.unrecognized", language: language) }
         switch protection.apiConfiguration {
         case .magpie, .ccSwitch:
-            return appText("api.source", language: language, arguments: ["source": sourceName ?? ""])
+            return sourceName ?? ""
         case .conflict: return appText("api.sourceConflict", language: language)
         case .subscription, .unknownAPI, .unconfirmed: return appText("api.sourceUnconfirmed", language: language)
         }
     }
 
-    private var modeDetail: String {
+    private var modeDetail: String? {
         guard protection.desktopScope == .api else { return appText("api.unknownDetail", language: language) }
-        if let sourceName { return appText("api.managedBy", language: language, arguments: ["source": sourceName]) }
-        return appText(protection.apiConfiguration == .conflict ? "api.sourceConflict" : "api.sourceUnconfirmed", language: language)
+        switch protection.apiConfiguration {
+        case .magpie, .ccSwitch: return nil
+        case .conflict: return appText("api.conflictDetail", language: language)
+        case .subscription, .unknownAPI, .unconfirmed: return appText("api.unconfirmedDetail", language: language)
+        }
     }
 
     private var managerHelp: String {
-        appText("api.managerHelp", language: language)
+        appText("api.managerHelp", language: language, arguments: ["source": sourceName ?? ""])
             + (store.isDemo ? "\n" + appText("desktop.demo", language: language) : "")
     }
 
@@ -247,14 +251,14 @@ struct Header: View {
         if let sourceName {
             Button { Task { await store.openAPIManager() } } label: {
                 HStack(spacing: 5) {
-                    Text(appText("api.openManager", language: language, arguments: ["source": sourceName]))
-                        .font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                    Text(appText("api.manage", language: language))
+                        .font(.system(size: 11, weight: .medium)).lineLimit(1).fixedSize()
                     Image(systemName: "arrow.up.right").font(.system(size: 8.5, weight: .bold))
                 }
-                .foregroundColor(.claude)
+                .foregroundColor(openHover ? .txt : .sub)
                 .padding(.horizontal, 12).frame(height: 30)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(openHover ? 0.2 : 0.1)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.claude.opacity(0.26), lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.sub.opacity(openHover ? 0.14 : 0.07)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.stroke, lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
@@ -319,11 +323,13 @@ struct Header: View {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(modeTitle).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
                         Text(sourceTag).font(.system(size: 9.5, weight: .medium))
-                            .foregroundColor(sourceName == nil ? .warn : .claude.opacity(0.85))
+                            .foregroundColor(sourceName == nil ? .warn : .sub)
                             .lineLimit(1).fixedSize()
                     }
-                    Text(modeDetail).font(.system(size: 10.5)).foregroundColor(.sub)
-                        .lineLimit(1).truncationMode(.middle)
+                    if let modeDetail {
+                        Text(modeDetail).font(.system(size: 10.5)).foregroundColor(.sub)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
                 }
             }
             Spacer(minLength: 8)

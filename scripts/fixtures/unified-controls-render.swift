@@ -84,6 +84,7 @@ actor FictionalRenderGuard: GuardWorking {
    let fullStore = Store(demo:true)
    fullStore.setAppLanguage(language)
    fullStore.cliConnection.contextDidChange()
+   try save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
    try save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
    if CommandLine.arguments.contains("--fixture-protection-expanded") {
     try save(TerminalProtectionCard(store:fullStore,controller:fullStore.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"settings-"+language,width:500)
