@@ -1,0 +1,186 @@
+{
+  "kind": "fictional HTML interaction prototype only",
+  "author": "Kimi CLI native default configuration",
+  "session": "session_ded8a07f-1995-469b-a1b6-24ec248de650",
+  "main_invocation": {
+    "exit_code": 0,
+    "provider_errors": [],
+    "elapsed_seconds": 933,
+    "html_exists": true,
+    "design_exists": true
+  },
+  "fix_invocation": {
+    "exit_code": 0,
+    "provider_errors": [],
+    "elapsed_seconds": 456
+  },
+  "browser_checks": [
+    {
+      "id": "default_add_only",
+      "pass": true,
+      "detail": "更新默认关闭，未选时不能执行"
+    },
+    {
+      "id": "preview_counts_separated",
+      "pass": true,
+      "detail": "只新增1项，未选5项单独折叠"
+    },
+    {
+      "id": "add_only_backup_manifest",
+      "pass": true,
+      "detail": "零覆盖仍解释新增项撤销清单"
+    },
+    {
+      "id": "cancel_return_zero_copy",
+      "pass": true,
+      "detail": "取消结果明确未写入，返回后仍可新增且无收据"
+    },
+    {
+      "id": "repeat_copy_deduplicated",
+      "pass": true,
+      "detail": "已新增、同段已同步、接续已同步均不重复写入"
+    },
+    {
+      "id": "undo_unchanged_target",
+      "pass": true,
+      "detail": "目标未再改时整批模拟撤销完成"
+    },
+    {
+      "id": "filter_keeps_hidden_selection",
+      "pass": true,
+      "detail": "搜索隐藏的选择保留"
+    },
+    {
+      "id": "select_all_current_results_only",
+      "pass": true,
+      "detail": "取消当前结果不丢筛选外选择"
+    },
+    {
+      "id": "updates_off_clears_update_picks",
+      "pass": true,
+      "detail": "关闭更新取消旧更新选择"
+    },
+    {
+      "id": "api_requires_explicit_space",
+      "pass": true,
+      "detail": "跨API不猜目标空间"
+    },
+    {
+      "id": "same_space_blocked",
+      "pass": true,
+      "detail": "同一实际空间不允许复制"
+    },
+    {
+      "id": "api_can_be_source",
+      "pass": true,
+      "detail": "API可作为来源且目标唯一空间自动显示"
+    },
+    {
+      "id": "uninitialized_target_blocked",
+      "pass": true,
+      "detail": "未初始化空间只显示指引，不创建目标"
+    },
+    {
+      "id": "multi_space_has_no_guessed_default",
+      "pass": true,
+      "detail": "多空间必须显式选择"
+    },
+    {
+      "id": "branch_and_unproved_continuation_blocked",
+      "pass": true,
+      "detail": "仅历史ID包含或轮数更多都不解锁更新"
+    },
+    {
+      "id": "stale_preview_stops_before_copy",
+      "pass": true,
+      "detail": "失效计划不产生操作收据"
+    },
+    {
+      "id": "invalidated_selection_cannot_force_copy",
+      "pass": true,
+      "detail": "重新核对后冲突项不再可执行"
+    },
+    {
+      "id": "backup_failure_zero_writes",
+      "pass": true,
+      "detail": "备份失败不冒称复制完成"
+    },
+    {
+      "id": "write_failure_reports_restored",
+      "pass": true,
+      "detail": "写失败与恢复完成区分"
+    },
+    {
+      "id": "incomplete_recovery_blocks_new_copy",
+      "pass": true,
+      "detail": "保留现场，不允许继续新复制"
+    },
+    {
+      "id": "undo_conflict_zero_writes",
+      "pass": true,
+      "detail": "任一撤销冲突整批不写入"
+    },
+    {
+      "id": "interrupted_receipt_blocks_new_copy",
+      "pass": true,
+      "detail": "中断收据不自动恢复或重试"
+    },
+    {
+      "id": "running_target_requires_exit_then_preview",
+      "pass": true,
+      "detail": "目标运行时不能直接复制"
+    },
+    {
+      "id": "escape_closes_modal_and_returns_focus",
+      "pass": true,
+      "detail": "Esc关闭说明框并回到原按钮"
+    },
+    {
+      "id": "exit_never_copies_automatically",
+      "pass": true,
+      "detail": "退出回写后重新预览，仍需二次确认"
+    },
+    {
+      "id": "sequential_search_typing",
+      "pass": true,
+      "detail": "逐键复核值及焦点；pressSequentially因重绘更换节点而拒绝，非输入丢失"
+    },
+    {
+      "id": "mixed_preview_backup_count",
+      "pass": true,
+      "detail": "新增1、更新2对应备份2条旧索引"
+    },
+    {
+      "id": "narrow_preview_no_horizontal_overflow",
+      "pass": true,
+      "detail": "430px窄屏预览无横向溢出"
+    },
+    {
+      "id": "narrow_selection_no_horizontal_overflow",
+      "pass": true,
+      "detail": "430px选择页可用"
+    }
+  ],
+  "test_harness_corrections": [
+    {
+      "id": "cancel_zero_copy",
+      "pass": false,
+      "detail": "断言错误：取消先进入未执行结果页，不能在此检查列表复选框",
+      "invalidAssertion": true
+    }
+  ],
+  "fixture_exact_match": true,
+  "javascript_syntax": "PASS",
+  "automatic_resource_loads": 0,
+  "console_errors": [],
+  "production_sources_changed": false,
+  "real_session_access": false,
+  "guard_operations": false,
+  "engine": "NOT_IMPLEMENTED",
+  "feature_flag": false,
+  "git_push": "NOT_RUN_BY_TASK_SCOPE",
+  "html_sha256": "8b26019417d05777c26ca9b2eeae1c7bd26c3cba2df6c9b6c6eebe0a22afea0d",
+  "design_sha256": "fecba94fa4602a2253be338da19fb8eef52ab759bf0a90b2b5a59f5502679812",
+  "design_qa_sha256": "e113ff254386a56fa71097886b816ba4c8115ec1226f26c235ac7adddc1dca8a",
+  "automation_trigger": "2026-10-27T14:41:18.354Z"
+}

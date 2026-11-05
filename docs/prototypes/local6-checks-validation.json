@@ -1,0 +1,66 @@
+{
+  "date": "2026-10-28",
+  "build": "20261028.6.4",
+  "baselineCommit": "828cb98665c84bf0d97afa2f14f928ac35ddf15c",
+  "frontendAuthor": "official local Claude CLI",
+  "installed": true,
+  "controllerChecks": 97,
+  "coreTests": {
+    "baselinePassed": 176,
+    "coreSourceChanged": false,
+    "rerunThisUIRound": false
+  },
+  "guardHelpersByteIdentical": {
+    "ClaudeGuard": true,
+    "ClaudeSessionTransfer": true
+  },
+  "nativeFictionalChecks": [
+    "fresh account cards omit duplicate update time",
+    "one footer last-refresh label",
+    "matched CLI no large permanent check row",
+    "takeover row visible outside settings",
+    "takeover cancel preserves unmanaged state",
+    "takeover confirm updates fictional Store only",
+    "network check renders three results without expand control",
+    "failed target country leaves saved target SG unchanged",
+    "invalid target hides unchecked pass rows",
+    "loading placeholders observed via full accessibility tree",
+    "check-help button opens and Escape closes",
+    "successful check preserves prior operation error as historical",
+    "disconnected proxy and unknown country never green",
+    "bad network has no takeover action"
+  ],
+  "notConfirmed": [
+    "menu-bar anchored fixture: automation exposes only anchor window, nested popover visibility not confirmed",
+    "VoiceOver device acceptance",
+    "every API/unknown/guard-stale combination visually repeated"
+  ],
+  "realGuardCommandsRun": false,
+  "realDesktopTakeoverPerformed": false,
+  "realAccountsAndSessionsModified": false,
+  "sourceHashes": {
+    "App/Views.swift": "ea08c0e14e13a4c07d113d4a824df11c578fa0f3a4994adb7b5a77a7ce3eafb6",
+    "App/ProtectionView.swift": "7560367dfe0ee623d27088ad049817d3370729aa337a7a0d6d66c4c2dd00668e",
+    "App/Protection.swift": "31a270a0abf0ff11a6b403087a93c7c831dc9db977660c8cb49922eb041d0124",
+    "build.sh": "51fe4165d0e5dedeee7eb410aa367c6d5dbfc6b1412796d37a967aa986669f8e"
+  },
+  "screenshots": [
+    "local6-checks-main.png",
+    "local6-checks-result.png"
+  ],
+  "installation": {
+    "target": "/Applications/Claude Switcher 候选版.app",
+    "fromBuild": "20261028.6.3",
+    "toBuild": "20261028.6.4",
+    "updatedFiles": [
+      "Contents/Info.plist",
+      "Contents/MacOS/ClaudeSwitcher"
+    ],
+    "guardHelpersByteAndFileIdentityUnchanged": true,
+    "originalApplicationsVerifiedUnchanged": true,
+    "guardCommandsRun": false,
+    "accountAndSessionDirectoriesAccessed": false,
+    "candidateLaunched": true,
+    "installedMainSHA256": "6673e85fc70095767eecfaa82fc21a6fcbdc9144a7d1ee0296f01c56c4a9cd06"
+  }
+}

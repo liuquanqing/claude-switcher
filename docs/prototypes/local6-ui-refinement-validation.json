@@ -1,0 +1,76 @@
+{
+  "date": "2026-10-29",
+  "build": "20261029.6.6",
+  "installed": true,
+  "frontendAndProductCopyAuthor": "official local Claude Code",
+  "originalReferenceCommit": "b7df18c5d7077c47425e6ce8f98c6b21ee729b79",
+  "controllerChecks": 97,
+  "releaseBuildAndSignature": "passed",
+  "coreBaselineTests": 176,
+  "coreSourceChanged": false,
+  "coreTestsRerunThisUIRound": false,
+  "helpersMatchInstalledBytes": {
+    "ClaudeGuard": true,
+    "ClaudeSessionTransfer": true
+  },
+  "nativeFictionalChecks": [
+    "add entry restored to final grid cell",
+    "empty/whitespace name disables add",
+    "Escape cancels without adding",
+    "Return adds fourth and fifth fictional profiles",
+    "four/five profiles use same scroll viewport and final-card entry",
+    "current status marker follows fictional account switch",
+    "settings entry opens panel without takeover",
+    "saved SG remains visible while JP is only draft",
+    "read-only check failure does not change saved target",
+    "results still fold independently",
+    "stop protection confirmation cancel keeps enabled state",
+    "confirmed stop affects fictional Store only",
+    "network passes while protection off: protection remains off",
+    "enabling simulated guard does not automatically claim running desktop",
+    "explicit takeover confirmation yields desktop-protected status only"
+  ],
+  "notRepeatedOrConfirmed": [
+    "one/two-account native layouts",
+    "all API/unknown/offline permutations visually repeated",
+    "real start/focus/takeover/account switch",
+    "VoiceOver device acceptance",
+    "menu-bar nested-popover full visibility: previous tool limitation remains"
+  ],
+  "realGuardCommandsRun": false,
+  "realAccountsOrSessionsUsedAsFixtures": false,
+  "realDesktopTakeoverPerformed": false,
+  "sourceHashes": {
+    "App/Views.swift": "94dded6839ba9ab5438019e6dce7399a1c963c522dfb080d9958e15e97b84491",
+    "App/ProtectionView.swift": "58af4d8f58dd4cb756e974a916962ee59a48d46789e7d1bc326dce49d5040bd4",
+    "App/ManagedDesktop.swift": "b8c34a2ea3844d05c491fb3950ec9fe60353bc18574025ad3015a691378d7645",
+    "build.sh": "c19e456623963883af519d05820cbb25a9fd135609d2a09f47d347a7aa456f31"
+  },
+  "screenshots": [
+    "local6-ui-refinement.png",
+    "local6-settings-unified.png",
+    "local6-protected-summary.png"
+  ],
+  "installation": {
+    "date": "2026-10-29",
+    "target": "/Applications/Claude Switcher 候选版.app",
+    "fromBuild": "20261028.6.4",
+    "toBuild": "20261029.6.6",
+    "changedFiles": [
+      "Contents/Info.plist",
+      "Contents/MacOS/ClaudeSwitcher"
+    ],
+    "forceQuitUsed": false,
+    "helperBytesInodesAndModificationTimesUnchanged": true,
+    "originalApplicationsVerifiedUnchanged": true,
+    "guardConfigurationAndOwnershipFilesUnchanged": true,
+    "guardCommandsRun": false,
+    "accountAndSessionDirectoriesAccessed": false,
+    "candidateLaunched": true,
+    "installedMainSHA256": "9acde8481254d3679b2e4b4c23374ecd276a6ddc8154a2c16cb3403e9a86a750",
+    "guardRegisteredAfterRestart": true,
+    "guardReceiptAgeSecondsAtVerification": 3.5,
+    "guardDecisionAtVerification": "allowed",
+    "desktopManagedAtVerification": false
+  }
+}

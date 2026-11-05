@@ -1,0 +1,103 @@
+{
+  "date": "2026-10-28",
+  "frontendAuthor": "Kimi CLI default configuration",
+  "backendAndAudit": "Codex",
+  "controllerChecks": 75,
+  "coreTests": "154 项为上一阶段已通过范围；本轮 Core 无改动，不冒充重新执行",
+  "sourceHashes": {
+    "App/SessionTransferView.swift": "ecf0799a9440b9f4b1214a9650aefa468d2b625d7684f1ddc0e0963dd1a48f1f",
+    "App/SessionTransferLocalization.swift": "8045c966fae8a2aa4066685943fab28c0798534c1f20e72ccafd11a3242e1700",
+    "App/SessionTransferController.swift": "9c499bb52c1f876aae6fc93890a54041296aaa048e2a7adfe556b020e9d552ca",
+    "App/main.swift": "ca4318f716b1d4b00a33f8ccf13aa38207393041b31fba4acd75369589dfc61e",
+    "App/Views.swift": "1f2bb629e1f97badb010f21e31643f88e5392f2837d44cdb8bfb8a7de21eeccf",
+    "scripts/fixtures/controller-check.swift": "e2760dcd7c615c953cb33f8a7f0f7426ca304a5d0c87825bbde0e689450c71ba"
+  },
+  "checks": [
+    {
+      "id": "default_missing_only",
+      "result": "PASS",
+      "observation": "首次有效载入默认仅勾选目标缺少项，不选已有/冲突"
+    },
+    {
+      "id": "deselect",
+      "result": "PASS",
+      "observation": "全选已满时点击取消，计数到0，操作按钮禁用"
+    },
+    {
+      "id": "refresh_keeps_choice",
+      "result": "PASS",
+      "observation": "手动取消后刷新仍为0，不重新默认勾选"
+    },
+    {
+      "id": "updates_explicit",
+      "result": "PASS",
+      "observation": "开启已有更新后仅解锁可安全项，不自动勾选"
+    },
+    {
+      "id": "mixed",
+      "result": "PASS",
+      "observation": "选中1/2时原生复选框AX为mixed(2)，再点变为全选(1)"
+    },
+    {
+      "id": "filtered_selection",
+      "result": "PASS",
+      "observation": "筛选后显示筛选外数量，取消仅清当前范围"
+    },
+    {
+      "id": "empty_filter",
+      "result": "PASS",
+      "observation": "无搜索结果时全选禁用，筛选外选择保留"
+    },
+    {
+      "id": "cancel_confirmation",
+      "result": "PASS",
+      "observation": "新增+更新确认列出实际更新项；Escape取消保留选择"
+    },
+    {
+      "id": "language",
+      "result": "PASS",
+      "observation": "中英文控件/已选数量/动作一致；标题路径不翻译"
+    },
+    {
+      "id": "visual",
+      "result": "PASS",
+      "observation": "Kimi自主去掉橙色竖线和棕色行底，改中性层次"
+    },
+    {
+      "id": "installed",
+      "result": "PASS",
+      "observation": "候选版本/标识/签名/helper核对通过；未启动；原版代码校验一致"
+    }
+  ],
+  "installation": {
+    "date": "2026-10-28",
+    "target": "/Applications/Claude Switcher 候选版.app",
+    "bundleIdentifier": "dev.claudeswitcher.candidate",
+    "fromVersion": "1.3.0-local.5",
+    "toVersion": "1.3.0-local.6",
+    "backup": "/Applications/.ClaudeSwitcher-candidate-1.3.0-local.5-8a3976eae2d7442dac1df62e687bd7e4.bundle-backup",
+    "candidateLaunched": false,
+    "originalApplicationsVerifiedUnchanged": true,
+    "accountAndSessionDirectoriesAccessed": false,
+    "guardServiceCommandsRun": false,
+    "installedHashes": {
+      "Contents/Info.plist": "7c451a673baebdc29551180aaeef067fa2d385a648d50ceb5f61ba66f995d43a",
+      "Contents/MacOS/ClaudeSwitcher": "89318cff1baf7eb1894792d66e914eb229ccc155f9cb7b555fc33e0d25486447"
+    }
+  },
+  "evidenceLimits": [
+    "只用虚构会话与临时目录，实际候选未启动",
+    "本轮原生实测选择/筛选/确认取消/语言；上一阶段迁移引擎、撤销、恢复验证另见既有报告",
+    "旧预览AX连接超时后只关闭了该假数据进程，重新识别的预览正常",
+    "不把截图视为完整无障碍合规认证",
+    "原版校验采样为 Info.plist 与主程序；安装文件操作仅定位候选包。"
+  ],
+  "screenshots": [
+    "local6-import-selected.jpg",
+    "local6-import-partial.jpg",
+    "local6-import-filtered.jpg"
+  ],
+  "references": [
+    "https://developer.apple.com/design/human-interface-guidelines/toggles"
+  ]
+}

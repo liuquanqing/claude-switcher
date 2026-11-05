@@ -1,0 +1,283 @@
+{
+  "r_id": "R-20261027-004-local5-review",
+  "scope": "frozen review snapshots, not final binary proof",
+  "snapshots": [
+    {
+      "invocation_id": "2824a459-03c2-4224-b595-c3a558bc71ea",
+      "manifest_sha256": "791f3e6bb6bce310de7086b92989c44afd6bb3d305ddfc59b604c0e1e99f1489",
+      "manifest": {
+        "base_head": "320ab81bafa812dc270cc2eb628b2356be33b190",
+        "files": [
+          {
+            "path": "candidate/App/APIManagement.swift",
+            "sha256": "171b408caf492532889b87c43f97b852da712a3be0ca03d73bdfa96349c7a6c8"
+          },
+          {
+            "path": "candidate/App/CLILoginController.swift",
+            "sha256": "c387eaa9718b523ab2298f8ff6da6f950fa73f2b32275c03ae131e8bcf5787d4"
+          },
+          {
+            "path": "candidate/App/DesktopLifecycle.swift",
+            "sha256": "6b5cd248bd2c1ba99539be81255b1b7168c6e22814e07aefe815d79c1bab996e"
+          },
+          {
+            "path": "candidate/App/DesktopTokenReader.swift",
+            "sha256": "3a44b9ab485729e546b49be3ac9f2ee8733ffb2c6ea3dd93a8cab201c5a207b6"
+          },
+          {
+            "path": "candidate/App/GuardWorker.swift",
+            "sha256": "b8a9c9eeda76280b26765a7795db6ee24de1ec840e5e05fb50eba76c7f6597f2"
+          },
+          {
+            "path": "candidate/App/ManagedDesktop.swift",
+            "sha256": "7c1e95002a8dbf24c6df4f261a303363e63d9d6903c9e4996a216ba6132a3041"
+          },
+          {
+            "path": "candidate/App/NativeCLIStorage.swift",
+            "sha256": "0039806792b71a90c5c24954a0ae7d3b4a9c0b68c0a3beff1c45db47a9dbecca"
+          },
+          {
+            "path": "candidate/App/PanelPresentation.swift",
+            "sha256": "58c769173a2788003a9d1806c92c8c7902db821b3680cb9f35ffdb4dcdf5fb06"
+          },
+          {
+            "path": "candidate/App/Protection.swift",
+            "sha256": "98d894c8c913baecfa92e467e2889cd6857257e7b92be5f914baa49621f6f4e2"
+          },
+          {
+            "path": "candidate/App/ProtectionView.swift",
+            "sha256": "e4f60e9b8b55b7ae4cc702bf23ac220ca828b1011404115b84c01a3549715def"
+          },
+          {
+            "path": "candidate/App/Views.swift",
+            "sha256": "612cdc666c5f3591482d21bf79970948a2480603b2537c0a09bce4f16dc23c78"
+          },
+          {
+            "path": "candidate/App/main.swift",
+            "sha256": "2575b9a3e781cabad861b126b92efd23464948a6649a1d9ba8e3e6c7d810dbfc"
+          },
+          {
+            "path": "candidate/Sources/ClaudeGuard/GuardMain.swift",
+            "sha256": "6e0d7809c6249b60669c12cb9935af6c18d20a238e50b8b65b57ff35ff1ea61f"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/APIConfiguration.swift",
+            "sha256": "4bd84d5340c98f200a7add9f95c854da1e745b34b0c65f47d64d33b2991c5876"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/AuthenticationConfiguration.swift",
+            "sha256": "fa8a574c2f3b1b563a3235b488210dbf67a19447f13fe4401dc627dbd6847c7f"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/CLIModels.swift",
+            "sha256": "1fef978a690adb2d79bd1f8bf5f56b34f641dfd6e5e66cdd806513b89f7b83ac"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/CLITransaction.swift",
+            "sha256": "7a45900929a09b13976be85b7a4e7efe0e82c9aac0ed9339d5ca241055c233ca"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/GuardService.swift",
+            "sha256": "5a69bb40976e5bafeee35adf38bac88a5667473901c13cd23974ddd29b4fe6a0"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/NetworkProbe.swift",
+            "sha256": "c6a0af104630602f4425b189c7844a2290f78794390c24ff2d1512a17ae517b7"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/ProfileTransaction.swift",
+            "sha256": "8ee9ae864c2c670abf69e3332d6da2ce33bb6596151d75d19ba84e7afff8a2da"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/Safety.swift",
+            "sha256": "3d4369f37898ce9cb9740393093446620921699f3be3c72f7b6627bba79f1f6f"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/ThreadRepository.swift",
+            "sha256": "e5e96e25861a3aae72ae30fd116e8593bcc25c54897afa3b58834be0bfeaeec8"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/APIConfigurationTests.swift",
+            "sha256": "9e1e5c0c8711980d2771a7d84a841dfc30e2930a21826281d1b1c5517019feff"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/CLITransactionTests.swift",
+            "sha256": "8506ae704e929b0f2f3d3ba0babd21fb4b96e36313f7898e82c82b472fed4224"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/ConfigurationScopeTests.swift",
+            "sha256": "767c271c316a7d380c570375c70ab3e95e33844edc207c09c8a90c6cc481a232"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/FileTests.swift",
+            "sha256": "470dac318a8a0889347fc088aaceb8d3842c8e541a6ae4f4c75b173268dd71cf"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/IdentityTests.swift",
+            "sha256": "f950fec88ad114523465048787638eec623ac8bc68c27c7ca863981459219384"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/SafetyTests.swift",
+            "sha256": "4c6a3337406d528e0a9302ef68334f4fc178047b11c2bc3982cedd65a7f198a7"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/ThreadTests.swift",
+            "sha256": "f4446047d1572186826d0be25e86c5e8be9ef50b867856621ebc76fd2b9c7af7"
+          },
+          {
+            "path": "candidate/Package.swift",
+            "sha256": "9e97f858d43db551a23f7717790345876b08860f5ad76a6f922b93022ada447a"
+          },
+          {
+            "path": "candidate/build.sh",
+            "sha256": "31faa159f57a90a344975c69aa249fb86dfeeb4ffb3dc4433adcbdee4b634da3"
+          },
+          {
+            "path": "candidate/docs/功能对比数据.json",
+            "sha256": "570a607c02363e19b0f3083ce28861fd4571023a75ca6e09c18e75562522b860"
+          }
+        ]
+      }
+    },
+    {
+      "invocation_id": "53cea2d9-2743-424b-bd91-8ec89bca5455",
+      "manifest_sha256": "0b7d0ddab8105334b58165cd94dc9f6c2d2c8763af5d82e2a54c99d89c02448f",
+      "manifest": {
+        "files": [
+          {
+            "path": "candidate/App/APIManagement.swift",
+            "sha256": "171b408caf492532889b87c43f97b852da712a3be0ca03d73bdfa96349c7a6c8"
+          },
+          {
+            "path": "candidate/App/CLILoginController.swift",
+            "sha256": "8803258381530218d63076a1ecb9665a278fbec13dc3c44c50afa811b18e7636"
+          },
+          {
+            "path": "candidate/App/DesktopLifecycle.swift",
+            "sha256": "6b5cd248bd2c1ba99539be81255b1b7168c6e22814e07aefe815d79c1bab996e"
+          },
+          {
+            "path": "candidate/App/DesktopOnlySwitch.swift",
+            "sha256": "b43f7a15084c5b3b4b2ed96622327e27fe7685bea2aaeed4d1d41f7c584e19f7"
+          },
+          {
+            "path": "candidate/App/DesktopTokenReader.swift",
+            "sha256": "3a44b9ab485729e546b49be3ac9f2ee8733ffb2c6ea3dd93a8cab201c5a207b6"
+          },
+          {
+            "path": "candidate/App/GuardWorker.swift",
+            "sha256": "b8a9c9eeda76280b26765a7795db6ee24de1ec840e5e05fb50eba76c7f6597f2"
+          },
+          {
+            "path": "candidate/App/ManagedDesktop.swift",
+            "sha256": "7c1e95002a8dbf24c6df4f261a303363e63d9d6903c9e4996a216ba6132a3041"
+          },
+          {
+            "path": "candidate/App/NativeCLIStorage.swift",
+            "sha256": "0039806792b71a90c5c24954a0ae7d3b4a9c0b68c0a3beff1c45db47a9dbecca"
+          },
+          {
+            "path": "candidate/App/PanelPresentation.swift",
+            "sha256": "58c769173a2788003a9d1806c92c8c7902db821b3680cb9f35ffdb4dcdf5fb06"
+          },
+          {
+            "path": "candidate/App/Protection.swift",
+            "sha256": "bc2e826c6c9d8e3048cc37a61c3b2d9f6a24089b7cf84c00837b4da24faf0fe5"
+          },
+          {
+            "path": "candidate/App/ProtectionView.swift",
+            "sha256": "6812b0b3c7ed3cf43a38703a7bd10ec8021042872d6b17ee3d6c8b4ecb75b1f5"
+          },
+          {
+            "path": "candidate/App/Views.swift",
+            "sha256": "ea2d7dbd8dcb362441124a5c1f0e9124700ac3b80cbfca15eb8153e2acda8b87"
+          },
+          {
+            "path": "candidate/App/main.swift",
+            "sha256": "04e5687db484bc38590892e72653eb09329d6eb67574813f709b15a8eae5ce84"
+          },
+          {
+            "path": "candidate/Sources/ClaudeGuard/GuardMain.swift",
+            "sha256": "6e0d7809c6249b60669c12cb9935af6c18d20a238e50b8b65b57ff35ff1ea61f"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/APIConfiguration.swift",
+            "sha256": "4bd84d5340c98f200a7add9f95c854da1e745b34b0c65f47d64d33b2991c5876"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/AuthenticationConfiguration.swift",
+            "sha256": "fa8a574c2f3b1b563a3235b488210dbf67a19447f13fe4401dc627dbd6847c7f"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/CLIModels.swift",
+            "sha256": "1fef978a690adb2d79bd1f8bf5f56b34f641dfd6e5e66cdd806513b89f7b83ac"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/CLITransaction.swift",
+            "sha256": "a333649a5e533bcb9f85537ea43df21d50b327721cc04f9562fa4474c04cf90d"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/GuardService.swift",
+            "sha256": "5a69bb40976e5bafeee35adf38bac88a5667473901c13cd23974ddd29b4fe6a0"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/NetworkProbe.swift",
+            "sha256": "c6a0af104630602f4425b189c7844a2290f78794390c24ff2d1512a17ae517b7"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/ProfileTransaction.swift",
+            "sha256": "8ee9ae864c2c670abf69e3332d6da2ce33bb6596151d75d19ba84e7afff8a2da"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/Safety.swift",
+            "sha256": "3d4369f37898ce9cb9740393093446620921699f3be3c72f7b6627bba79f1f6f"
+          },
+          {
+            "path": "candidate/Sources/SwitcherCore/ThreadRepository.swift",
+            "sha256": "e5e96e25861a3aae72ae30fd116e8593bcc25c54897afa3b58834be0bfeaeec8"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/APIConfigurationTests.swift",
+            "sha256": "9e1e5c0c8711980d2771a7d84a841dfc30e2930a21826281d1b1c5517019feff"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/CLITransactionTests.swift",
+            "sha256": "705cdcc54c6fd2219225d33419691cd70c9e95ac0d655ef4e540fade1f97a593"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/ConfigurationScopeTests.swift",
+            "sha256": "69af60670fa37e3a93cb5eec326cee58ad028251e48c240b21584ea7c3e4f43d"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/FileTests.swift",
+            "sha256": "470dac318a8a0889347fc088aaceb8d3842c8e541a6ae4f4c75b173268dd71cf"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/IdentityTests.swift",
+            "sha256": "f950fec88ad114523465048787638eec623ac8bc68c27c7ca863981459219384"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/SafetyTests.swift",
+            "sha256": "4c6a3337406d528e0a9302ef68334f4fc178047b11c2bc3982cedd65a7f198a7"
+          },
+          {
+            "path": "candidate/Tests/SwitcherCoreTests/ThreadTests.swift",
+            "sha256": "f4446047d1572186826d0be25e86c5e8be9ef50b867856621ebc76fd2b9c7af7"
+          },
+          {
+            "path": "candidate/scripts/fixtures/controller-check.swift",
+            "sha256": "6dcaf7a02d53c11fc8865e3a7b7768a7d9e6808e0e1a5a5b2d667543d265a7ba"
+          },
+          {
+            "path": "candidate/Package.swift",
+            "sha256": "9e97f858d43db551a23f7717790345876b08860f5ad76a6f922b93022ada447a"
+          },
+          {
+            "path": "candidate/scripts/test-controller.sh",
+            "sha256": "e0a0bd073dc1f2bb29b329b9ac75449bf4ad24a38b720d78ec21a222a4fce52e"
+          }
+        ]
+      }
+    }
+  ]
+}

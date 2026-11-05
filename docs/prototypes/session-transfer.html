@@ -1,0 +1,1464 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>复制会话 · 离线交互演示</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --outside: #141311;
+      --bg: #1d1c1a;
+      --surface: #252421;
+      --surface-hover: #2b2925;
+      --stroke: #383631;
+      --stroke-soft: #302e2a;
+      --text: #f3f0ea;
+      --muted: #aaa398;
+      --faint: #7e786e;
+      --accent: #da7b58;
+      --accent-soft: #efac91;
+      --accent-ink: #251711;
+      --good: #8bc79a;
+      --warn: #d9b877;
+      --bad: #e99888;
+    }
+    * { box-sizing: border-box; }
+    html { min-width: 280px; background: var(--outside); }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 28px 20px 22px;
+      color: var(--text);
+      background: var(--outside);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input, select { font: inherit; }
+    button, a, select, input { -webkit-tap-highlight-color: transparent; }
+    button { cursor: pointer; }
+    button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .42; }
+    button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--accent-soft);
+      outline-offset: 3px;
+    }
+    h1, h2, p { margin: 0; }
+    .prototype-shell { width: min(700px, 100%); margin: 0 auto; }
+    .prototype-window {
+      overflow: hidden;
+      min-height: 600px;
+      background: var(--bg);
+      border: 1px solid var(--stroke);
+      border-radius: 14px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, .36);
+    }
+    .titlebar {
+      min-height: 50px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      background: #24231f;
+      border-bottom: 1px solid var(--stroke);
+    }
+    .titlebar-left { display: flex; align-items: center; gap: 13px; min-width: 0; }
+    .traffic { display: flex; gap: 6px; flex: 0 0 auto; }
+    .traffic i { width: 10px; height: 10px; border-radius: 50%; background: #625e56; }
+    .traffic i:first-child { background: #87534a; }
+    .traffic i:nth-child(2) { background: #867147; }
+    .traffic i:last-child { background: #4e7354; }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      min-height: 30px;
+      padding: 3px 5px;
+      color: var(--muted);
+      border-radius: 5px;
+      text-decoration: none;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .back-link:hover { color: var(--text); background: rgba(255, 255, 255, .035); }
+    .back-link .arrow { font-size: 17px; line-height: 1; }
+    .window-title { font-size: 13px; font-weight: 650; letter-spacing: .01em; }
+    .language-button {
+      justify-self: end;
+      min-width: 38px;
+      min-height: 28px;
+      padding: 3px 7px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .language-button:hover { color: var(--text); border-color: var(--stroke); }
+    .window-body { padding: 18px 18px 16px; }
+    .endpoint-grid { display: grid; grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr); gap: 10px; align-items: start; }
+    .endpoint { min-width: 0; }
+    .field-label { display: block; margin: 0 0 6px 2px; color: var(--muted); font-size: 11px; font-weight: 600; }
+    select, .search-input {
+      width: 100%;
+      min-height: 36px;
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--stroke);
+      border-radius: 7px;
+    }
+    select { padding: 6px 27px 6px 10px; }
+    .space-field { margin-top: 8px; }
+    .direction { padding-top: 30px; color: var(--accent); text-align: center; font-size: 18px; }
+    .notice {
+      margin-top: 12px;
+      padding: 8px 10px;
+      border-left: 2px solid var(--warn);
+      color: #dcc8a5;
+      background: rgba(217, 184, 119, .065);
+      border-radius: 0 6px 6px 0;
+      font-size: 11px;
+    }
+    .notice.bad { color: #efb0a4; border-left-color: var(--bad); background: rgba(233, 152, 136, .065); }
+    .toolbar { display: flex; align-items: center; gap: 14px; margin-top: 16px; }
+    .search-wrap { position: relative; flex: 1 1 auto; min-width: 0; }
+    .search-input { display: block; padding: 7px 11px 7px 32px; background: #1a1917; }
+    .search-input::placeholder { color: var(--faint); }
+    .search-icon { position: absolute; left: 11px; top: 8px; color: var(--faint); font-size: 15px; pointer-events: none; }
+    .switch-label { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; cursor: pointer; white-space: nowrap; }
+    .switch-label input { width: 15px; height: 15px; margin: 0; accent-color: var(--accent); }
+    .switch-label span { color: var(--muted); font-size: 11px; }
+    .list-meta { display: flex; align-items: center; gap: 10px; min-height: 36px; margin-top: 5px; padding: 0 2px; }
+    .list-meta .counts { margin-left: auto; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .link-button { padding: 4px 0; color: var(--muted); background: none; border: 0; font-size: 11px; font-weight: 600; }
+    .link-button:hover:not(:disabled) { color: var(--text); }
+    .refresh-button { width: 26px; color: var(--faint); font-size: 16px; font-weight: 400; }
+    .thread-list { overflow: auto; min-height: 312px; max-height: 348px; border: 1px solid var(--stroke); border-radius: 10px; background: #1a1917; }
+    .thread-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr) auto;
+      gap: 11px;
+      align-items: start;
+      min-height: 74px;
+      padding: 13px 14px 12px;
+      border-bottom: 1px solid var(--stroke-soft);
+      transition: background-color .12s ease, box-shadow .12s ease;
+    }
+    .thread-row:last-child { border-bottom: 0; }
+    .thread-row.selectable { cursor: pointer; }
+    .thread-row.selectable:hover { background: rgba(255, 255, 255, .025); }
+    .thread-row.selected {
+      background: rgba(218, 123, 88, .095);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .thread-row.selected:hover { background: rgba(218, 123, 88, .13); }
+    .thread-row.unavailable .thread-main { opacity: .72; }
+    .thread-check { width: 16px; height: 16px; margin: 3px 0 0; accent-color: var(--accent); cursor: inherit; }
+    .thread-main { min-width: 0; }
+    .thread-title-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .thread-title { min-width: 0; color: var(--text); font-size: 14px; font-weight: 650; line-height: 1.35; overflow-wrap: anywhere; }
+    .selected .thread-title { color: #fff8f3; }
+    .thread-project { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 11px; font-weight: 500; }
+    .thread-path { margin-top: 4px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+    .thread-reason { margin-top: 5px; color: var(--warn); font-size: 11px; line-height: 1.4; }
+    .thread-side { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding-top: 1px; }
+    .thread-time { color: var(--muted); font-size: 11px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .row-state { color: var(--faint); font-size: 10px; font-weight: 550; white-space: nowrap; }
+    .row-state.update { color: var(--accent-soft); }
+    .row-state.blocked { color: var(--warn); }
+    .empty-state { min-height: 310px; display: grid; place-content: center; padding: 24px; text-align: center; color: var(--muted); font-size: 12px; }
+    .operation {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      margin-top: 12px;
+      padding: 11px 12px;
+      border: 1px solid var(--stroke);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .operation::before { content: ""; flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+    .operation.good::before { background: var(--good); }
+    .operation.warn::before { background: var(--warn); }
+    .operation.bad::before { background: var(--bad); }
+    .operation-main { min-width: 0; flex: 1; }
+    .operation-main strong { display: block; font-size: 12px; font-weight: 650; }
+    .operation.good .operation-main strong { color: var(--good); }
+    .operation.warn .operation-main strong { color: var(--warn); }
+    .operation.bad .operation-main strong { color: var(--bad); }
+    .operation-main p { margin-top: 2px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+    .operation-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+    .actionbar { display: flex; align-items: center; gap: 14px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--stroke-soft); }
+    .action-status { flex: 1; min-width: 0; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .action-status.has-selection { color: var(--accent-soft); }
+    .button {
+      min-height: 34px;
+      padding: 6px 12px;
+      color: var(--text);
+      background: var(--surface-hover);
+      border: 1px solid var(--stroke);
+      border-radius: 7px;
+      font-weight: 600;
+      font-size: 12px;
+    }
+    .button:hover:not(:disabled) { border-color: #5a544b; background: #33302b; }
+    .button.primary { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+    .button.primary:hover:not(:disabled) { background: #e68a67; border-color: #e68a67; }
+    .button.danger { color: #fff3ee; background: #9e4e3e; border-color: #b5614e; }
+    .button.danger:hover:not(:disabled) { background: #ad5947; border-color: #c87560; }
+    .button.quiet { color: var(--muted); background: transparent; }
+    .button.small { min-height: 28px; padding: 3px 8px; font-size: 11px; }
+    .demo-controls { margin: 14px 4px 0; padding: 11px 12px; color: #8d867c; border: 1px dashed #3a3630; border-radius: 8px; font-size: 11px; }
+    .demo-controls label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .demo-controls select { width: auto; min-width: 230px; min-height: 31px; padding-top: 4px; padding-bottom: 4px; color: #aaa398; background: #1d1c1a; }
+    .demo-controls p { margin-top: 5px; }
+    .demo-controls .button { margin-top: 8px; }
+    .outside-note { margin: 7px 5px 0; color: #736d64; font-size: 10px; text-align: center; }
+    .modal-overlay { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; padding: 18px; background: rgba(0, 0, 0, .68); }
+    .modal { width: min(460px, 100%); max-height: calc(100vh - 36px); overflow: auto; padding: 19px; background: var(--bg); border: 1px solid #48433b; border-radius: 12px; box-shadow: 0 24px 80px rgba(0, 0, 0, .55); }
+    .modal h2 { font-size: 16px; line-height: 1.4; }
+    .modal-body { margin-top: 10px; color: var(--muted); font-size: 12px; }
+    .modal-body p + p { margin-top: 7px; }
+    .modal-warning { margin-bottom: 10px; padding: 8px 10px; color: #efb0a4; background: rgba(233, 152, 136, .07); border-left: 2px solid var(--bad); border-radius: 0 6px 6px 0; }
+    .modal-sessions { margin: 12px 0 0; padding: 0; list-style: none; border-top: 1px solid var(--stroke); }
+    .modal-sessions li { padding: 10px 0; border-bottom: 1px solid var(--stroke-soft); }
+    .modal-session-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .modal-session-title { color: var(--text); font-weight: 650; overflow-wrap: anywhere; }
+    .modal-session-project { flex: 0 0 auto; color: var(--faint); font-size: 11px; }
+    .modal-session-path { margin-top: 3px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 10px; overflow-wrap: anywhere; }
+    .modal-session-action { display: block; margin-top: 4px; color: var(--faint); font-size: 11px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 17px; }
+    .modal-exception { margin-top: 14px; padding-top: 11px; border-top: 1px solid var(--stroke-soft); text-align: right; }
+    .modal-exception .link-button { color: var(--faint); font-weight: 500; }
+    .modal-exception .link-button:hover { color: var(--bad); }
+    .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+    [hidden] { display: none !important; }
+    @media (max-width: 560px) {
+      body { padding: 10px 8px 16px; }
+      .prototype-window { min-height: calc(100vh - 120px); border-radius: 11px; }
+      .window-body { padding: 14px 12px 13px; }
+      .titlebar { padding: 8px 10px; gap: 6px; }
+      .traffic { display: none; }
+      .back-link { padding-left: 2px; }
+      .endpoint-grid { grid-template-columns: minmax(0, 1fr); gap: 9px; }
+      .direction { display: none; }
+      .toolbar { flex-wrap: wrap; gap: 7px 12px; }
+      .search-wrap { flex-basis: 100%; }
+      .switch-label { margin-left: 2px; }
+      .thread-row { grid-template-columns: 19px minmax(0, 1fr); gap: 9px; padding: 12px 11px; }
+      .thread-side { grid-column: 2; grid-row: 2; flex-direction: row; align-items: center; justify-content: space-between; width: 100%; padding-top: 0; }
+      .thread-time { text-align: left; }
+      .thread-title-line { flex-wrap: wrap; gap: 3px 7px; }
+      .operation { align-items: flex-start; flex-wrap: wrap; gap: 9px; }
+      .operation-main { flex-basis: calc(100% - 20px); }
+      .operation-actions { width: 100%; justify-content: flex-end; }
+      .actionbar { flex-wrap: wrap; gap: 9px; }
+      .action-status { flex-basis: 100%; }
+      .actionbar .button.primary { width: 100%; }
+      .demo-controls select { min-width: 0; flex: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .thread-row { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype-shell">
+    <section class="prototype-window" id="prototype-window" aria-label="复制会话应用窗口演示">
+      <header class="titlebar">
+        <div class="titlebar-left">
+          <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+          <a class="back-link" id="back-link" href="../功能对比说明.html#features" title="返回功能对比说明"><span class="arrow" aria-hidden="true">‹</span><span id="back-link-label">功能说明</span></a>
+        </div>
+        <strong class="window-title" id="window-title">复制会话</strong>
+        <button class="language-button" id="language-button" type="button" aria-label="Switch to English">EN</button>
+      </header>
+      <div id="app" class="window-body"></div>
+    </section>
+    <section class="demo-controls" aria-label="演示情形测试控件">
+      <label for="scenario-select"><strong id="demo-label">演示情形</strong><select id="scenario-select" data-focus="scenario-select"></select></label>
+      <button id="scenario-action" class="button small" type="button" hidden></button>
+      <p id="demo-note">产品框外控件 · 仅重置或修改虚构内存，不是产品界面。</p>
+    </section>
+    <p class="outside-note" id="outside-note">离线单文件 · 无网络、真实文件、Keychain 或浏览器存储访问</p>
+  </main>
+  <div id="modal-root"></div>
+
+  <script id="fixture-data" type="application/json">
+{
+  "schema": "session-transfer-interaction/v1",
+  "notice": "All records and continuation proof are fictional UI fixtures, not an official Claude index schema. No backend/filesystem access.",
+  "defaultSource": "business",
+  "defaultTarget": "personal",
+  "updateExistingDefault": false,
+  "endpoints": [
+    {
+      "id": "personal",
+      "name": "Personal",
+      "mode": "subscription",
+      "label": "订阅档案",
+      "spaces": [
+        {
+          "id": "personal-main",
+          "name": "个人空间"
+        }
+      ]
+    },
+    {
+      "id": "business",
+      "name": "Business",
+      "mode": "subscription",
+      "label": "订阅档案",
+      "spaces": [
+        {
+          "id": "business-main",
+          "name": "团队空间"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "name": "API 工作区",
+      "mode": "api",
+      "label": "配置匹配 Magpie",
+      "spaces": [
+        {
+          "id": "api-main",
+          "name": "默认工作区"
+        },
+        {
+          "id": "api-other",
+          "name": "另一个工作区"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "id": "new-one",
+      "title": "接口重构",
+      "project": "atlas",
+      "kind": "new",
+      "sourceTurns": 18,
+      "targetTurns": null,
+      "reason": "目标没有这条索引，原文可用。"
+    },
+    {
+      "id": "same-update",
+      "title": "测试覆盖整理",
+      "project": "atlas",
+      "kind": "same-session-update",
+      "sourceTurns": 28,
+      "targetTurns": 12,
+      "reason": "指向同一份原文，仅列表进度较旧。"
+    },
+    {
+      "id": "continued",
+      "title": "长任务续接",
+      "project": "worker",
+      "kind": "continuation",
+      "sourceTurns": 2,
+      "targetTurns": 120,
+      "reason": "合成证据已确认接续点，目标未在接续点之后继续；新段轮数少不代表落后。",
+      "fixtureProof": {
+        "kind": "join-point-evidence-for-ui-only",
+        "targetHasNoProgressAfterJoin": true
+      }
+    },
+    {
+      "id": "target-ahead",
+      "title": "发布脚本",
+      "project": "deploy",
+      "kind": "target-ahead",
+      "sourceTurns": 5,
+      "targetTurns": 13,
+      "reason": "目标已更新，保留目标。"
+    },
+    {
+      "id": "fork",
+      "title": "分支实验",
+      "project": "lab",
+      "kind": "conflict",
+      "sourceTurns": 40,
+      "targetTurns": 15,
+      "reason": "同名但没有可确认的续接关系，不覆盖。"
+    },
+    {
+      "id": "missing",
+      "title": "旧项目记录",
+      "project": "archive",
+      "kind": "missing-transcript",
+      "sourceTurns": 16,
+      "targetTurns": null,
+      "reason": "找不到引用的原文，不能仅复制空索引。"
+    }
+  ],
+  "scenarios": [
+    "normal",
+    "target-uninitialized",
+    "multi-space",
+    "desktop-running",
+    "stale-plan",
+    "backup-failed",
+    "write-failed-rollback-ok",
+    "write-failed-rollback-incomplete",
+    "undo-conflict",
+    "continuation-without-join-proof",
+    "interrupted-operation"
+  ]
+}
+  </script>
+
+  <script>
+    "use strict";
+
+    const fixture = JSON.parse(document.getElementById("fixture-data").textContent);
+    const app = document.getElementById("app");
+    const scenarioSelect = document.getElementById("scenario-select");
+    const scenarioAction = document.getElementById("scenario-action");
+    const modalRoot = document.getElementById("modal-root");
+    const languageButton = document.getElementById("language-button");
+    const presentation = {
+      "new-one": { cwd: "/demo/projects/atlas", minutesAgo: 0 },
+      "same-update": { cwd: "/demo/projects/atlas", minutesAgo: 5 },
+      "continued": { cwd: "/demo/services/worker", minutesAgo: 18 },
+      "target-ahead": { cwd: "/demo/projects/deploy", minutesAgo: 64 },
+      "fork": { cwd: "/demo/projects/lab", minutesAgo: 190 },
+      "missing": { cwd: "/demo/archive/old-project", minutesAgo: 2880 }
+    };
+    const messages = {
+      zh: {
+        windowTitle: "复制会话",
+        windowAria: "复制会话应用窗口演示",
+        back: "功能说明",
+        backTitle: "返回功能对比说明",
+        language: "EN",
+        languageAria: "Switch to English",
+        source: "从",
+        target: "复制到",
+        sourceSpace: "来源空间",
+        targetSpace: "目标空间",
+        chooseSourceSpace: "选择来源空间",
+        chooseTargetSpace: "选择目标空间",
+        search: "搜索会话、项目或路径",
+        searchAria: "搜索会话、项目或路径",
+        updateExisting: "更新已有会话",
+        updateExistingTitle: "默认只新增；开启后才可选择可安全更新的已有会话",
+        selectAll: "全选当前结果",
+        selectNone: "取消全选",
+        refresh: "重新检查",
+        counts: "已选 {picked} · 显示 {shown}",
+        empty: "没有匹配的会话",
+        noSelection: "未选择会话",
+        selectedOne: "已选：{title}",
+        selectedMany: "已选：{title} 等 {count} 项",
+        recoveryPending: "请先处理未完成记录",
+        copy: "复制 {count} 项到 {target}",
+        justNow: "刚刚",
+        minutesAgo: "{count} 分钟前",
+        hoursAgo: "{count} 小时前",
+        daysAgo: "{count} 天前",
+        existing: "已有",
+        canUpdate: "将更新",
+        added: "已新增",
+        synced: "已同步",
+        targetAhead: "目标领先",
+        branch: "分支冲突",
+        missing: "原文缺失",
+        needsReview: "需核对",
+        targetChangedReason: "目标已有不同内容，请重新核对",
+        targetAheadReason: "目标已有更新内容，保留目标",
+        branchReason: "与目标会话已分叉，不可覆盖",
+        missingReason: "找不到会话原文，不可复制",
+        proofReason: "无法确认续接关系，不可更新",
+        sameSpaceError: "来源与目标相同，请选择其他目标。",
+        chooseSpaceError: "请选择来源与目标空间后继续。",
+        uninitializedError: "目标尚未初始化，请先在目标 Code 页完成初始化。",
+        targetRunningError: "请先自行退出目标 Claude，再点击“重新检查”。",
+        selectionChangedError: "目标状态已变化，本次未复制。已保留其他有效选择，请重新核对。",
+        refreshRemovedError: "{count} 个选择因目标变化已取消，请重新核对。",
+        copyCompleted: "复制完成，备份已保存",
+        copiedOne: "“{title}”已复制到 {target}",
+        copiedMany: "“{title}”等 {count} 项已复制到 {target}",
+        backupFailed: "备份失败，未开始复制",
+        backupFailedSummary: "目标未修改，你的选择仍保留。",
+        rolledBack: "写入失败，已恢复复制前状态",
+        rolledBackSummary: "本次未留下更改，可重新复制。",
+        undoConflict: "无法撤销本次复制",
+        undoConflictSummary: "“{title}”已有新进展；未恢复或覆盖任何内容。",
+        undone: "已撤销本次复制",
+        undoneSummary: "{count} 个会话已回到复制前状态，备份仍保留。",
+        recoveryRequired: "恢复尚未确认",
+        recoveryRequiredSummary: "新的复制已暂停，请处理这次未完成记录。",
+        recoveryBlocked: "恢复被新进展阻止",
+        recoveryBlockedSummary: "未覆盖目标新内容，请查看备份并选择处理方式。",
+        recovered: "已恢复复制前状态",
+        recoveredSummary: "未完成记录已处理，可以重新复制。",
+        closedUnrecovered: "已结束未完成记录",
+        closedUnrecoveredSummary: "未恢复或覆盖任何内容；当前数据与备份均已保留。",
+        showBackup: "查看备份",
+        undo: "撤销本次",
+        recover: "处理未完成",
+        confirmUpdateTitle: "复制并更新已有会话？",
+        confirmUpdateBody: "本次新增 {added} 项、更新 {updated} 项。以下为将被更新的具体会话，覆盖前会自动备份。",
+        confirmCopy: "备份并复制",
+        cancel: "取消",
+        close: "关闭",
+        return: "返回",
+        confirmUndoTitle: "撤销本次复制？",
+        confirmUndoBody: "仅当这些会话没有后续变化时，才撤回新增并恢复覆盖前版本。",
+        confirmUndo: "确认撤销",
+        recoveryTitle: "处理未完成记录",
+        recoveryBody: "按本次备份恢复到复制前，不会重新执行复制。",
+        recoveryConflictBody: "检测到“{title}”已有新进展，因此没有执行恢复。可以返回查看备份，或明确保留现状并结束记录。",
+        confirmRecovery: "确认恢复",
+        keepCurrent: "保留现状并结束记录",
+        closeIncompleteTitle: "保留现状并结束？",
+        closeIncompleteBody: "这不会恢复会话，也不会覆盖目标的新进展。当前全部数据与本次备份都会保留，只结束这条未完成记录。",
+        confirmCloseIncomplete: "保留现状并结束",
+        backupTitle: "本次备份",
+        backupFailedTitle: "备份不可用",
+        backupFailedBody: "备份未完整生成，因此复制没有开始，目标未修改。",
+        backupNew: "新增 · 复制前不存在",
+        backupUpdate: "更新 · 已保留覆盖前版本",
+        demoScenario: "演示情形",
+        demoNote: "产品框外控件 · 仅重置或修改虚构内存，不是产品界面。",
+        outsideNote: "离线单文件 · 无网络、真实文件、Keychain 或浏览器存储访问",
+        simulateQuit: "模拟用户已自行退出 Claude",
+        simulateProgress: "模拟目标出现外部新进展",
+        progressInjected: "已模拟外部新进展",
+        scenario_normal: "正常",
+        "scenario_target-uninitialized": "目标未初始化",
+        "scenario_multi-space": "多空间",
+        "scenario_desktop-running": "目标桌面运行中",
+        "scenario_stale-plan": "复制前目标变化",
+        "scenario_backup-failed": "备份失败",
+        "scenario_write-failed-rollback-ok": "写失败 · 恢复完成",
+        "scenario_write-failed-rollback-incomplete": "写失败 · 恢复未确认",
+        "scenario_undo-conflict": "撤销冲突",
+        "scenario_continuation-without-join-proof": "续接无接续证明",
+        "scenario_interrupted-operation": "中断收据 · 上次未完成"
+      },
+      en: {
+        windowTitle: "Copy sessions",
+        windowAria: "Copy sessions window demo",
+        back: "Overview",
+        backTitle: "Back to feature overview",
+        language: "中文",
+        languageAria: "切换到中文",
+        source: "From",
+        target: "To",
+        sourceSpace: "Source space",
+        targetSpace: "Target space",
+        chooseSourceSpace: "Choose source space",
+        chooseTargetSpace: "Choose target space",
+        search: "Search sessions, projects, or paths",
+        searchAria: "Search sessions, projects, or paths",
+        updateExisting: "Update existing",
+        updateExistingTitle: "Add only by default; turn on to select verified updates",
+        selectAll: "Select visible",
+        selectNone: "Deselect visible",
+        refresh: "Check again",
+        counts: "{picked} selected · {shown} shown",
+        empty: "No matching sessions",
+        noSelection: "No sessions selected",
+        selectedOne: "Selected: {title}",
+        selectedMany: "Selected: {title} and {count} total",
+        recoveryPending: "Resolve the unfinished operation first",
+        copy: "Copy {count} to {target}",
+        justNow: "Now",
+        minutesAgo: "{count}m ago",
+        hoursAgo: "{count}h ago",
+        daysAgo: "{count}d ago",
+        existing: "Existing",
+        canUpdate: "Update",
+        added: "Added",
+        synced: "Synced",
+        targetAhead: "Target ahead",
+        branch: "Diverged",
+        missing: "No source",
+        needsReview: "Review",
+        targetChangedReason: "Different target content needs review",
+        targetAheadReason: "The target has newer content and will be kept",
+        branchReason: "This session has diverged and cannot overwrite the target",
+        missingReason: "The source transcript is unavailable",
+        proofReason: "The continuation cannot be verified",
+        sameSpaceError: "Source and target are the same. Choose another target.",
+        chooseSpaceError: "Choose a source and target space to continue.",
+        uninitializedError: "Initialize the target Code space before copying.",
+        targetRunningError: "Quit the target Claude yourself, then choose “Check again”.",
+        selectionChangedError: "The target changed. Nothing was copied; other valid selections are intact.",
+        refreshRemovedError: "{count} selections were cleared because the target changed.",
+        copyCompleted: "Copied; backup saved",
+        copiedOne: "“{title}” copied to {target}",
+        copiedMany: "“{title}” and {count} sessions copied to {target}",
+        backupFailed: "Backup failed; copy did not start",
+        backupFailedSummary: "The target is unchanged and your selections are intact.",
+        rolledBack: "Write failed; previous state restored",
+        rolledBackSummary: "No changes remain. You can copy again.",
+        undoConflict: "Could not undo this copy",
+        undoConflictSummary: "“{title}” has new progress. Nothing was restored or overwritten.",
+        undone: "Copy undone",
+        undoneSummary: "{count} sessions returned to their previous state; the backup is retained.",
+        recoveryRequired: "Recovery not confirmed",
+        recoveryRequiredSummary: "New copies are paused until this unfinished record is resolved.",
+        recoveryBlocked: "New progress blocked recovery",
+        recoveryBlockedSummary: "No new target content was overwritten. Review the backup and choose how to proceed.",
+        recovered: "Previous state restored",
+        recoveredSummary: "The unfinished record is resolved. You can copy again.",
+        closedUnrecovered: "Unfinished record closed",
+        closedUnrecoveredSummary: "Nothing was restored or overwritten. Current data and the backup were kept.",
+        showBackup: "View backup",
+        undo: "Undo copy",
+        recover: "Resolve",
+        confirmUpdateTitle: "Copy and update existing sessions?",
+        confirmUpdateBody: "Add {added} and update {updated}. These existing sessions will be updated; their previous versions are backed up first.",
+        confirmCopy: "Back up and copy",
+        cancel: "Cancel",
+        close: "Close",
+        return: "Back",
+        confirmUndoTitle: "Undo this copy?",
+        confirmUndoBody: "New items and overwritten versions are restored only if none of these sessions have changed since.",
+        confirmUndo: "Undo copy",
+        recoveryTitle: "Resolve unfinished record",
+        recoveryBody: "Restore the previous state from this backup without retrying the copy.",
+        recoveryConflictBody: "“{title}” has new progress, so nothing was restored. Go back to review the backup, or explicitly keep the current state and close the record.",
+        confirmRecovery: "Confirm recovery",
+        keepCurrent: "Keep current state and close record",
+        closeIncompleteTitle: "Keep current state and close?",
+        closeIncompleteBody: "This does not restore sessions or overwrite new target progress. All current data and this backup are kept; only the unfinished record is closed.",
+        confirmCloseIncomplete: "Keep state and close",
+        backupTitle: "Backup for this operation",
+        backupFailedTitle: "Backup unavailable",
+        backupFailedBody: "The backup was incomplete, so the copy did not start and the target was not changed.",
+        backupNew: "New · absent before copy",
+        backupUpdate: "Update · previous version retained",
+        demoScenario: "Demo scenario",
+        demoNote: "Outside the product UI · resets or changes fictional memory only.",
+        outsideNote: "Offline single file · no network, real files, Keychain, or browser storage",
+        simulateQuit: "Simulate user quitting Claude",
+        simulateProgress: "Simulate external target progress",
+        progressInjected: "External progress simulated",
+        scenario_normal: "Normal",
+        "scenario_target-uninitialized": "Target uninitialized",
+        "scenario_multi-space": "Multiple spaces",
+        "scenario_desktop-running": "Target desktop running",
+        "scenario_stale-plan": "Target changes before copy",
+        "scenario_backup-failed": "Backup fails",
+        "scenario_write-failed-rollback-ok": "Write fails · restored",
+        "scenario_write-failed-rollback-incomplete": "Write fails · recovery unconfirmed",
+        "scenario_undo-conflict": "Undo conflict",
+        "scenario_continuation-without-join-proof": "Continuation without proof",
+        "scenario_interrupted-operation": "Interrupted previous operation"
+      }
+    };
+    let state;
+    let memory;
+    let operationSequence = 0;
+    let modalReturnFocus = null;
+    let modalConfirm = null;
+    let modalOnCancel = null;
+
+    function clone(value) {
+      return JSON.parse(JSON.stringify(value));
+    }
+
+    function deepFreeze(value) {
+      if (value && typeof value === "object" && !Object.isFrozen(value)) {
+        Object.freeze(value);
+        Object.values(value).forEach(deepFreeze);
+      }
+      return value;
+    }
+
+    function esc(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function t(key, values = {}) {
+      const lang = state ? state.lang : "zh";
+      const template = (messages[lang] && messages[lang][key]) || messages.zh[key] || key;
+      return template.replace(/\{(\w+)\}/g, (match, name) => Object.hasOwn(values, name) ? String(values[name]) : match);
+    }
+
+    function endpoint(id) {
+      return fixture.endpoints.find(item => item.id === id);
+    }
+
+    function baselineIndex() {
+      const target = {};
+      fixture.rows.forEach(row => {
+        if (row.targetTurns !== null) {
+          target[row.id] = {
+            id: row.id,
+            title: row.title,
+            project: row.project,
+            turns: row.targetTurns,
+            cliSegment: row.kind === "continuation" ? "fixture-old-segment" : "fixture-same-segment",
+            demoRevision: "baseline"
+          };
+        }
+      });
+      return target;
+    }
+
+    function createMemory() {
+      const targets = {};
+      fixture.endpoints.forEach(item => {
+        item.spaces.forEach(namespace => {
+          targets[namespace.id] = baselineIndex();
+        });
+      });
+      const transcripts = {};
+      fixture.rows.forEach(row => {
+        transcripts[row.id] = row.kind === "missing-transcript" ? null : `fixture-transcript:${row.id}`;
+      });
+      return { source: deepFreeze(clone(fixture.rows)), transcripts: deepFreeze(transcripts), targets };
+    }
+
+    function resetDemo(scenario) {
+      const lang = state ? state.lang : "zh";
+      const sourceId = fixture.defaultSource;
+      const targetId = scenario === "multi-space" ? "api" : fixture.defaultTarget;
+      const sourceEndpoint = endpoint(sourceId);
+      const targetEndpoint = endpoint(targetId);
+      operationSequence = 0;
+      memory = createMemory();
+      state = {
+        lang,
+        scenario,
+        sourceId,
+        targetId,
+        sourceSpaceId: sourceEndpoint.spaces.length === 1 ? sourceEndpoint.spaces[0].id : "",
+        targetSpaceId: scenario === "multi-space" ? "" : (targetEndpoint.spaces.length === 1 ? targetEndpoint.spaces[0].id : ""),
+        picked: new Set(),
+        query: "",
+        updateExisting: fixture.updateExistingDefault,
+        targetRunning: scenario === "desktop-running",
+        staleApplied: false,
+        lastOperation: null,
+        error: null,
+        externalProgressInjected: false
+      };
+      if (scenario === "interrupted-operation") seedInterruptedOperation();
+      closeModal(false);
+      renderScenarioOptions();
+      renderChrome();
+      updateScenarioControls();
+      render();
+    }
+
+    function targetIndex(key = state.targetSpaceId) {
+      if (!key) return {};
+      if (!memory.targets[key]) memory.targets[key] = {};
+      return memory.targets[key];
+    }
+
+    function targetInitialized() {
+      return !(state.scenario === "target-uninitialized" && state.targetSpaceId === "personal-main");
+    }
+
+    function sameSpace() {
+      return Boolean(state.sourceSpaceId && state.targetSpaceId &&
+        state.sourceId === state.targetId && state.sourceSpaceId === state.targetSpaceId);
+    }
+
+    function needsRecovery() {
+      return Boolean(state.lastOperation && state.lastOperation.needsRecovery);
+    }
+
+    function selectionReady() {
+      return Boolean(state.sourceSpaceId && state.targetSpaceId && !sameSpace() && targetInitialized() && !needsRecovery());
+    }
+
+    function classify(row) {
+      const current = targetIndex()[row.id];
+      if (row.id === "new-one" && current?.cliSegment === "fixture-unrelated-target") {
+        return { action: null, labelKey: "needsReview", tone: "blocked", reasonKey: "targetChangedReason" };
+      }
+      if (row.kind === "new") {
+        if (current) {
+          if (current.cliSegment === "fixture-source-segment") return { action: null, labelKey: "added", tone: "muted", reasonKey: "" };
+          return { action: null, labelKey: "needsReview", tone: "blocked", reasonKey: "targetChangedReason" };
+        }
+        return { action: "new", labelKey: "", tone: "new", reasonKey: "" };
+      }
+      if (row.kind === "same-session-update") {
+        if (!current || current.cliSegment !== "fixture-same-segment") {
+          return { action: null, labelKey: "needsReview", tone: "blocked", reasonKey: "targetChangedReason" };
+        }
+        if (current.turns === row.sourceTurns) return { action: null, labelKey: "synced", tone: "muted", reasonKey: "" };
+        if (current.turns > row.sourceTurns) return { action: null, labelKey: "targetAhead", tone: "blocked", reasonKey: "targetAheadReason" };
+        if (!state.updateExisting) return { action: null, labelKey: "existing", tone: "muted", reasonKey: "" };
+        return { action: "update", labelKey: "canUpdate", tone: "update", reasonKey: "" };
+      }
+      if (row.kind === "continuation") {
+        if (state.scenario === "continuation-without-join-proof") {
+          return { action: null, labelKey: "needsReview", tone: "blocked", reasonKey: "proofReason" };
+        }
+        if (current && current.cliSegment === "fixture-new-segment") {
+          if (current.turns === row.sourceTurns) return { action: null, labelKey: "synced", tone: "muted", reasonKey: "" };
+          if (current.turns > row.sourceTurns) return { action: null, labelKey: "targetAhead", tone: "blocked", reasonKey: "targetAheadReason" };
+          return { action: null, labelKey: "needsReview", tone: "blocked", reasonKey: "targetChangedReason" };
+        }
+        if (!current) return { action: null, labelKey: "needsReview", tone: "blocked", reasonKey: "targetChangedReason" };
+        if (!state.updateExisting) return { action: null, labelKey: "existing", tone: "muted", reasonKey: "" };
+        return { action: "update", labelKey: "canUpdate", tone: "update", reasonKey: "" };
+      }
+      if (row.kind === "target-ahead") return { action: null, labelKey: "targetAhead", tone: "blocked", reasonKey: "targetAheadReason" };
+      if (row.kind === "conflict") return { action: null, labelKey: "branch", tone: "blocked", reasonKey: "branchReason" };
+      return { action: null, labelKey: "missing", tone: "blocked", reasonKey: "missingReason" };
+    }
+
+    function visibleRows() {
+      const query = state.query.trim().toLocaleLowerCase();
+      return memory.source.filter(row => {
+        const detail = presentation[row.id];
+        return !query || `${row.title} ${row.project} ${detail.cwd}`.toLocaleLowerCase().includes(query);
+      });
+    }
+
+    function formatAge(minutes) {
+      if (minutes < 1) return t("justNow");
+      if (minutes < 60) return t("minutesAgo", { count: minutes });
+      if (minutes < 1440) return t("hoursAgo", { count: Math.floor(minutes / 60) });
+      return t("daysAgo", { count: Math.floor(minutes / 1440) });
+    }
+
+    function renderEndpoint(side) {
+      const idKey = side === "source" ? "sourceId" : "targetId";
+      const spaceKey = side === "source" ? "sourceSpaceId" : "targetSpaceId";
+      const selectedEndpoint = endpoint(state[idKey]);
+      const options = fixture.endpoints.map(item =>
+        `<option value="${esc(item.id)}" ${item.id === state[idKey] ? "selected" : ""}>${esc(item.name)} · ${esc(item.label)}</option>`
+      ).join("");
+      let namespace = "";
+      if (selectedEndpoint.spaces.length > 1) {
+        const spaceOptions = [`<option value="">${esc(t(side === "source" ? "chooseSourceSpace" : "chooseTargetSpace"))}</option>`].concat(selectedEndpoint.spaces.map(item =>
+          `<option value="${esc(item.id)}" ${item.id === state[spaceKey] ? "selected" : ""}>${esc(item.name)}</option>`
+        )).join("");
+        namespace = `<div class="space-field"><label class="field-label" for="${side}-space">${esc(t(side === "source" ? "sourceSpace" : "targetSpace"))}</label><select id="${side}-space" data-role="${side}-space" data-focus="${side}-space">${spaceOptions}</select></div>`;
+      }
+      return `<div class="endpoint"><label class="field-label" for="${side}-endpoint">${esc(t(side))}</label><select id="${side}-endpoint" data-role="${side}-endpoint" data-focus="${side}-endpoint">${options}</select>${namespace}</div>`;
+    }
+
+    function renderRow(row) {
+      const classification = classify(row);
+      const checked = state.picked.has(row.id);
+      const enabled = Boolean(classification.action && selectionReady());
+      const detail = presentation[row.id];
+      const rowClasses = `${enabled ? "selectable" : "unavailable"}${checked ? " selected" : ""}`;
+      return `<div class="thread-row ${rowClasses}" data-row="${esc(row.id)}">
+        <input class="thread-check" type="checkbox" data-pick="${esc(row.id)}" data-focus="pick-${esc(row.id)}" aria-label="${esc(row.title)} · ${esc(row.project)} · ${esc(detail.cwd)}" ${checked ? "checked" : ""} ${enabled ? "" : "disabled"}>
+        <div class="thread-main">
+          <div class="thread-title-line"><span class="thread-title">${esc(row.title)}</span><span class="thread-project">${esc(row.project)}</span></div>
+          <div class="thread-path">${esc(detail.cwd)}</div>
+          ${classification.reasonKey ? `<div class="thread-reason">${esc(t(classification.reasonKey))}</div>` : ""}
+        </div>
+        <div class="thread-side"><time class="thread-time">${esc(formatAge(detail.minutesAgo))}</time>${classification.labelKey ? `<span class="row-state ${esc(classification.tone)}">${esc(t(classification.labelKey))}</span>` : ""}</div>
+      </div>`;
+    }
+
+    function operationNames(receipt) {
+      return receipt.changes.map(change => change.title);
+    }
+
+    function operationView(operation) {
+      const receipt = operation.receipt;
+      const names = operationNames(receipt);
+      const first = names[0] || "";
+      const count = names.length;
+      const target = endpoint(receipt.targetId).name;
+      switch (operation.type) {
+        case "copy-completed":
+          return { tone: "good", title: t("copyCompleted"), summary: t(count === 1 ? "copiedOne" : "copiedMany", { title: first, count, target }) };
+        case "backup-failed":
+          return { tone: "bad", title: t("backupFailed"), summary: t("backupFailedSummary") };
+        case "rolled-back":
+          return { tone: "warn", title: t("rolledBack"), summary: t("rolledBackSummary") };
+        case "undo-conflict":
+          return { tone: "bad", title: t("undoConflict"), summary: t("undoConflictSummary", { title: operation.conflictTitle || first }) };
+        case "undone":
+          return { tone: "good", title: t("undone"), summary: t("undoneSummary", { count }) };
+        case "recovered":
+          return { tone: "good", title: t("recovered"), summary: t("recoveredSummary") };
+        case "closed-unrecovered":
+          return { tone: "warn", title: t("closedUnrecovered"), summary: t("closedUnrecoveredSummary") };
+        default:
+          if (operation.recoveryConflict && operation.recoveryConflict.length) {
+            return { tone: "bad", title: t("recoveryBlocked"), summary: t("recoveryBlockedSummary") };
+          }
+          return { tone: "bad", title: t("recoveryRequired"), summary: t("recoveryRequiredSummary") };
+      }
+    }
+
+    function renderOperation() {
+      const operation = state.lastOperation;
+      if (!operation) return "";
+      const view = operationView(operation);
+      return `<section class="operation ${esc(view.tone)}" aria-label="${esc(view.title)}" role="status">
+        <div class="operation-main"><strong>${esc(view.title)}</strong><p>${esc(view.summary)}</p></div>
+        <div class="operation-actions">
+          <button class="button small quiet" type="button" data-action="show-backup" data-focus="show-backup">${esc(t("showBackup"))}</button>
+          ${operation.canUndo ? `<button class="button small" type="button" data-action="undo" data-focus="undo">${esc(t("undo"))}</button>` : ""}
+          ${operation.needsRecovery ? `<button class="button small" type="button" data-action="recover" data-focus="recover">${esc(t("recover"))}</button>` : ""}
+        </div>
+      </section>`;
+    }
+
+    function renderNotice() {
+      if (state.error) return `<div class="notice ${state.error.tone || "bad"}" role="alert">${esc(t(state.error.key, state.error.values))}</div>`;
+      if (sameSpace()) return `<div class="notice" role="alert">${esc(t("sameSpaceError"))}</div>`;
+      if (!state.sourceSpaceId || !state.targetSpaceId) return `<div class="notice" role="alert">${esc(t("chooseSpaceError"))}</div>`;
+      if (!targetInitialized()) return `<div class="notice" role="alert">${esc(t("uninitializedError"))}</div>`;
+      return "";
+    }
+
+    function selectionSummary() {
+      if (!state.picked.size) return { text: t("noSelection"), selected: false };
+      const selectedRows = memory.source.filter(row => state.picked.has(row.id));
+      const first = selectedRows[0] ? selectedRows[0].title : "";
+      return {
+        text: state.picked.size === 1 ? t("selectedOne", { title: first }) : t("selectedMany", { title: first, count: state.picked.size }),
+        selected: true
+      };
+    }
+
+    function render(focusKey) {
+      const active = document.activeElement;
+      const previousFocus = focusKey || (active && active.dataset ? active.dataset.focus : "");
+      const searchPosition = active && active.dataset && active.dataset.focus === "search" ? active.selectionStart : null;
+      const rows = visibleRows();
+      const actionable = rows.filter(row => classify(row).action && selectionReady());
+      const allPicked = actionable.length > 0 && actionable.every(row => state.picked.has(row.id));
+      const canCopy = selectionReady() && memory.source.some(row => state.picked.has(row.id) && classify(row).action);
+      const listContent = rows.length ? rows.map(renderRow).join("") : `<div class="empty-state">${esc(t("empty"))}</div>`;
+      const summary = selectionSummary();
+      updateScenarioControls();
+      app.innerHTML = `<div class="endpoint-grid">${renderEndpoint("source")}<div class="direction" aria-hidden="true">→</div>${renderEndpoint("target")}</div>
+        ${renderNotice()}
+        <div class="toolbar">
+          <div class="search-wrap"><span class="search-icon" aria-hidden="true">⌕</span><label class="sr-only" for="thread-search">${esc(t("searchAria"))}</label><input id="thread-search" class="search-input" type="search" placeholder="${esc(t("search"))}" value="${esc(state.query)}" data-role="search" data-focus="search" autocomplete="off"></div>
+          <label class="switch-label" title="${esc(t("updateExistingTitle"))}"><input type="checkbox" data-role="update-existing" data-focus="update-existing" ${state.updateExisting ? "checked" : ""}><span>${esc(t("updateExisting"))}</span></label>
+        </div>
+        <div class="list-meta">
+          <button class="link-button" type="button" data-action="select-all" data-focus="select-all" ${actionable.length ? "" : "disabled"}>${esc(t(allPicked ? "selectNone" : "selectAll"))}</button>
+          <button class="link-button refresh-button" type="button" data-action="refresh" data-focus="refresh" title="${esc(t("refresh"))}" aria-label="${esc(t("refresh"))}">↻</button>
+          <span class="counts">${esc(t("counts", { picked: state.picked.size, shown: rows.length }))}</span>
+        </div>
+        <div class="thread-list" aria-label="${esc(t("windowTitle"))}">${listContent}</div>
+        ${renderOperation()}
+        <div class="actionbar"><span class="action-status ${summary.selected ? "has-selection" : ""}" title="${esc(summary.text)}">${esc(summary.text)}</span><button class="button primary" type="button" data-action="copy" data-focus="copy" ${canCopy ? "" : "disabled"}>${esc(t("copy", { count: state.picked.size, target: endpoint(state.targetId).name }))}</button></div>`;
+      if (previousFocus) {
+        const candidates = document.querySelectorAll("[data-focus]");
+        const next = Array.from(candidates).find(item => item.dataset.focus === previousFocus);
+        if (next) {
+          next.focus({ preventScroll: true });
+          if (previousFocus === "search" && searchPosition !== null && next.setSelectionRange) next.setSelectionRange(searchPosition, searchPosition);
+        }
+      }
+    }
+
+    function renderChrome() {
+      document.documentElement.lang = state.lang === "zh" ? "zh-CN" : "en";
+      document.getElementById("window-title").textContent = t("windowTitle");
+      document.getElementById("prototype-window").setAttribute("aria-label", t("windowAria"));
+      document.getElementById("back-link-label").textContent = t("back");
+      document.getElementById("back-link").title = t("backTitle");
+      document.getElementById("back-link").setAttribute("aria-label", t("backTitle"));
+      languageButton.textContent = t("language");
+      languageButton.setAttribute("aria-label", t("languageAria"));
+      document.getElementById("demo-label").textContent = t("demoScenario");
+      document.getElementById("demo-note").textContent = t("demoNote");
+      document.getElementById("outside-note").textContent = t("outsideNote");
+    }
+
+    function renderScenarioOptions() {
+      scenarioSelect.innerHTML = fixture.scenarios.map(scenario => `<option value="${esc(scenario)}">${esc(t(`scenario_${scenario}`))}</option>`).join("");
+      scenarioSelect.value = state.scenario;
+    }
+
+    function clearBinding() {
+      state.picked.clear();
+      state.error = null;
+    }
+
+    function refresh() {
+      let removed = 0;
+      memory.source.forEach(row => {
+        if (state.picked.has(row.id) && !classify(row).action) {
+          state.picked.delete(row.id);
+          removed += 1;
+        }
+      });
+      state.error = state.targetRunning ? { key: "targetRunningError" } : (removed ? { key: "refreshRemovedError", values: { count: removed }, tone: "warn" } : null);
+      render("refresh");
+    }
+
+    function selectedChanges() {
+      const invalid = [];
+      memory.source.forEach(row => {
+        if (state.picked.has(row.id) && !classify(row).action) invalid.push(row);
+      });
+      if (invalid.length) {
+        invalid.forEach(row => state.picked.delete(row.id));
+        state.error = { key: "selectionChangedError" };
+        render("copy");
+        return null;
+      }
+      const id = `DEMO-${String(operationSequence + 1).padStart(3, "0")}`;
+      const target = targetIndex();
+      return memory.source.filter(row => state.picked.has(row.id)).map(row => {
+        const classification = classify(row);
+        const before = target[row.id] ? clone(target[row.id]) : null;
+        let after;
+        if (classification.action === "new") {
+          after = { id: row.id, title: row.title, project: row.project, turns: row.sourceTurns, cliSegment: "fixture-source-segment", demoRevision: id };
+        } else {
+          after = Object.assign({}, before, { turns: row.sourceTurns, demoRevision: id });
+          if (row.kind === "continuation") after.cliSegment = "fixture-new-segment";
+        }
+        return { rowId: row.id, title: row.title, project: row.project, action: classification.action, before, after };
+      });
+    }
+
+    function modalSessionList(changes, backup = false) {
+      return `<ul class="modal-sessions">${changes.map(change => {
+        const detail = presentation[change.rowId];
+        return `<li><div class="modal-session-top"><span class="modal-session-title">${esc(change.title)}</span><span class="modal-session-project">${esc(change.project)}</span></div><div class="modal-session-path">${esc(detail.cwd)}</div>${backup ? `<span class="modal-session-action">${esc(t(change.action === "new" ? "backupNew" : "backupUpdate"))}</span>` : ""}</li>`;
+      }).join("")}</ul>`;
+    }
+
+    function requestCopy() {
+      if (!selectionReady() || !state.picked.size) return;
+      state.error = null;
+      if (state.targetRunning) {
+        state.error = { key: "targetRunningError" };
+        render("copy");
+        return;
+      }
+      if (state.scenario === "stale-plan" && !state.staleApplied && state.picked.has("new-one")) {
+        state.staleApplied = true;
+        targetIndex()["new-one"] = { id: "new-one", title: "接口重构", project: "atlas", turns: 1, cliSegment: "fixture-unrelated-target", demoRevision: "external-change-before-copy" };
+        state.picked.delete("new-one");
+        state.error = { key: "selectionChangedError" };
+        render("copy");
+        return;
+      }
+      const changes = selectedChanges();
+      if (!changes || !changes.length) return;
+      const updates = changes.filter(change => change.action === "update");
+      if (updates.length) {
+        const added = changes.length - updates.length;
+        openModal(t("confirmUpdateTitle"), `<p>${esc(t("confirmUpdateBody", { added, updated: updates.length }))}</p>${modalSessionList(updates)}`, {
+          confirmLabel: t("confirmCopy"),
+          onConfirm: executeCopy
+        });
+      } else {
+        executeCopy();
+      }
+    }
+
+    function buildReceipt(changes, status) {
+      return {
+        id: `DEMO-${String(++operationSequence).padStart(3, "0")}`,
+        status,
+        sourceId: state.sourceId,
+        targetId: state.targetId,
+        sourceSpaceId: state.sourceSpaceId,
+        targetSpaceId: state.targetSpaceId,
+        changes: clone(changes)
+      };
+    }
+
+    function applyChange(receipt, change) {
+      targetIndex(receipt.targetSpaceId)[change.rowId] = clone(change.after);
+    }
+
+    function restoreAll(receipt) {
+      const target = targetIndex(receipt.targetSpaceId);
+      receipt.changes.forEach(change => {
+        if (change.action === "new") delete target[change.rowId];
+        else target[change.rowId] = clone(change.before);
+      });
+    }
+
+    function capturePending(receipt) {
+      const pending = {};
+      const target = targetIndex(receipt.targetSpaceId);
+      receipt.changes.forEach(change => {
+        pending[change.rowId] = target[change.rowId] ? clone(target[change.rowId]) : null;
+      });
+      return pending;
+    }
+
+    function recoveryConflicts(operation) {
+      if (!operation || !operation.needsRecovery || !operation.pending) return [];
+      const target = targetIndex(operation.receipt.targetSpaceId);
+      return operation.receipt.changes.filter(change =>
+        JSON.stringify(target[change.rowId] || null) !== JSON.stringify(operation.pending[change.rowId])
+      );
+    }
+
+    function executeCopy() {
+      const changes = selectedChanges();
+      if (!changes || !changes.length || state.targetRunning || needsRecovery()) return;
+      let receipt;
+      let operation;
+      if (state.scenario === "backup-failed") {
+        receipt = buildReceipt(changes, "backup-failed");
+        operation = { receipt, type: "backup-failed", canUndo: false, needsRecovery: false };
+      } else if (state.scenario === "write-failed-rollback-ok") {
+        receipt = buildReceipt(changes, "rolled-back");
+        changes.forEach(change => applyChange(receipt, change));
+        restoreAll(receipt);
+        operation = { receipt, type: "rolled-back", canUndo: false, needsRecovery: false };
+      } else if (state.scenario === "write-failed-rollback-incomplete") {
+        receipt = buildReceipt(changes, "recovery-incomplete");
+        applyChange(receipt, changes[0]);
+        operation = { receipt, type: "recovery-required", canUndo: false, needsRecovery: true, recoveryConflict: [] };
+        operation.pending = capturePending(receipt);
+      } else {
+        receipt = buildReceipt(changes, "completed");
+        changes.forEach(change => applyChange(receipt, change));
+        operation = { receipt, type: "copy-completed", canUndo: true, needsRecovery: false };
+        state.picked.clear();
+      }
+      state.lastOperation = operation;
+      state.error = null;
+      render("copy");
+    }
+
+    function requestUndo() {
+      const operation = state.lastOperation;
+      if (!operation || !operation.canUndo) return;
+      openModal(t("confirmUndoTitle"), `<p>${esc(t("confirmUndoBody"))}</p>${modalSessionList(operation.receipt.changes)}`, {
+        confirmLabel: t("confirmUndo"),
+        onConfirm: confirmUndo
+      });
+    }
+
+    function confirmUndo() {
+      const operation = state.lastOperation;
+      if (!operation || !operation.canUndo) return;
+      const receipt = operation.receipt;
+      if (state.scenario === "undo-conflict" && !receipt.undoConflictInjected) {
+        const first = receipt.changes[0];
+        const current = targetIndex(receipt.targetSpaceId)[first.rowId];
+        if (current) current.turns += 1;
+        receipt.undoConflictInjected = true;
+      }
+      const target = targetIndex(receipt.targetSpaceId);
+      const conflicts = receipt.changes.filter(change => JSON.stringify(target[change.rowId] || null) !== JSON.stringify(change.after));
+      if (conflicts.length) {
+        receipt.status = "undo-conflict";
+        state.lastOperation = { receipt, type: "undo-conflict", conflictTitle: conflicts[0].title, canUndo: false, needsRecovery: false };
+      } else {
+        restoreAll(receipt);
+        receipt.status = "undone";
+        state.lastOperation = { receipt, type: "undone", canUndo: false, needsRecovery: false };
+      }
+      render("show-backup");
+    }
+
+    function requestRecovery() {
+      const operation = state.lastOperation;
+      if (!operation || !operation.needsRecovery) return;
+      operation.recoveryConflict = recoveryConflicts(operation);
+      render("recover");
+      openRecoveryModal();
+    }
+
+    function openRecoveryModal(replace = false) {
+      const operation = state.lastOperation;
+      if (!operation || !operation.needsRecovery) return;
+      const conflicts = operation.recoveryConflict || [];
+      const conflictBody = conflicts.length ? `<div class="modal-warning">${esc(t("recoveryConflictBody", { title: conflicts[0].title }))}</div>` : "";
+      openModal(t("recoveryTitle"), `${conflictBody}<p>${esc(t("recoveryBody"))}</p>${modalSessionList(operation.receipt.changes)}`, {
+        confirmLabel: conflicts.length ? "" : t("confirmRecovery"),
+        cancelLabel: conflicts.length ? t("return") : t("cancel"),
+        onConfirm: conflicts.length ? null : confirmRecovery,
+        exceptionLabel: t("keepCurrent"),
+        onException: requestCloseIncomplete,
+        replace
+      });
+    }
+
+    function confirmRecovery() {
+      const operation = state.lastOperation;
+      if (!operation || !operation.needsRecovery) return;
+      const conflicts = recoveryConflicts(operation);
+      if (conflicts.length) {
+        operation.recoveryConflict = conflicts;
+        render("recover");
+        openRecoveryModal();
+        return;
+      }
+      restoreAll(operation.receipt);
+      operation.receipt.status = "recovered";
+      state.lastOperation = { receipt: operation.receipt, type: "recovered", canUndo: false, needsRecovery: false };
+      state.error = null;
+      render("copy");
+    }
+
+    function requestCloseIncomplete() {
+      const operation = state.lastOperation;
+      if (!operation || !operation.needsRecovery) return;
+      openModal(t("closeIncompleteTitle"), `<p>${esc(t("closeIncompleteBody"))}</p>${modalSessionList(operation.receipt.changes)}`, {
+        confirmLabel: t("confirmCloseIncomplete"),
+        cancelLabel: t("return"),
+        confirmTone: "danger",
+        onConfirm: confirmCloseIncomplete,
+        onCancel: () => openRecoveryModal(true),
+        replace: true
+      });
+    }
+
+    function confirmCloseIncomplete() {
+      const operation = state.lastOperation;
+      if (!operation || !operation.needsRecovery) return;
+      operation.receipt.status = "closed-unrecovered";
+      state.lastOperation = { receipt: operation.receipt, type: "closed-unrecovered", canUndo: false, needsRecovery: false };
+      memory.source.forEach(row => {
+        if (state.picked.has(row.id) && !classify(row).action) state.picked.delete(row.id);
+      });
+      state.error = null;
+      render("show-backup");
+    }
+
+    function seedInterruptedOperation() {
+      const row = memory.source.find(item => item.id === "new-one");
+      const after = { id: row.id, title: row.title, project: row.project, turns: row.sourceTurns, cliSegment: "fixture-source-segment", demoRevision: "interrupted-demo" };
+      const receipt = {
+        id: "DEMO-INTERRUPTED",
+        status: "interrupted",
+        sourceId: state.sourceId,
+        targetId: state.targetId,
+        sourceSpaceId: state.sourceSpaceId,
+        targetSpaceId: state.targetSpaceId,
+        changes: [{ rowId: row.id, title: row.title, project: row.project, action: "new", before: null, after }]
+      };
+      targetIndex(receipt.targetSpaceId)[row.id] = clone(after);
+      state.lastOperation = { receipt, type: "recovery-required", canUndo: false, needsRecovery: true, recoveryConflict: [] };
+      state.lastOperation.pending = capturePending(receipt);
+    }
+
+    function openModal(title, body, options = {}) {
+      if (!options.replace) modalReturnFocus = document.activeElement;
+      modalConfirm = options.onConfirm || null;
+      modalOnCancel = options.onCancel || null;
+      const cancelLabel = options.cancelLabel || (modalConfirm ? t("cancel") : t("close"));
+      const confirmButton = modalConfirm ? `<button class="button ${options.confirmTone === "danger" ? "danger" : "primary"}" type="button" data-modal-confirm>${esc(options.confirmLabel || t("confirmCopy"))}</button>` : "";
+      const exception = options.onException ? `<div class="modal-exception"><button class="link-button" type="button" data-modal-exception>${esc(options.exceptionLabel)}</button></div>` : "";
+      modalRoot.innerHTML = `<div class="modal-overlay" data-modal-overlay><section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><h2 id="modal-title">${esc(title)}</h2><div class="modal-body">${body}</div><div class="modal-actions"><button class="button ${modalConfirm ? "quiet" : "primary"}" type="button" data-modal-close ${!modalConfirm ? "data-autofocus" : ""}>${esc(cancelLabel)}</button>${confirmButton}</div>${exception}</section></div>`;
+      const autofocus = modalRoot.querySelector("[data-autofocus]") || modalRoot.querySelector("button");
+      if (autofocus) autofocus.focus();
+    }
+
+    function closeModal(restore = true) {
+      if (!modalRoot.firstChild) return;
+      modalRoot.innerHTML = "";
+      modalConfirm = null;
+      modalOnCancel = null;
+      if (restore && modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus({ preventScroll: true });
+      modalReturnFocus = null;
+    }
+
+    function cancelModal() {
+      if (!modalRoot.firstChild) return;
+      const callback = modalOnCancel;
+      modalRoot.innerHTML = "";
+      modalConfirm = null;
+      modalOnCancel = null;
+      if (callback) {
+        callback();
+      } else {
+        if (modalReturnFocus && document.contains(modalReturnFocus)) modalReturnFocus.focus({ preventScroll: true });
+        modalReturnFocus = null;
+      }
+    }
+
+    function showBackup() {
+      const operation = state.lastOperation;
+      if (!operation) return;
+      const receipt = operation.receipt;
+      if (receipt.status === "backup-failed") {
+        openModal(t("backupFailedTitle"), `<p>${esc(t("backupFailedBody"))}</p>`);
+        return;
+      }
+      openModal(t("backupTitle"), modalSessionList(receipt.changes, true));
+    }
+
+    function updateScenarioControls() {
+      const showQuit = state.scenario === "desktop-running" && state.targetRunning;
+      const showProgress = needsRecovery() && !state.externalProgressInjected;
+      scenarioAction.hidden = !(showQuit || showProgress);
+      scenarioAction.textContent = t(showProgress ? "simulateProgress" : "simulateQuit");
+    }
+
+    function handleAction(action) {
+      if (action === "select-all") {
+        const rows = visibleRows().filter(row => classify(row).action && selectionReady());
+        const allPicked = rows.length && rows.every(row => state.picked.has(row.id));
+        rows.forEach(row => allPicked ? state.picked.delete(row.id) : state.picked.add(row.id));
+        render("select-all");
+      } else if (action === "refresh") {
+        refresh();
+      } else if (action === "copy") {
+        requestCopy();
+      } else if (action === "show-backup") {
+        showBackup();
+      } else if (action === "undo") {
+        requestUndo();
+      } else if (action === "recover") {
+        requestRecovery();
+      }
+    }
+
+    app.addEventListener("click", event => {
+      const action = event.target.closest("[data-action]");
+      if (action) {
+        handleAction(action.dataset.action);
+        return;
+      }
+      const rowElement = event.target.closest("[data-row]");
+      if (rowElement && !event.target.closest("input, button, select, a")) {
+        const row = memory.source.find(item => item.id === rowElement.dataset.row);
+        if (!row || !classify(row).action || !selectionReady()) return;
+        state.picked.has(row.id) ? state.picked.delete(row.id) : state.picked.add(row.id);
+        render(`pick-${row.id}`);
+      }
+    });
+
+    app.addEventListener("input", event => {
+      if (event.target.dataset.role === "search") {
+        state.query = event.target.value;
+        render();
+      }
+    });
+
+    app.addEventListener("change", event => {
+      const role = event.target.dataset.role;
+      if (event.target.dataset.pick) {
+        const id = event.target.dataset.pick;
+        event.target.checked ? state.picked.add(id) : state.picked.delete(id);
+        render(`pick-${id}`);
+        return;
+      }
+      if (role === "search") return;
+      if (role === "update-existing") {
+        const turnOff = state.updateExisting && !event.target.checked;
+        state.updateExisting = event.target.checked;
+        if (turnOff) {
+          memory.source.forEach(row => {
+            if (state.picked.has(row.id) && row.kind !== "new") state.picked.delete(row.id);
+          });
+        }
+        state.error = null;
+        render("update-existing");
+      } else if (role === "source-endpoint" || role === "target-endpoint") {
+        const side = role.startsWith("source") ? "source" : "target";
+        state[`${side}Id`] = event.target.value;
+        const selected = endpoint(event.target.value);
+        state[`${side}SpaceId`] = selected.spaces.length === 1 ? selected.spaces[0].id : "";
+        clearBinding();
+        render(`${side}-endpoint`);
+      } else if (role === "source-space" || role === "target-space") {
+        const side = role.startsWith("source") ? "source" : "target";
+        state[`${side}SpaceId`] = event.target.value;
+        clearBinding();
+        render(`${side}-space`);
+      }
+    });
+
+    languageButton.addEventListener("click", () => {
+      state.lang = state.lang === "zh" ? "en" : "zh";
+      renderChrome();
+      renderScenarioOptions();
+      updateScenarioControls();
+      render();
+    });
+
+    scenarioSelect.addEventListener("change", () => resetDemo(scenarioSelect.value));
+    scenarioAction.addEventListener("click", () => {
+      if (state.scenario === "desktop-running" && state.targetRunning) {
+        state.targetRunning = false;
+        state.error = null;
+      } else if (needsRecovery()) {
+        const operation = state.lastOperation;
+        const first = operation.receipt.changes[0];
+        const current = targetIndex(operation.receipt.targetSpaceId)[first.rowId];
+        if (current) {
+          current.turns += 1;
+          current.demoRevision = "external-progress-after-interruption";
+        } else if (first.before) {
+          targetIndex(operation.receipt.targetSpaceId)[first.rowId] = clone(first.before);
+        }
+        state.externalProgressInjected = true;
+        scenarioAction.textContent = t("progressInjected");
+        updateScenarioControls();
+        return;
+      }
+      updateScenarioControls();
+      render();
+    });
+
+    modalRoot.addEventListener("click", event => {
+      if (event.target.closest("[data-modal-confirm]")) {
+        const callback = modalConfirm;
+        closeModal(false);
+        if (callback) callback();
+      } else if (event.target.closest("[data-modal-exception]")) {
+        const operation = state.lastOperation;
+        if (operation && operation.needsRecovery) requestCloseIncomplete();
+      } else if (event.target.closest("[data-modal-close]") || event.target.hasAttribute("data-modal-overlay")) {
+        cancelModal();
+      }
+    });
+
+    document.addEventListener("keydown", event => {
+      if (!modalRoot.firstChild) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelModal();
+        return;
+      }
+      if (event.key === "Tab") {
+        const focusable = Array.from(modalRoot.querySelectorAll("button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), [tabindex='0']"));
+        if (!focusable.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    });
+
+    resetDemo("normal");
+
+    window.addEventListener("pageshow", event => {
+      if (event.persisted) {
+        renderScenarioOptions();
+        renderChrome();
+        render();
+      } else {
+        resetDemo("normal");
+      }
+    });
+  </script>
+</body>
+</html>
