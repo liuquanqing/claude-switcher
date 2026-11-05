@@ -160,7 +160,7 @@ def run_case(name, old_template, new_template, expected, corrupt=False, helper=N
             assert record["application"] == str(app) and record["build"] == NEW
             assert info(stage)["CFBundleVersion"] == OLD and return_code == 0
         if expected == "rolledBack":
-            assert (directory / ("launched-" + OLD + ".json")).exists()
+            wait_for(lambda: (directory / ("launched-" + OLD + ".json")).exists())
             assert info(stage)["CFBundleVersion"] == NEW
         answer = {"case": name, "state": outcome["state"], "installedBuild": expected_build,
                   "helperExit": return_code, "actualSignedHelper": True, "nativeLaunch": True,
