@@ -94,6 +94,9 @@ enum InstallTrust {
             try InstallTrust.verify(plan.application, team: team, build: replacementDone ? plan.newBuild : plan.oldBuild)
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
+            // A retained original or another preview with the same identifier
+            // must not substitute for the exact bundle we just installed.
+            config.createsNewApplicationInstance = true
             config.arguments = ["--complete-update", file.path]
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 NSWorkspace.shared.openApplication(at: plan.application, configuration: config) { _, error in
