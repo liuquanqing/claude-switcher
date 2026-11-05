@@ -223,11 +223,11 @@ struct Header: View {
         appText(protection.desktopScope == .api ? "api.mode" : "api.unknownMode", language: language)
     }
 
-    private var sourceTag: String {
+    private var sourceTag: String? {
         if protection.desktopScope != .api { return appText("api.unrecognized", language: language) }
         switch protection.apiConfiguration {
         case .magpie, .ccSwitch:
-            return sourceName ?? ""
+            return nil
         case .conflict: return appText("api.sourceConflict", language: language)
         case .subscription, .unknownAPI, .unconfirmed: return appText("api.sourceUnconfirmed", language: language)
         }
@@ -236,7 +236,8 @@ struct Header: View {
     private var modeDetail: String? {
         guard protection.desktopScope == .api else { return appText("api.unknownDetail", language: language) }
         switch protection.apiConfiguration {
-        case .magpie, .ccSwitch: return nil
+        case .magpie, .ccSwitch:
+            return appText("api.managedBy", language: language, arguments: ["source": sourceName ?? ""])
         case .conflict: return appText("api.conflictDetail", language: language)
         case .subscription, .unknownAPI, .unconfirmed: return appText("api.unconfirmedDetail", language: language)
         }
@@ -252,13 +253,13 @@ struct Header: View {
             Button { Task { await store.openAPIManager() } } label: {
                 HStack(spacing: 5) {
                     Text(appText("api.manage", language: language))
-                        .font(.system(size: 11, weight: .medium)).lineLimit(1).fixedSize()
+                        .font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
                     Image(systemName: "arrow.up.right").font(.system(size: 8.5, weight: .bold))
                 }
-                .foregroundColor(openHover ? .txt : .sub)
+                .foregroundColor(.claude)
                 .padding(.horizontal, 12).frame(height: 30)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.sub.opacity(openHover ? 0.14 : 0.07)))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.stroke, lineWidth: 1))
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(openHover ? 0.2 : 0.1)))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.claude.opacity(0.26), lineWidth: 1))
                 .contentShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
@@ -322,9 +323,11 @@ struct Header: View {
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(modeTitle).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
-                        Text(sourceTag).font(.system(size: 9.5, weight: .medium))
-                            .foregroundColor(sourceName == nil ? .warn : .sub)
-                            .lineLimit(1).fixedSize()
+                        if let sourceTag {
+                            Text(sourceTag).font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(sourceName == nil ? .warn : .sub)
+                                .lineLimit(1).fixedSize()
+                        }
                     }
                     if let modeDetail {
                         Text(modeDetail).font(.system(size: 10.5)).foregroundColor(.sub)
