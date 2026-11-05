@@ -1,0 +1,56 @@
+{
+  "date": "2026-10-28",
+  "scope": "current default CLI local status and guard prerequisites; read-only diagnosis",
+  "cli": {
+    "credentialsWritten": false,
+    "defaultDirectory": true,
+    "desktopOrganizationAvailable": false,
+    "loggedIn": true,
+    "sameSavedAccount": true,
+    "subscription": true,
+    "tokenVerified": false
+  },
+  "network": {
+    "country": "SG",
+    "networkOnlyAllowed": true,
+    "processStopped": false,
+    "proxyConnected": true,
+    "routesDisagree": false,
+    "serviceChanged": false,
+    "tunOnline": true
+  },
+  "newProtectionConfigExists": false,
+  "legacyJobStillRegistered": true,
+  "newGuardLoaded": false,
+  "claudeDesktopStillRunningAtCheck": true,
+  "serviceMigrationExecuted": false,
+  "credentialsModified": false,
+  "existingSessionsModified": false,
+  "frontendMainPanel": "official local Claude CLI authorized after Kimi quota block; implementation in progress in isolated source copy",
+  "clipboard": "Kimi completed direct copy, no preview, 1.6-second success; native success and system clipboard content checked with fictional request only",
+  "tests": {
+    "core": 161,
+    "controller": 93,
+    "handoffSyntheticPreconditions": 3
+  },
+  "installation": {
+    "target": "/Applications/Claude Switcher 候选版.app",
+    "bundleIdentifier": "dev.claudeswitcher.candidate",
+    "candidateLaunched": false,
+    "originalApplicationsVerifiedUnchanged": true,
+    "accountAndSessionDirectoriesAccessed": false,
+    "guardServiceCommandsRun": false,
+    "installedHashes": {
+      "Contents/Info.plist": "cc8eb48e48f0b83d03ade7ccd5e88a16285989a3945e31b6c2399a373f108f7c",
+      "Contents/MacOS/ClaudeSwitcher": "14cfd418f7138a3b06b2e865a51253f60f1358edd76512e1cf99e8cf2493919e"
+    },
+    "build": "20261028.6.1"
+  },
+  "sourceHashes": {
+    "App/CLIStatusReader.swift": "bee69e846875ef52ac1dd11acd213baca1ee1ed25caaf72d227c63a6f98f559d",
+    "App/CLILoginController.swift": "b3221d5d05c63720e5cca23253b7f11f43248b1b7a5729ec4f911e4641d4efae",
+    "Sources/SwitcherCore/CLIReportedStatus.swift": "02072963ac0e803e9319c4285608a987c1f434acd59ec5f042a8595b16cbcdc5",
+    "App/SessionTransferController.swift": "e6fbdce905dedc4ad2216f154c6479aa669172bdaed82e82d08b2757cf153f9a",
+    "App/SessionTransferView.swift": "970dbb5a1928a759f3c3d5e250f80ca85351d179001efd0eadad4b207afbc399"
+  }
+}

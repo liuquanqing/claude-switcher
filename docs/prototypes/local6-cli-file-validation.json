@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-28",
+  "build": "20261028.6.3",
+  "coreTests": 176,
+  "controllerChecks": 97,
+  "frontendAuthor": "official local Claude CLI",
+  "backendReview": {
+    "agent": "official local Claude CLI independent read-only review",
+    "p2Found": 2,
+    "p2ResolvedByCodex": 2,
+    "postFixWholeReview": "not rerun; code fixes, regression tests and build checked"
+  },
+  "realCredentialsReadByAdapter": false,
+  "realCredentialsWritten": false,
+  "realSessionsReadOrWritten": false,
+  "guardActionsRun": false,
+  "nativeFixtureChecks": [
+    "check preserves mismatched fictional identity",
+    "cancel sync preserves original fictional identity",
+    "confirm sync changes fictional Store only",
+    "500pt action layout remains readable",
+    "API desktop has no sync action"
+  ],
+  "nativeNotRun": [
+    "stale confirmation target injected during open dialog",
+    "busy transient",
+    "real default login and Keychain ACL acceptance"
+  ],
+  "sourceHashes": {
+    "App/CLILoginController.swift": "36bff3957b585b90a2ec7bcb1af395c7d5356135178adff62db43d1f72293b1f",
+    "App/NativeCLIStorage.swift": "35a71d104cbe01af24b2bab92db1b4d518549f815eaa9e4503cab0a8cf301430",
+    "App/Views.swift": "658bb6d322b26741f7d25016e36eda09bca9c3e699c2a6475b707bad3a60fe3a",
+    "App/ProtectionView.swift": "c72927f943b4492458c7ba47d02dfe801338cd53c1d7719b2d423821b5526441",
+    "Sources/SwitcherCore/CLIFileCredentials.swift": "bd15409a503a2b4c57b7be6c3a5d5e9bff750fa0003de936a22bff7bc838316b",
+    "Sources/SwitcherCore/CLITransaction.swift": "0c2db29f3edb6e42bf18ecd6610a9d8294d5d1088768fd86a9eb507952bd6483",
+    "Sources/SwitcherCore/AuthenticationConfiguration.swift": "f22a2135bc7b95aae5ee2dd5c2f95a9e198a4969f1d1d3de05c14ea6f579bec2",
+    "build.sh": "18590a0cf02746f3cd0c225902d1bd23c4b263f5d2ea609f20222a5d5de6272a"
+  },
+  "installation": {
+    "target": "/Applications/Claude Switcher 候选版.app",
+    "bundleIdentifier": "dev.claudeswitcher.candidate",
+    "toBuild": "20261028.6.3",
+    "candidateLaunched": false,
+    "originalApplicationsVerifiedUnchanged": true,
+    "accountAndSessionDirectoriesAccessed": false,
+    "guardServiceCommandsRun": false,
+    "installedHashes": {
+      "Contents/Info.plist": "1e6d8c78506dec28bf416b4229449942cb621f6d5a47c2066ae414eb7d971a8d",
+      "Contents/MacOS/ClaudeSwitcher": "4628701c69b7a4512274eebaa6085d04119f3891253a2be4b2a7cdd6c38a8b68"
+    }
+  }
+}

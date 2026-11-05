@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-28",
+  "build": "20261028.6.5",
+  "installed": false,
+  "runningCandidateBuildAtWorkStart": "20261028.6.4",
+  "frontendAndProductCopyAuthor": "official local Claude Code",
+  "parentRole": "behavior review, backend integration and QA; no final product-copy edits after author pass",
+  "releaseBuildAndSignature": "passed",
+  "controllerChecks": 97,
+  "coreBaselineTests": 176,
+  "coreChanged": false,
+  "coreRerunForThisUIRound": false,
+  "helpersMatchInstalledBytes": {
+    "ClaudeGuard": true,
+    "ClaudeSessionTransfer": true
+  },
+  "nativeFictionalChecks": [
+    "account-only heading and icon About popover",
+    "running control label: display",
+    "stopped control label: open",
+    "merged protection status/action without separate explanatory row",
+    "settings button does not open takeover confirmation",
+    "takeover row opens confirmation; cancel preserves unmanaged state",
+    "confirmed fictional takeover removes action and shows normal protected state",
+    "network result opens after check and folds independently",
+    "collapsed stale input shows warning instead of green pass",
+    "new failed check and invalid-input check expand automatically",
+    "collapsed result persists across settings close/reopen",
+    "merged open control is rejected by mismatched fictional region gate"
+  ],
+  "notRun": [
+    "real Desktop start/focus/takeover or interruption",
+    "real credential/session switching",
+    "all API/unknown/busy combinations visually repeated",
+    "full VoiceOver device acceptance",
+    "menu-bar anchor nested-popover acceptance: previous tool observation limitation remains"
+  ],
+  "guardServiceCommandsRun": false,
+  "realDesktopTakeoverPerformed": false,
+  "realAccountsOrSessionsWrittenByTest": false,
+  "sourceHashes": {
+    "App/Views.swift": "4e4e5b93c3b4de2a3e63f0abe41a5a58b3274f8501ef2e840328f692059e6fc1",
+    "App/ProtectionView.swift": "16b448786e4c9446d4a6272c33b42ee0e6579f441b8c519a0e8820f8d0cbec1b",
+    "App/Protection.swift": "2af98da387fd7ad92dcfab6bbd7eb4abbadfcbb0b80c95820ad6029f4c6f92a3",
+    "App/ManagedDesktop.swift": "6733e59f9c610cb835347615cf533254e71ffa97ce5d6727db2c70203953a5c8",
+    "App/main.swift": "5353a89fc23f873581c8b7855480090777fb1efc10bd386a49bfa93952c376c4",
+    "build.sh": "1a8ecfd00b22b1021f8a1ca8706f9836837d54dd3d888e90d074a73edbe712df"
+  },
+  "screenshots": [
+    "local6-header-polish.png",
+    "local6-results-collapsed.png"
+  ]
+}

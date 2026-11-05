@@ -1,0 +1,59 @@
+{
+  "date": "2026-10-28",
+  "build": "20261028.6.2",
+  "frontendAuthor": "official local Claude CLI; user-authorized replacement for quota-blocked Kimi",
+  "scope": "isolated fictional Store and temporary transfer data only",
+  "checks": {
+    "releaseBuildAndSignature": "passed",
+    "controllerChecks": 93,
+    "coreTests": {
+      "passed": 161,
+      "scope": "backend patch ec3dc2d; core unchanged by this UI update"
+    },
+    "native": [
+      "same-height data and missing cards",
+      "notRequested/loading/blocked/failed states",
+      "add account: inline entry, paste, Return submit",
+      "twelve-account list can reach bottom",
+      "footer preference changes import interface to English",
+      "fresh demo starts Chinese without writing production preference",
+      "import page no EN toggle",
+      "select all toggles zero and one eligible item",
+      "import missing item and undo with fake backup",
+      "return from import to accounts",
+      "copy instructions: immediate copied state and no sheet",
+      "matched CLI help popover opens, closes, no truncation"
+    ],
+    "notRun": [
+      "real-account switch/restore",
+      "real conversation migration",
+      "guard handoff or fault injection",
+      "production UserDefaults restart acceptance",
+      "native help for every authentication mode"
+    ]
+  },
+  "installation": {
+    "target": "/Applications/Claude Switcher 候选版.app",
+    "bundleIdentifier": "dev.claudeswitcher.candidate",
+    "toBuild": "20261028.6.2",
+    "candidateLaunched": false,
+    "originalApplicationsVerifiedUnchanged": true,
+    "accountAndSessionDirectoriesAccessed": false,
+    "guardServiceCommandsRun": false,
+    "installedHashes": {
+      "Contents/Info.plist": "9b31a241c358fdbbba2c7410b7578dfd4a8ac1717c01e4991a035df2a998bcb5",
+      "Contents/MacOS/ClaudeSwitcher": "7ddec7118a71844dfb960f2cb5a51c6cefc42c0767bc9571f447e0fcb3af132e"
+    }
+  },
+  "sourceHashes": {
+    "App/Views.swift": "b936726dd1350fdf6cea884f91f424c1ca886b6dea3a6c0a856e3ce97583bb35",
+    "App/SessionTransferView.swift": "e9488f582aca18fb8416f19513bdc2f85e8ad1b6c16af81f5359bb2fe1326093",
+    "App/ApplicationMenus.swift": "9c2f0783566f29b9698e50cefcbe9898ba8394f2dc0d76b4abee033539e8d128",
+    "App/main.swift": "9400dea2497e66381421b3f5780d90c292594d520b400ab53f892e1d4f84e822",
+    "build.sh": "c2e8f5dec97a2aae5e5cdc2be504beed8828e0ba3fb61285b1501c5cdccb94b2"
+  },
+  "screenshots": [
+    "local6-main-panel-refined.png",
+    "local6-import-refined.png"
+  ]
+}
