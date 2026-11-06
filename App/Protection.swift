@@ -34,6 +34,7 @@ final class ProtectionController: ObservableObject {
     @Published private(set) var lastCheckedAt: Date?
     @Published private(set) var lastCheckReport: ManualNetworkCheck?
     @Published var lastDecision = SafetyDecision(.disabled)
+    @Published private(set) var guardCheckedAt: Date?
     @Published private(set) var operationError: String?
     @Published private(set) var desktopScope: DesktopProtectionScope = .unknown
     @Published private(set) var desktopScopeDetail: String?
@@ -61,6 +62,14 @@ final class ProtectionController: ObservableObject {
         return guardOnline ? "后台保护继续运行" : "保护状态待确认"
     }
 
+    var guardStatusIssue: SafetyDecision? {
+        guard enabled, !working, desktopScope != .api else { return nil }
+        guard !guardOnline || !lastDecision.allowed else { return nil }
+        if guardOnline, desktopScope != .subscription, lastDecision.reason == .unsupportedMode { return nil }
+        if !guardOnline, lastDecision.allowed { return SafetyDecision(.guardUnavailable) }
+        return lastDecision
+    }
+
     init(demo: Bool = false, testFiles: SafetyFiles? = nil, worker: (any GuardWorking)? = nil,
          observeNetwork: ((ProxyMode) async -> NetworkObservation)? = nil) {
         self.demo = demo
@@ -72,6 +81,7 @@ final class ProtectionController: ObservableObject {
         if demo {
             desktopScope = .subscription; desktopManaged = true; apiConfiguration = .subscription
             enabled = true; guardOnline = true; activeCountry = "SG"; activeProxyMode = .shadowrocket; status = "守卫在线 · 目标 SG · 退出界面后继续保护"
+            guardCheckedAt = Date()
             lastDecision = SafetyDecision(.allowed, expected: "SG", observed: "SG")
             if CommandLine.arguments.contains("--demo-blocked") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewBlocked") as? Bool == true {
                 demoNetwork.country = "JP"
@@ -198,6 +208,7 @@ final class ProtectionController: ObservableObject {
             guardOnline = false; lastDecision = SafetyDecision(.staleReceipt); status = lastDecision.message; return
         }
         guardOnline = true
+        guardCheckedAt = receipt.checkedAt
         lastDecision = receipt.termination == "failed" ? SafetyDecision(.terminationFailed) : receipt.decision
         status = lastDecision.allowed ? "网络门禁已就绪 · 目标 \(config.expectedCountry)" : lastDecision.message
     }

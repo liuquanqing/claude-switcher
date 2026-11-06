@@ -217,6 +217,14 @@ actor FixtureGuardWorker: GuardWorking {
   await worker.completeLookup()
   try await waitUntil("service lookup publishes its completed result") { liveBranch.guardOnline }
   require(liveBranch.guardOnline, "completed service lookup publishes online state")
+  require(liveBranch.guardCheckedAt == files.loadReceipt()?.checkedAt,
+          "guard time comes from its receipt rather than a manual diagnostic")
+  liveBranch.lastDecision = SafetyDecision(.proxyDisconnected)
+  require(liveBranch.guardStatusIssue?.reason == .proxyDisconnected,
+          "a subscription guard's network failure remains visible")
+  liveBranch.guardOnline = false; liveBranch.lastDecision = SafetyDecision(.allowed)
+  require(liveBranch.guardStatusIssue?.reason == .guardUnavailable,
+          "an unconfirmed guard cannot publish a previously allowed result as its current issue")
   await worker.setFailure("fixture: configuration is read only")
   liveBranch.country = "JP"
   await liveBranch.enable()
@@ -242,6 +250,10 @@ actor FixtureGuardWorker: GuardWorking {
    try CLIJSON.encode(["inferenceProvider": "gateway"]).write(to: library.appendingPathComponent(manager + ".json"))
    apiController.refreshScope()
    require(apiController.desktopScope == .api && apiController.apiConfiguration == expected, "local refresh identifies changed API manager without saved guard config or credential reads")
+   apiController.enabled = true; apiController.guardOnline = true
+   apiController.lastDecision = SafetyDecision(.proxyDisconnected)
+   require(apiController.guardStatusIssue == nil,
+           "an API desktop never claims that a subscription network verdict blocked its launch")
   }
   let apiUsageFiles = SafetyFiles(directory: apiRoot.appendingPathComponent("usage-state"))
   try apiUsageFiles.save(config, to: apiUsageFiles.configURL)
@@ -276,8 +288,11 @@ actor FixtureGuardWorker: GuardWorking {
   require(demo.operationError != nil && demo.lastDecision == original && demo.guardOnline, "invalid input cannot replace runtime health")
   demo.clearOperationError(); demo.disable(); demo.country = "SG"; await demo.checkNow()
   require(!demo.enabled && !demo.guardOnline && demo.lastCheckReport?.passed == true, "readonly result cannot enable protection")
+  let recordedGuardTime = demo.guardCheckedAt
   demo.country = "JP"; await demo.checkNow()
   require(demo.activeCountry == "SG" && demo.lastCheckReport?.passed == false, "draft target is not saved target")
+  require(demo.guardCheckedAt == recordedGuardTime,
+          "new manual diagnostics do not rewrite the guard's timestamp or grant launch permission")
   demo.country = "ZZ"; await demo.checkNow()
   require(demo.lastCheckReport?.observation == nil && demo.lastCheckReport?.validationMessage != nil, "invalid diagnostic has no fake observation")
 

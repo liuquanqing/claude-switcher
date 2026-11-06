@@ -12,6 +12,10 @@ assert protection_view.count(initial_state) == 1
 Path('_qa/rc7/visual/FixtureProtectionView.swift').write_text(protection_view.replace(initial_state,
     '@State private var showSettings = CommandLine.arguments.contains("--fixture-protection-expanded")'))
 protection_model = Path('App/Protection.swift').read_text()
+demo_time = 'guardCheckedAt = Date()'
+assert protection_model.count(demo_time) == 1
+protection_model = protection_model.replace(demo_time,
+    'guardCheckedAt = Date().addingTimeInterval(CommandLine.arguments.contains("--fixture-diagnostic-disagrees") ? -12 : 0)')
 manager_input = 'Bundle.main.object(forInfoDictionaryKey: "CSPreviewAPIManager") as? String'
 assert protection_model.count(manager_input) == 1
 Path('_qa/rc7/visual/FixtureProtection.swift').write_text(protection_model.replace(manager_input,

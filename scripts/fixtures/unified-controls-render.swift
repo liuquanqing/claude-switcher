@@ -18,6 +18,7 @@ actor FictionalRenderGuard: GuardWorking {
    scenario += "-" + source
   }
   if CommandLine.arguments.contains("--fixture-protection-expanded") { scenario += "-expanded" }
+  if CommandLine.arguments.contains("--fixture-diagnostic-disagrees") { scenario += "-diagnostic-disagrees" }
   return URL(fileURLWithPath:"_qa/rc7-ui-revision/visual").appendingPathComponent(scenario)
  }
  @MainActor static func main() {
@@ -84,6 +85,11 @@ actor FictionalRenderGuard: GuardWorking {
    let fullStore = Store(demo:true)
    fullStore.setAppLanguage(language)
    fullStore.cliConnection.contextDidChange()
+   if CommandLine.arguments.contains("--fixture-diagnostic-disagrees") {
+    fullStore.protection.lastDecision = SafetyDecision(.proxyDisconnected)
+    fullStore.protection.status = fullStore.protection.lastDecision.message
+    await fullStore.protection.checkNow()
+   }
    try save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
    try save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
    if CommandLine.arguments.contains("--fixture-protection-expanded") {

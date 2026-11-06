@@ -216,6 +216,7 @@ struct TerminalProtectionCard: View {
     /// one-line summary (verdict + time). While checking it never shows the previous round's verdict.
     private var resultHeaderRow: some View {
         let result = displayVerdict
+        let resultText = isOperationReport ? result.text : t("protection.lastDiagnostic", arguments: ["result": result.text])
         let checking = controller.checking
         return Button { resultsExpanded.toggle() } label: {
             HStack(spacing: 6) {
@@ -224,7 +225,7 @@ struct TerminalProtectionCard: View {
                     Text(t("protection.checkingNetwork")).foregroundColor(.sub).lineLimit(1)
                 } else {
                     Image(systemName: result.icon)
-                    Text(result.text)
+                    Text(resultText)
                         .lineLimit(resultsExpanded ? 2 : 1).truncationMode(.tail)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -248,7 +249,7 @@ struct TerminalProtectionCard: View {
         .help(reportOriginHelp.map {
             $0 + "\n" + t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults")
         } ?? t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults"))
-        .accessibilityLabel(checking ? t("protection.checkingAccessibility") : t("protection.resultsAccessibility", arguments: ["result": result.text]))
+        .accessibilityLabel(checking ? t("protection.checkingAccessibility") : t("protection.resultsAccessibility", arguments: ["result": resultText]))
         .accessibilityHint(t(resultsExpanded ? "protection.collapseResults" : "protection.expandResults"))
     }
 
@@ -340,12 +341,23 @@ struct TerminalProtectionCard: View {
 
     // MARK: Notices
 
+    private func guardIssueReason(_ decision: SafetyDecision) -> String {
+        switch decision.reason {
+        case .guardUnavailable: return t("protection.guardUnavailableShort")
+        case .staleReceipt: return t("protection.guardStaleShort")
+        case .terminationFailed: return t("protection.terminationFailed")
+        default: return failureText(decision)
+        }
+    }
+
     private var issueText: String? {
-        guard controller.enabled, !controller.working else { return nil }
-        guard !controller.guardOnline || !controller.lastDecision.allowed else { return nil }
-        if controller.guardOnline, controller.desktopScope != .subscription,
-           controller.lastDecision.reason == .unsupportedMode { return nil }
-        return generated(controller.status)
+        guard let issue = controller.guardStatusIssue else { return nil }
+        let reason = guardIssueReason(issue)
+        if let checkedAt = controller.guardCheckedAt {
+            let time = AppLocalization.date(checkedAt, language: language, timeStyle: .short)
+            return t("protection.guardIssueAt", arguments: ["time": time, "reason": reason])
+        }
+        return t("protection.guardIssue", arguments: ["reason": reason])
     }
 
     private var noticeText: String? {
