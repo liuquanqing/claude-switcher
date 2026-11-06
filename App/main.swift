@@ -758,9 +758,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         b.title = scope == .api ? " API" : sl.map { " \(initial) · \(pct($0))%" } ?? " \(initial)"
         b.image = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Claude Switcher")
         b.imagePosition = .imageLeading
-        let tooltip = scope == .api ? "Claude: API" : "Claude: \(store.current)"
-        // Metadata polling need not reset an unchanged AppKit hover tracking tag.
-        if b.toolTip != tooltip { b.toolTip = tooltip }
+        // The menu-bar title already conveys the state. Avoid a redundant
+        // AppKit help tag that can remain onscreen after the panel closes.
+        b.toolTip = nil
+        b.setAccessibilityLabel(scope == .api ? "Claude Switcher, API" : "Claude Switcher, \(store.current)")
     }
 
     @objc func toggle() {
