@@ -33,7 +33,7 @@ actor FictionalRenderGuard: GuardWorking {
   }
   NSApp.run()
  }
- @MainActor static func save<V:View>(_ view:V, name:String, width:CGFloat) throws {
+ @MainActor static func save<V:View>(_ view:V, name:String, width:CGFloat) async throws {
   let host=NSHostingView(rootView:view.environment(\.controlActiveState,.active))
   host.appearance=NSAppearance(named:.darkAqua)
   host.frame=NSRect(x:0,y:0,width:width,height:700)
@@ -42,6 +42,7 @@ actor FictionalRenderGuard: GuardWorking {
   host.frame=NSRect(origin:.zero,size:size)
   let window=NSWindow(contentRect:host.frame,styleMask:[.borderless],backing:.buffered,defer:false)
   window.alphaValue=0;window.contentView=host;window.orderFront(nil)
+  try await Task.sleep(nanoseconds: 100_000_000)
   host.layoutSubtreeIfNeeded();host.displayIfNeeded()
   guard let bitmap=host.bitmapImageRepForCachingDisplay(in:host.bounds) else { throw SafetyError("No fictional rendering") }
   host.cacheDisplay(in:host.bounds,to:bitmap)
@@ -105,34 +106,35 @@ actor FictionalRenderGuard: GuardWorking {
     fullStore.protection.status = fullStore.protection.lastDecision.message
     await fullStore.protection.checkNow()
    }
-   try save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
-   try save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
+   try await save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
+   try await save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
    var help = TerminalStrip(store:fullStore)
    help.fixtureHelpOnly = true
-   try save(help.environment(\.appLanguage,language).background(Color.card),name:"cli-help-"+language,width:340)
+   help.fixtureLanguage = language
+   try await save(VStack { help }.environment(\.appLanguage,language).background(Color.card),name:"cli-help-"+language,width:340)
    if CommandLine.arguments.contains("--fixture-summary-only") { continue }
    if CommandLine.arguments.contains("--fixture-protection-expanded") {
-    try save(TerminalProtectionCard(store:fullStore,controller:fullStore.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"settings-"+language,width:500)
+    try await save(TerminalProtectionCard(store:fullStore,controller:fullStore.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"settings-"+language,width:500)
     continue
    }
    let update=ApplicationUpdater(demo:true,operations:.init(fetch:{_ in metadata},download:{_,target,_ in try payload.write(to:target);return target},verify:{_,_,_,_ in},directory:root),currentVersion:"1.3.6-rc.7",currentBuild:"1",architecture:"arm64")
    await update.check()
    var finishInstall:CheckedContinuation<Void,Error>?
    update.installHandler={_,_,_,_ in try await withCheckedThrowingContinuation {finishInstall=$0}}
-   try save(ApplicationUpdateView(updater:update,language:language,close:{}),name:"update-available-"+language,width:430)
+   try await save(ApplicationUpdateView(updater:update,language:language,close:{}),name:"update-available-"+language,width:430)
    await update.download()
    let installTask=Task {@MainActor in await update.installAndRelaunch()}
    while finishInstall == nil {await Task.yield()}
-   try save(ApplicationUpdateView(updater:update,language:language,close:{}),name:"update-installing-"+language,width:430)
+   try await save(ApplicationUpdateView(updater:update,language:language,close:{}),name:"update-installing-"+language,width:430)
    finishInstall!.resume(throwing:SafetyError("当前操作尚未完成，请稍后更新。"));await installTask.value
-   try save(ApplicationUpdateView(updater:update,language:language,close:{}),name:"update-retry-"+language,width:430)
+   try await save(ApplicationUpdateView(updater:update,language:language,close:{}),name:"update-retry-"+language,width:430)
    let guardStore = Store(demo:true)
    let guardController = ProtectionController(testFiles:SafetyFiles(directory:root.appendingPathComponent("guard-"+language)), worker:FictionalRenderGuard(), observeNetwork:{_ in NetworkObservation(proxyConnected:false,tunOnline:false,country:nil)})
    let startGuard=Task { @MainActor in await guardController.enable() }
    while !guardController.working { await Task.yield() }
-   try save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-starting-"+language,width:500)
+   try await save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-starting-"+language,width:500)
    await startGuard.value
-   try save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-retry-"+language,width:500)
+   try await save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-retry-"+language,width:500)
    for state in ["unlinked","local-default","local-isolated","local-different","default","waiting","different","failed"] {
     let store=Store(demo:true);store.setAppLanguage(language)
     let context: CLIConnectionContext? = store.protection.desktopScope == .subscription
@@ -156,9 +158,9 @@ actor FictionalRenderGuard: GuardWorking {
     if state == "waiting" { await connection.choose(.isolated) }
     else if state != "unlinked" && !state.hasPrefix("local-") { await connection.open() }
     connection.contextDidChange()
-    try save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"cli-"+state+"-"+language,width:500)
+    try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"cli-"+state+"-"+language,width:500)
     if state == "local-default" {
-     try save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-record-"+language,width:420)
+     try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-record-"+language,width:420)
     }
     if state == "unlinked", context != nil { try await saveChoice(store, connection: connection, language: language) }
    }

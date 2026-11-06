@@ -12,6 +12,12 @@ assert protection_view.count(initial_state) == 1
 Path('_qa/rc7/visual/FixtureProtectionView.swift').write_text(protection_view.replace(initial_state,
     '@State private var showSettings = CommandLine.arguments.contains("--fixture-protection-expanded")'))
 views = Path('App/Views.swift').read_text()
+terminal_at = views.index('struct TerminalStrip: View')
+terminal = views[terminal_at:]
+locale_input = '@Environment(\\.appLanguage) private var language'
+assert locale_input in terminal
+terminal = terminal.replace(locale_input, '@Environment(\\.appLanguage) private var fixtureEnvironmentLanguage\n    var fixtureLanguage: String? = nil\n    private var language: String { fixtureLanguage ?? fixtureEnvironmentLanguage }', 1)
+views = views[:terminal_at] + terminal
 help_body = '    var body: some View {\n        let displayedStatus ='
 assert views.count(help_body) == 1
 # Test-only selection keeps the real popover inside SwiftUI's environment lifecycle.
