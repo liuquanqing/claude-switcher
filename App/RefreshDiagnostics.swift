@@ -24,7 +24,12 @@ struct CredentialReadSummary:Encodable {
     }
     var summary:[CredentialReadSummary] {values.keys.sorted().compactMap {values[$0]}}
 }
+struct UsageQueryDiagnostic: Encodable {
+    let profileIndex: Int
+    let stages: [String]
+}
 struct RefreshDiagnostics:Encodable {
+    var usageQueries: [UsageQueryDiagnostic] = []
     var startedAt=Date()
     var completedAt:Date?
     var outcome="pending"

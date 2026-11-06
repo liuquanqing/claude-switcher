@@ -1077,6 +1077,7 @@ actor FixtureGuardWorker: GuardWorking {
   passiveStore.lastRefresh = passiveTime
   for _ in 0..<3 { passiveStore.panelWillOpen() }
   require(passiveStore.lastRefresh == passiveTime && !passiveStore.cliStatusRefreshing && passiveStore.cliStatus == .matched, "opening a panel is passive and never starts a full CLI refresh")
+  checks += try await nativeUsageOutputChecks()
   checks += try await accountUsageQueryChecks()
   checks += try await unifiedControlsChecks()
   checks += try await currentCLIRecoveryChecks()

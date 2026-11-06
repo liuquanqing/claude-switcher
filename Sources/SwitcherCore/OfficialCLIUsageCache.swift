@@ -6,7 +6,8 @@ public struct OfficialUsageWindow: Sendable, Equatable {
     public let resetsAt: Date?
 }
 
-/// A sample written by Claude Code, not a timestamp invented when this app reads it.
+/// A native CLI reading. Cache reads preserve its timestamp; native command
+/// output is dated only when a fresh, recognized /usage response is received.
 public struct OfficialCLIUsageCache: Sendable, Equatable {
     public let identity: CLIIdentity
     public let fetchedAt: Date
