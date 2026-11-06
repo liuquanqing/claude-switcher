@@ -19,9 +19,10 @@ actor FictionalRenderGuard: GuardWorking {
   }
   if CommandLine.arguments.contains("--fixture-protection-expanded") { scenario += "-expanded" }
   if CommandLine.arguments.contains("--fixture-diagnostic-disagrees") { scenario += "-diagnostic-disagrees" }
-  for flag in ["old-usage", "cli-api", "cli-unknown"] {
+  for flag in ["old-usage", "cli-api", "cli-unknown", "diagnostic", "draft", "checking", "paused", "results-collapsed"] {
    if CommandLine.arguments.contains("--fixture-" + flag) { scenario += "-" + flag }
   }
+  if CommandLine.arguments.contains("--demo-blocked") { scenario += "-blocked" }
   return URL(fileURLWithPath:"_qa/rc7-ui-revision/visual").appendingPathComponent(scenario)
  }
  @MainActor static func main() {
@@ -106,6 +107,12 @@ actor FictionalRenderGuard: GuardWorking {
     fullStore.protection.status = fullStore.protection.lastDecision.message
     await fullStore.protection.checkNow()
    }
+   if CommandLine.arguments.contains("--fixture-diagnostic") || CommandLine.arguments.contains("--fixture-draft") {
+    await fullStore.protection.checkNow()
+   }
+   if CommandLine.arguments.contains("--fixture-draft") { fullStore.protection.country = "JP" }
+   if CommandLine.arguments.contains("--fixture-checking") { fullStore.protection.checking = true }
+   if CommandLine.arguments.contains("--fixture-paused") { fullStore.protection.disable() }
    try await save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
    try await save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
    var help = TerminalStrip(store:fullStore)

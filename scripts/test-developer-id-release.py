@@ -23,7 +23,7 @@ class SigningChecks(unittest.TestCase):
         self.assertEqual(info["CFBundleShortVersionString"], "1.3.6")
         self.assertEqual(info["CSReleaseChannel"], "preview")
         self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.8")
-        self.assertEqual(info["CFBundleVersion"], "20261106.8.7")
+        self.assertEqual(info["CFBundleVersion"], "20261106.8.8")
         self.assertIn("预览", info["CFBundleDisplayName"])
         self.assertIn("预览", info["CFBundleName"])
         self.assertFalse(any(k.startswith("CSPreview") for k in info))

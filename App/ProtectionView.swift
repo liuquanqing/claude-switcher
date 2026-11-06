@@ -301,19 +301,14 @@ struct TerminalProtectionCard: View {
     // MARK: Help
 
     private var checkHelpContent: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: 8) {
             helpRow(t("protection.checkOnly"), t("protection.checkOnlyHelp"))
-            helpRow(t("protection.openShow"), t("protection.openShowHelp"))
-            helpRow(t("protection.unmanagedClickable"), t("protection.unmanagedHelp"))
-            Divider().opacity(0.6)
-            Text(t("protection.guardInterval", arguments: ["seconds": String(Int(SafetyConfig.interval))]))
-            // The current desktop's scope detail lives on the column / switch hover help; not repeated here.
-            Text(t("protection.scopeExplanation"))
+            helpRow(t("protection.checkResultsTitle"), t("protection.checkResultsHelp"))
         }
         .font(.system(size: 10.5)).foregroundColor(.sub)
         .lineSpacing(2)
         .fixedSize(horizontal: false, vertical: true)
-        .frame(width: 300, alignment: .leading)
+        .frame(width: 260, alignment: .leading)
         .padding(12)
     }
 
@@ -401,7 +396,7 @@ struct TerminalProtectionCard: View {
                 }
             }
             if controller.desktopScope == .subscription && needsRetry {
-                protectionAction
+                protectionAction()
             }
         }
         .padding(.horizontal, 2).padding(.vertical, 4)
@@ -495,7 +490,7 @@ struct TerminalProtectionCard: View {
                 .font(.system(size: 9, weight: .semibold))
                 .rotationEffect(.degrees(showSettings ? 180 : 0))
                 .foregroundColor(settingsHover || showSettings ? .txt : .sub)
-                .frame(width: 26, height: 26)
+                .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 7)
                     .fill(Color.white.opacity(settingsHover && !showSettings ? 0.06 : 0)))
                 .contentShape(Rectangle())
@@ -511,19 +506,19 @@ struct TerminalProtectionCard: View {
         controller.enabled && !needsRetry && controller.operationPhase == .idle
     }
 
-    private var protectionAction: some View {
+    private func protectionAction(compact: Bool = false) -> some View {
         Button(action: runProtectionAction) {
             HStack(spacing: 5) {
                 if controller.working { ProgressView().controlSize(.mini) }
                 Text(primaryProtectionTitle).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
             }
             .padding(.horizontal, protectionActionIsSecondary ? 9 : 12)
-            .frame(maxWidth: protectionActionIsSecondary ? nil : .infinity)
+            .frame(maxWidth: compact || protectionActionIsSecondary ? nil : .infinity)
             .frame(height: 28)
-            .foregroundColor(protectionActionIsSecondary ? .sub : .white)
+            .foregroundColor(protectionActionIsSecondary ? .txt : .white)
             .background(RoundedRectangle(cornerRadius: 7)
                 .fill(protectionActionIsSecondary
-                      ? Color.sub.opacity(protectionHover ? 0.14 : 0.07)
+                      ? Color.stroke.opacity(protectionHover ? 0.65 : 0.35)
                       : Color.claude.opacity(protectionHover ? 0.9 : 0.78)))
             .overlay(RoundedRectangle(cornerRadius: 7)
                 .stroke(Color.stroke.opacity(protectionActionIsSecondary ? 1 : 0), lineWidth: 1))
@@ -718,10 +713,19 @@ struct TerminalProtectionCard: View {
     }
 
     private var settings: some View {
-        // Controls only: status, scope and target are the column's job and are not repeated here.
-        VStack(alignment: .leading, spacing: 10) {
+        let scopeHelp = t(controller.desktopScope == .api ? "protection.apiServiceControlHelp" : "protection.scopeExplanation")
+        return VStack(alignment: .leading, spacing: 10) {
             if hasNotices {
                 VStack(alignment: .leading, spacing: 8) { notices }
+            }
+            HStack(spacing: 8) {
+                Text(t("protection.settingsSection"))
+                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.txt)
+                    .lineLimit(1).fixedSize()
+                    .help(scopeHelp)
+                    .accessibilityHint(scopeHelp)
+                Spacer(minLength: 8)
+                protectionAction(compact: true)
             }
             HStack(alignment: .bottom, spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
@@ -766,28 +770,33 @@ struct TerminalProtectionCard: View {
                     }
                     .pickerStyle(.menu).labelsHidden()
                     .font(.system(size: 11))
-                    .frame(maxWidth: .infinity)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(height: 28)
                     .disabled(operationLocked || controller.working || controller.checking)
                     .help(t("protection.saveToApply"))
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if controller.enabled {
-                    Button { Task { await controller.enable() } } label: {
-                        Text(t(controller.hasUnsavedChanges ? "protection.saveSettings" : "common.saved"))
-                            .font(.system(size: 10.5, weight: .semibold))
+                    if controller.hasUnsavedChanges {
+                        Button { Task { await controller.enable() } } label: {
+                            Text(t("protection.saveSettings"))
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .frame(width: 76, height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.white)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.claude))
+                        .disabled(operationLocked || controller.working)
+                        .opacity(operationLocked || controller.working ? 0.55 : 1)
+                        .help(t("protection.saveHelp"))
+                    } else {
+                        Label(t("common.saved"), systemImage: "checkmark")
+                            .font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
                             .frame(width: 76, height: 28)
-                            .contentShape(Rectangle())
+                            .help(t("protection.savedHelp"))
+                            .accessibilityHint(t("protection.savedHelp"))
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(controller.hasUnsavedChanges ? .white : .sub)
-                    .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(controller.hasUnsavedChanges ? Color.claude : Color.cardHi))
-                    .overlay(RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.stroke.opacity(controller.hasUnsavedChanges ? 0 : 1), lineWidth: 1))
-                    .disabled(operationLocked || controller.working || !controller.hasUnsavedChanges)
-                    .opacity(operationLocked || controller.working ? 0.55 : 1)
-                    .help(t(controller.hasUnsavedChanges ? "protection.saveHelp" : "protection.savedHelp"))
                 }
             }
             if let unsavedNote {
@@ -814,21 +823,15 @@ struct TerminalProtectionCard: View {
                 .opacity(operationLocked || controller.working || controller.checking ? 0.55 : 1)
                 .help(t("protection.checkOnlyHelp"))
                 .accessibilityHint(t("protection.checkOnlyHelp"))
-                if controller.lastCheckReport == nil && !controller.checking {
-                    Text(t("protection.readOnly"))
-                        .font(.system(size: 9.5)).foregroundColor(.sub).lineLimit(1)
-                }
                 Spacer(minLength: 8)
                 Button { showCheckHelp.toggle() } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "questionmark.circle").font(.system(size: 10.5))
-                        Text(t("protection.checkHelpButton")).font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundColor(helpHover || showCheckHelp ? .txt : .sub)
-                    .padding(.horizontal, 9).frame(height: 28)
-                    .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.stroke.opacity(helpHover || showCheckHelp ? 0.6 : 0.25)))
-                    .contentShape(Rectangle())
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(helpHover || showCheckHelp ? .txt : .sub)
+                        .frame(width: 28, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 7)
+                            .fill(Color.white.opacity(helpHover || showCheckHelp ? 0.06 : 0)))
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .onHover { helpHover = $0 }
@@ -837,16 +840,6 @@ struct TerminalProtectionCard: View {
                 .popover(isPresented: $showCheckHelp, arrowEdge: .bottom) { checkHelpContent }
             }
             checkResults
-            if controller.desktopScope == .api {
-                Text(t("protection.apiServiceControlHelp"))
-                    .font(.system(size: 9.5)).foregroundColor(.sub)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Divider().opacity(0.5)
-            HStack {
-                Spacer(minLength: 0)
-                protectionAction
-            }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)

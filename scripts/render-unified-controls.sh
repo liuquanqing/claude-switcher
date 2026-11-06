@@ -7,6 +7,8 @@ from pathlib import Path
 s=Path('App/main.swift').read_text()
 Path('_qa/rc7/visual/AppDeclarations.swift').write_text(s[:s.index('if CommandLine.arguments.contains("--stop-protection")')])
 protection_view = Path('App/ProtectionView.swift').read_text()
+protection_view = protection_view.replace('@State private var resultsExpanded = true',
+    '@State private var resultsExpanded = !CommandLine.arguments.contains("--fixture-results-collapsed")')
 initial_state = '@State private var showSettings = false'
 assert protection_view.count(initial_state) == 1
 Path('_qa/rc7/visual/FixtureProtectionView.swift').write_text(protection_view.replace(initial_state,
@@ -25,10 +27,11 @@ help_entry = """    var fixtureHelpOnly = false
     @ViewBuilder var body: some View {
         if fixtureHelpOnly { helpPopover } else { fixtureSummary }
     }
-    private var fixtureSummary: some View {
+    @ViewBuilder private var fixtureSummary: some View {
         let displayedStatus ="""
 Path('_qa/rc7/visual/FixtureViews.swift').write_text(views.replace(help_body, help_entry))
 protection_model = Path('App/Protection.swift').read_text()
+protection_model = protection_model.replace('@Published private(set) var checking = false', '@Published var checking = false')
 demo_time = 'guardCheckedAt = Date()'
 assert protection_model.count(demo_time) == 1
 protection_model = protection_model.replace(demo_time,
@@ -43,6 +46,8 @@ for file in App/*.swift; do
  if [[ "$file" != "App/main.swift" && "$file" != "App/Protection.swift" && "$file" != "App/ProtectionView.swift" && "$file" != "App/Views.swift" ]]; then app_sources+=("$file"); fi
 done
 app_sources+=(_qa/rc7/visual/FixtureProtection.swift _qa/rc7/visual/FixtureProtectionView.swift _qa/rc7/visual/FixtureViews.swift)
+# A failed compilation must not leave an executable from an earlier revision.
+rm -f _qa/rc7/visual/render _qa/rc7/visual/ClaudeSwitcherUIFixture.app/Contents/MacOS/Renderer
 swiftc -module-cache-path _qa/rc7/visual/module-cache -target "$(uname -m)-apple-macos13.0" -parse-as-library -I _qa/controller-check/model-module -L _qa/controller-check/model-module -lSwitcherCore -Xlinker -rpath -Xlinker "$PWD/_qa/controller-check/model-module" "${app_sources[@]}" _qa/rc7/visual/AppDeclarations.swift scripts/fixtures/unified-controls-render.swift -framework SwiftUI -framework AppKit -framework Security -framework ServiceManagement -o _qa/rc7/visual/render > _qa/rc7/visual/render-build.log 2>&1
 python3 - <<'INNER'
 from pathlib import Path
