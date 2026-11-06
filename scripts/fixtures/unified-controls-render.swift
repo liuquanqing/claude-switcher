@@ -107,6 +107,9 @@ actor FictionalRenderGuard: GuardWorking {
    }
    try save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
    try save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
+   var help = TerminalStrip(store:fullStore)
+   help.fixtureHelpOnly = true
+   try save(help.environment(\.appLanguage,language).background(Color.card),name:"cli-help-"+language,width:340)
    if CommandLine.arguments.contains("--fixture-summary-only") { continue }
    if CommandLine.arguments.contains("--fixture-protection-expanded") {
     try save(TerminalProtectionCard(store:fullStore,controller:fullStore.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"settings-"+language,width:500)

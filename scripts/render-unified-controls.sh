@@ -11,6 +11,17 @@ initial_state = '@State private var showSettings = false'
 assert protection_view.count(initial_state) == 1
 Path('_qa/rc7/visual/FixtureProtectionView.swift').write_text(protection_view.replace(initial_state,
     '@State private var showSettings = CommandLine.arguments.contains("--fixture-protection-expanded")'))
+views = Path('App/Views.swift').read_text()
+help_body = '    var body: some View {\n        let displayedStatus ='
+assert views.count(help_body) == 1
+# Test-only selection keeps the real popover inside SwiftUI's environment lifecycle.
+help_entry = """    var fixtureHelpOnly = false
+    @ViewBuilder var body: some View {
+        if fixtureHelpOnly { helpPopover } else { fixtureSummary }
+    }
+    private var fixtureSummary: some View {
+        let displayedStatus ="""
+Path('_qa/rc7/visual/FixtureViews.swift').write_text(views.replace(help_body, help_entry))
 protection_model = Path('App/Protection.swift').read_text()
 demo_time = 'guardCheckedAt = Date()'
 assert protection_model.count(demo_time) == 1
@@ -23,9 +34,9 @@ Path('_qa/rc7/visual/FixtureProtection.swift').write_text(protection_model.repla
 INNER
 app_sources=()
 for file in App/*.swift; do
- if [[ "$file" != "App/main.swift" && "$file" != "App/Protection.swift" && "$file" != "App/ProtectionView.swift" ]]; then app_sources+=("$file"); fi
+ if [[ "$file" != "App/main.swift" && "$file" != "App/Protection.swift" && "$file" != "App/ProtectionView.swift" && "$file" != "App/Views.swift" ]]; then app_sources+=("$file"); fi
 done
-app_sources+=(_qa/rc7/visual/FixtureProtection.swift _qa/rc7/visual/FixtureProtectionView.swift)
+app_sources+=(_qa/rc7/visual/FixtureProtection.swift _qa/rc7/visual/FixtureProtectionView.swift _qa/rc7/visual/FixtureViews.swift)
 swiftc -module-cache-path _qa/rc7/visual/module-cache -target "$(uname -m)-apple-macos13.0" -parse-as-library -I _qa/controller-check/model-module -L _qa/controller-check/model-module -lSwitcherCore -Xlinker -rpath -Xlinker "$PWD/_qa/controller-check/model-module" "${app_sources[@]}" _qa/rc7/visual/AppDeclarations.swift scripts/fixtures/unified-controls-render.swift -framework SwiftUI -framework AppKit -framework Security -framework ServiceManagement -o _qa/rc7/visual/render > _qa/rc7/visual/render-build.log 2>&1
 python3 - <<'INNER'
 from pathlib import Path

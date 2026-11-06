@@ -545,8 +545,7 @@ struct TerminalStrip: View {
         store.updating || store.busy != nil || store.refreshing || store.statusRefreshInProgress
     }
 
-    /// A background check is in flight. The strip keeps showing the last finished result; only the
-    /// info popover mentions the check, so periodic refreshes never reshape the card.
+    /// The strip keeps showing the last finished result while a background check is in flight.
     private var checking: Bool { store.cliStatusRefreshing }
 
     /// When the last check finished. Says nothing about whether it succeeded.
@@ -555,6 +554,14 @@ struct TerminalStrip: View {
         let value = AppLocalization.date(date, language: language, dateStyle: .short, timeStyle: .short, relative: true)
         let when = t("cli.lastCheck", arguments: ["date": value])
         return checking ? when + t("cli.newCheck") : when
+    }
+
+    private var observedLine: String {
+        guard let date = store.cliStatusCheckedAt else {
+            return t(checking ? "cli.observing" : "cli.notObserved")
+        }
+        let value = AppLocalization.date(date, language: language, dateStyle: .short, timeStyle: .short, relative: true)
+        return t("cli.lastObservation", arguments: ["date": value])
     }
 
     /// Sync is only offered after a check found a difference, and only against a subscription
@@ -871,15 +878,17 @@ struct TerminalStrip: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(status).font(.system(size: 11, weight: .semibold)).foregroundColor(statusColor)
-                    Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
-                    Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
+                    if store.cliStatus != .otherAuthentication {
+                        Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(observedLine).font(.system(size: 10)).foregroundColor(.sub)
+                    Text(t("cli.defaultObservationHelp")).font(.system(size: 10)).foregroundColor(.sub)
                         .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
-        .frame(width: 320, alignment: .leading).padding(12)
+        .frame(width: subscriptionDesktop ? 320 : 256, alignment: .leading).padding(12)
     }
 
     private func choiceActionsDisabled(for target: ChoiceTarget) -> Bool {

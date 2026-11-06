@@ -629,7 +629,7 @@ struct TerminalProtectionCard: View {
         return target
     }
     private var statusIcon: String {
-        if controller.desktopScope == .api { return "shield" }
+        if controller.desktopScope == .api { return "shield.lefthalf.filled" }
         if controller.working { return "arrow.triangle.2.circlepath" }
         if !controller.enabled { return "shield" }
         if !controller.guardOnline { return "exclamationmark.triangle.fill" }
