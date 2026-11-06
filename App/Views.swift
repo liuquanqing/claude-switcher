@@ -591,8 +591,8 @@ struct TerminalStrip: View {
         switch store.cliStatus {
         case .matched: return matched ? .good : .sub
         case .different: return subscriptionDesktop ? .warn : .sub
-        case .otherAuthentication, .refreshNeeded: return .warn
-        case .unverified, .needsLogin, .unsupportedStorage, .reported: return .sub
+        case .refreshNeeded: return .warn
+        case .unverified, .needsLogin, .otherAuthentication, .unsupportedStorage, .reported: return .sub
         }
     }
 
@@ -655,7 +655,9 @@ struct TerminalStrip: View {
     var body: some View {
         let displayedStatus = subscriptionDesktop ? terminalStatus : status
         let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
-        let displayedDetail = subscriptionDesktop ? terminalDetail : detail
+        let displayedDetail: String? = subscriptionDesktop
+            ? terminalDetail
+            : (store.cliStatus == .otherAuthentication ? accountDetail : detail)
         let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: summaryIcon).font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
@@ -682,10 +684,12 @@ struct TerminalStrip: View {
                     Spacer(minLength: 4)
                 }
                 .frame(height: 22)
-                Text(displayedDetail)
-                    .font(.system(size: 10.5)).foregroundColor(.sub)
-                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    .help(displayedDetail)
+                if let displayedDetail {
+                    Text(displayedDetail)
+                        .font(.system(size: 10.5)).foregroundColor(.sub)
+                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                        .help(displayedDetail)
+                }
             }
         }
         .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)

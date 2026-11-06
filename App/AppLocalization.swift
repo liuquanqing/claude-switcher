@@ -706,7 +706,7 @@ enum AppLocalization {
             "protection.disabled": "已暂停",
             "protection.unconfirmedStatus": "保护状态未确认",
             "protection.terminationFailed": "未能退出桌面",
-            "protection.notApplicable": "API 不参与订阅保护",
+            "protection.notApplicable": "保护不适用",
             "protection.apiServiceControlHelp": "以下控制仅管理订阅保护，不影响当前 API 配置。",
             "protection.scopeUnknown": "此桌面保护未确认",
             "protection.unmanaged": "此桌面未保护",
