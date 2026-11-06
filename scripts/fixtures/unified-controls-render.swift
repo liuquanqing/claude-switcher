@@ -19,7 +19,7 @@ actor FictionalRenderGuard: GuardWorking {
   }
   if CommandLine.arguments.contains("--fixture-protection-expanded") { scenario += "-expanded" }
   if CommandLine.arguments.contains("--fixture-diagnostic-disagrees") { scenario += "-diagnostic-disagrees" }
-  for flag in ["old-usage", "cli-api", "cli-unknown", "diagnostic", "draft", "checking", "paused", "results-collapsed"] {
+  for flag in ["old-usage", "cli-api", "cli-unknown", "diagnostic", "draft", "checking", "paused", "results-collapsed", "usage-failure", "usage-expired"] {
    if CommandLine.arguments.contains("--fixture-" + flag) { scenario += "-" + flag }
   }
   if CommandLine.arguments.contains("--demo-blocked") { scenario += "-blocked" }
@@ -91,6 +91,20 @@ actor FictionalRenderGuard: GuardWorking {
    fullStore.setAppLanguage(language)
    fullStore.cliConnection.contextDidChange()
    if CommandLine.arguments.contains("--fixture-old-usage") {
+    fullStore.profiles[0].snapshot?.fetchedAt = Date().addingTimeInterval(-8 * 3600)
+    fullStore.profiles[0].usageState = .cached
+   }
+   if CommandLine.arguments.contains("--fixture-usage-failure") {
+    fullStore.profiles[0].snapshot?.fetchedAt = Date().addingTimeInterval(-3 * 86400)
+    fullStore.profiles[0].usageState = .cached
+    fullStore.profiles[1].snapshot?.fetchedAt = Date().addingTimeInterval(-86400)
+    fullStore.profiles[1].usageState = .failed
+    fullStore.profiles[1].error = "官方 CLI 未返回新的对应账号额度，保留原数据。"
+    fullStore.usageNotice = "官方 CLI 未返回新的对应账号额度，保留原数据。"
+   }
+   if CommandLine.arguments.contains("--fixture-usage-expired") {
+    fullStore.profiles[0].snapshot?.session?.resetsAt = Date().addingTimeInterval(-3600)
+    fullStore.profiles[0].snapshot?.weekly?.resetsAt = Date().addingTimeInterval(-3600)
     fullStore.profiles[0].snapshot?.fetchedAt = Date().addingTimeInterval(-8 * 3600)
     fullStore.profiles[0].usageState = .cached
    }

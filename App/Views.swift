@@ -34,7 +34,7 @@ func pct(_ v: Double?) -> String { v.map { String(Int($0.rounded())) } ?? "--" }
 func countdown(_ d: Date?, language: String, now: Date = Date()) -> String {
     guard let d else { return appText("format.resetUnknown", language: language) }
     let s = Int(d.timeIntervalSince(now))
-    if s <= 0 { return appText("format.resetDue", language: language) }
+    if s <= 0 { return appText("format.resetPassed", language: language) }
     let h = s / 3600, m = (s % 3600) / 60
     if h > 0 {
         return appText("format.resetHours", language: language,
@@ -46,7 +46,7 @@ func countdown(_ d: Date?, language: String, now: Date = Date()) -> String {
 
 func weekdayTime(_ d: Date?, language: String, now: Date = Date()) -> String {
     guard let d else { return appText("format.resetUnknown", language: language) }
-    if d.timeIntervalSince(now) <= 0 { return appText("format.resetDue", language: language) }
+    if d.timeIntervalSince(now) <= 0 { return appText("format.resetPassed", language: language) }
     let f = DateFormatter()
     f.locale = AppLocalization.locale(for: language)
     f.timeZone = .current
@@ -56,7 +56,7 @@ func weekdayTime(_ d: Date?, language: String, now: Date = Date()) -> String {
 
 func weeklyReset(_ d: Date?, language: String, now: Date = Date()) -> String {
     guard let d else { return appText("format.resetUnknown", language: language) }
-    if d.timeIntervalSince(now) <= 0 { return appText("format.resetDue", language: language) }
+    if d.timeIntervalSince(now) <= 0 { return appText("format.resetPassed", language: language) }
     return appText("format.weeklyReset", language: language,
                    arguments: ["date": weekdayTime(d, language: language, now: now)])
 }
@@ -314,7 +314,7 @@ struct Header: View {
                 if subscriptionDesktop {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
-                        Text(appText("account.current", language: language)).font(.system(size: 9.5, weight: .medium)).foregroundColor(.claude.opacity(0.85))
+                        Text(appText("account.current", language: language)).font(.system(size: 10, weight: .medium)).foregroundColor(.claude)
                             .fixedSize()
                     }
                     Text([accountLine(a, language: language), s?.plan]
@@ -963,7 +963,7 @@ struct UsageMetric: View {
             }
             .foregroundColor(levelColor(value))
             Bar(value: value, color: levelColor(value), height: 3)
-            Text(reset).font(.system(size: 9)).foregroundColor(.sub.opacity(0.86))
+            Text(reset).font(.system(size: 10)).foregroundColor(.sub)
                 .lineLimit(1).minimumScaleFactor(0.82)
                 .help(resetHelp)
                 .accessibilityHint(resetHelp)
@@ -1022,24 +1022,28 @@ struct ProfileCard: View {
             HStack(spacing: 5) {
                 ProgressView().controlSize(.mini)
                 Text(t("usage.updating"))
-            }.foregroundColor(.sub.opacity(0.8))
+            }.foregroundColor(.sub)
         case .failed:
-            Label(t("usage.failedCached", arguments: ["age": age]), systemImage: "exclamationmark.triangle.fill")
-                .foregroundColor(.warn).lineLimit(1)
+            HStack(spacing: 5) {
+                Image(systemName: "exclamationmark.circle")
+                Text(t("usage.updated", arguments: ["age": age]))
+            }
+                .foregroundColor(.sub).lineLimit(1)
                 .help(p.error.map { AppLocalization.message($0, language: language) } ?? t("usage.requestFailed"))
+                .accessibilityLabel(t("usage.updateFailedDetail"))
         case .blocked:
-            Text(t("usage.blockedCached", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.blockedCached", arguments: ["age": age])).foregroundColor(.sub)
                 .help(t("usage.blockedHelp"))
         case .loaded where p.live && !resetReached:
             EmptyView()
         case .loaded where resetReached:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub)
                 .help(t("usage.resetDueCachedHelp"))
         case .loaded:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub)
                 .help(t("usage.cacheTimeHelp"))
         case .notRequested, .cached:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub)
                 .help(t("usage.cacheTimeHelp"))
         }
     }
@@ -1111,7 +1115,7 @@ struct ProfileCard: View {
                                         ]))
                         }
                         Spacer(minLength: 0)
-                        usageFooter(snapshot, now: context.date).font(.system(size: 9.5))
+                        usageFooter(snapshot, now: context.date).font(.system(size: 10))
                             .frame(height: 12, alignment: .leading)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -1119,13 +1123,13 @@ struct ProfileCard: View {
             } else {
                 let ph = placeholder
                 Spacer(minLength: 0)
-                VStack(spacing: 6) {
+                VStack(spacing: 5) {
                     if ph.spinner {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: ph.icon).font(.system(size: 18, weight: .light)).foregroundColor(ph.color)
+                        Image(systemName: ph.icon).font(.system(size: 16, weight: .light)).foregroundColor(.sub)
                     }
-                    Text(ph.title).font(.system(size: 10.5, weight: .medium)).foregroundColor(ph.color)
+                    Text(ph.title).font(.system(size: 10.5, weight: .regular)).foregroundColor(.sub)
                     if let detail = ph.detail {
                         Text(detail).font(.system(size: 9.5)).foregroundColor(.sub)
                             .multilineTextAlignment(.center).lineLimit(2).help(detail)
@@ -1175,8 +1179,8 @@ struct AddAccountEntry: View {
     private var idle: some View {
         Button { editing = true } label: {
             VStack(spacing: 7) {
-                Image(systemName: "plus").font(.system(size: 17, weight: .light))
-                Text(t("account.add")).font(.system(size: 11.5, weight: .medium))
+                Image(systemName: "plus").font(.system(size: 15, weight: .light))
+                Text(t("account.add")).font(.system(size: 11, weight: .regular))
             }
             .foregroundColor(hover ? .txt : .sub)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1366,20 +1370,20 @@ struct Panel: View {
         if let notice = store.usageNotice {
             let text = store.profiles.contains(where: { $0.usageState == .blocked })
                 ? t("refresh.blocked") : t("refresh.noNewData")
-            return (text, .warn, generated(notice))
+            return (text, .sub, generated(notice))
         }
         if store.profiles.contains(where: { $0.usageState == .blocked }) {
-            return (t("refresh.blocked"), .warn, t("refresh.blockedHelp"))
+            return (t("refresh.blocked"), .sub, t("refresh.blockedHelp"))
         }
         let failed = store.profiles.filter { $0.usageState == .failed }.count
         let hasNewData = store.profiles.contains { $0.usageState == .loaded }
         if failed > 0 {
             if hasNewData, let last = store.lastRefresh {
                 let age = ago(last, language: language, now: now)
-                return (t("refresh.failureSummary", arguments: ["age": age, "count": String(failed)]), .warn,
+                return (t("refresh.failureSummary", arguments: ["age": age, "count": String(failed)]), .sub,
                         t("refresh.failureHelp", arguments: ["sampled": fullDateTime(last, language: language)]))
             }
-            return (t("refresh.failureCached", arguments: ["count": String(failed)]), .warn,
+            return (t("refresh.failureCached", arguments: ["count": String(failed)]), .sub,
                     t("refresh.failureCachedHelp"))
         }
         guard hasNewData, let last = store.lastRefresh else {
@@ -1509,7 +1513,7 @@ struct Panel: View {
                     TimelineView(.periodic(from: .now, by: 60)) { context in
                         let summary = refreshSummary(now: context.date)
                         HStack(spacing: 5) {
-                            Image(systemName: summary.color == .sub ? "clock" : "exclamationmark.triangle")
+                            Image(systemName: store.usageNotice == nil ? "clock" : "exclamationmark.circle")
                                 .font(.system(size: 10))
                             Text(summary.text).font(.system(size: 11, weight: .medium))
                                 .lineLimit(1).minimumScaleFactor(0.85)

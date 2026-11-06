@@ -676,7 +676,7 @@ actor FixtureGuardWorker: GuardWorking {
           != ago(usageClock.addingTimeInterval(-119), language: "en", now: usageClock.addingTimeInterval(60)),
           "cache age advances on the display clock independently of data refresh")
   for language in ["zh", "en"] {
-   let pendingReset = appText("format.resetDue", language: language)
+   let pendingReset = appText("format.resetPassed", language: language)
    require(countdown(usageClock.addingTimeInterval(-1), language: language, now: usageClock) == pendingReset
            && weeklyReset(usageClock.addingTimeInterval(-1), language: language, now: usageClock) == pendingReset
            && weekdayTime(usageClock.addingTimeInterval(-1), language: language, now: usageClock) == pendingReset,
