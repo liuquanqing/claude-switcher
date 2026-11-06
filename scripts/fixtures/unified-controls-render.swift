@@ -19,6 +19,9 @@ actor FictionalRenderGuard: GuardWorking {
   }
   if CommandLine.arguments.contains("--fixture-protection-expanded") { scenario += "-expanded" }
   if CommandLine.arguments.contains("--fixture-diagnostic-disagrees") { scenario += "-diagnostic-disagrees" }
+  for flag in ["old-usage", "cli-api", "cli-unknown"] {
+   if CommandLine.arguments.contains("--fixture-" + flag) { scenario += "-" + flag }
+  }
   return URL(fileURLWithPath:"_qa/rc7-ui-revision/visual").appendingPathComponent(scenario)
  }
  @MainActor static func main() {
@@ -85,6 +88,18 @@ actor FictionalRenderGuard: GuardWorking {
    let fullStore = Store(demo:true)
    fullStore.setAppLanguage(language)
    fullStore.cliConnection.contextDidChange()
+   if CommandLine.arguments.contains("--fixture-old-usage") {
+    fullStore.profiles[0].snapshot?.fetchedAt = Date().addingTimeInterval(-8 * 3600)
+    fullStore.profiles[0].usageState = .cached
+   }
+   if CommandLine.arguments.contains("--fixture-cli-api") {
+    fullStore.cliStatus = .otherAuthentication; fullStore.cliEmail = nil; fullStore.cliProfile = nil
+    fullStore.cliStandaloneVerified = false
+   }
+   if CommandLine.arguments.contains("--fixture-cli-unknown") {
+    fullStore.cliStatus = .unverified; fullStore.cliStandaloneVerified = false
+    fullStore.cliStatusCheckedAt = nil; fullStore.cliStatusDetail = nil
+   }
    if CommandLine.arguments.contains("--fixture-diagnostic-disagrees") {
     fullStore.protection.lastDecision = SafetyDecision(.proxyDisconnected)
     fullStore.protection.status = fullStore.protection.lastDecision.message
@@ -92,6 +107,7 @@ actor FictionalRenderGuard: GuardWorking {
    }
    try save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
    try save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
+   if CommandLine.arguments.contains("--fixture-summary-only") { continue }
    if CommandLine.arguments.contains("--fixture-protection-expanded") {
     try save(TerminalProtectionCard(store:fullStore,controller:fullStore.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"settings-"+language,width:500)
     continue

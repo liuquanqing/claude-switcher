@@ -7,8 +7,8 @@ import SwitcherCore
 }
 
 @MainActor extension Store {
-    /// Footer refresh consumes the CLI's existing sample. It never starts
-    /// a native CLI process, requests credentials or attempts login repair.
+    /// Explicit footer refresh imports existing samples, then queries prepared
+    /// account bindings through an isolated, proxy-constrained official CLI.
     func refreshAllStatuses(operations supplied: StatusRefreshOperations? = nil) async {
         guard !updating, busy == nil, !refreshing, !cliStatusRefreshing,
               !statusRefreshInProgress, !automaticRefreshInProgress else { return }
@@ -39,6 +39,10 @@ import SwitcherCore
         } catch {
             lastRefreshDiagnostics?.outcome = "cacheUnavailable"
             usageNotice = error.localizedDescription
+        }
+        if supplied == nil && !isDemo {
+            await refreshLinkedAccountUsage()
+            lastRefreshDiagnostics?.outcome = usageNotice == nil ? "completed" : "queryIncomplete"
         }
         protection.refreshStatus()
     }

@@ -665,31 +665,25 @@ struct TerminalProtectionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if controller.desktopScope == .api {
-                protectionHeader
-                    .padding(.horizontal, 10).padding(.vertical, 2)
-                    .background(showSettings ? panelTint : Color.clear)
-            } else {
-                HStack(spacing: 0) {
-                    TerminalStrip(store: store)
-                        // The divider closes off the summary side only, so the tinted column runs
-                        // straight into the panel below it like a tab.
-                        .overlay(alignment: .bottom) {
-                            if showSettings { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
-                        }
-                    Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
-                        .padding(.vertical, showSettings ? 0 : 10)
-                    VStack(alignment: .leading, spacing: 0) {
-                        protectionHeader
-                        Spacer(minLength: 0)
+            HStack(spacing: 0) {
+                TerminalStrip(store: store)
+                    // The divider closes off the summary side only, so the tinted column runs
+                    // straight into the panel below it like a tab.
+                    .overlay(alignment: .bottom) {
+                        if showSettings { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
                     }
-                    .padding(.horizontal, 4).padding(.vertical, 4)
-                    .frame(width: 164)
-                    .frame(maxHeight: .infinity)
-                    .background(showSettings ? panelTint : Color.clear)
+                Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
+                    .padding(.vertical, showSettings ? 0 : 10)
+                VStack(alignment: .leading, spacing: 0) {
+                    protectionHeader
+                    Spacer(minLength: 0)
                 }
-                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4).padding(.vertical, 4)
+                .frame(width: 164)
+                .frame(maxHeight: .infinity)
+                .background(showSettings ? panelTint : Color.clear)
             }
+            .fixedSize(horizontal: false, vertical: true)
 
             if showSettings {
                 settings.background(panelTint)

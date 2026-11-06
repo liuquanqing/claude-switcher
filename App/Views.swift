@@ -395,43 +395,10 @@ struct TerminalStrip: View {
     private var showsConnectionPhase: Bool { officialReportActive && subscriptionDesktop }
 
     private var summaryTitle: String {
-        switch protection.desktopScope {
-        case .subscription: return t("cli.title")
-        case .api: return t("api.desktopTitle")
-        case .unknown: return t("api.desktopConfiguration")
-        }
+        t(subscriptionDesktop ? "cli.title" : "cli.defaultTitle")
     }
 
-    private var summaryIcon: String {
-        subscriptionDesktop ? "terminal" : "desktopcomputer"
-    }
-
-    private var apiSourceName: String? {
-        guard protection.desktopScope == .api else { return nil }
-        switch protection.apiConfiguration {
-        case .magpie: return "Magpie"
-        case .ccSwitch: return "CC Switch"
-        case .subscription, .unknownAPI, .conflict, .unconfirmed: return nil
-        }
-    }
-
-    private var apiSourceTag: String {
-        if let apiSourceName { return apiSourceName }
-        if protection.desktopScope == .unknown { return t("api.unrecognized") }
-        return t(protection.apiConfiguration == .conflict ? "api.sourceConflict" : "api.sourceUnconfirmed")
-    }
-
-    private var apiSourceColor: Color {
-        apiSourceName == nil ? .warn : .sub
-    }
-
-    private var apiDetail: String {
-        guard protection.desktopScope == .api else { return t("api.unknownDetail") }
-        if let apiSourceName {
-            return t("api.desktopManagedBy", arguments: ["source": apiSourceName])
-        }
-        return t(protection.apiConfiguration == .conflict ? "api.desktopSourceConflict" : "api.desktopSourceUnknown")
-    }
+    private var summaryIcon: String { "terminal" }
 
     private var verifiedMatch: Bool {
         connection.phase == .matched && connection.choice != nil && connection.checkedAt != nil
@@ -608,8 +575,8 @@ struct TerminalStrip: View {
     private var status: String {
         switch store.cliStatus {
         case .unverified: return t(standaloneVerified ? "cli.identityVerified" : "cli.unverified")
-        case .matched: return t(matched ? "cli.matched" : "cli.unverified")
-        case .different: return t("cli.different")
+        case .matched: return t(matched ? "cli.matched" : "cli.subscriptionIdentity")
+        case .different: return t(subscriptionDesktop ? "cli.different" : "cli.subscriptionIdentity")
         case .needsLogin: return t("cli.needsLogin")
         case .otherAuthentication: return t("cli.otherAuthentication")
         // A limit of this app's checker, not a terminal fault: neutral colour, no "unsupported" alarm.
@@ -623,7 +590,8 @@ struct TerminalStrip: View {
     private var statusColor: Color {
         switch store.cliStatus {
         case .matched: return matched ? .good : .sub
-        case .different, .otherAuthentication, .refreshNeeded: return .warn
+        case .different: return subscriptionDesktop ? .warn : .sub
+        case .otherAuthentication, .refreshNeeded: return .warn
         case .unverified, .needsLogin, .unsupportedStorage, .reported: return .sub
         }
     }
@@ -644,7 +612,9 @@ struct TerminalStrip: View {
             return t("cli.noResult")
         case .reported: return accountDetail ?? t("cli.localReport")
         case .refreshNeeded: return t("cli.savedCredentials")
-        case .matched: return matched ? accountDetail ?? t("cli.matchesDesktop") : t("cli.recheckDesktop")
+        case .matched:
+            if !subscriptionDesktop { return accountDetail ?? t("cli.defaultAccountUnknown") }
+            return matched ? accountDetail ?? t("cli.matchesDesktop") : t("cli.recheckDesktop")
         case .different: return accountDetail ?? t("cli.defaultAccountUnknown")
         case .needsLogin: return t("cli.noSubscription")
         case .otherAuthentication: return t("cli.mayOverride")
@@ -683,6 +653,10 @@ struct TerminalStrip: View {
     }
 
     var body: some View {
+        let displayedStatus = subscriptionDesktop ? terminalStatus : status
+        let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
+        let displayedDetail = subscriptionDesktop ? terminalDetail : detail
+        let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: summaryIcon).font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
                 .frame(width: 28, height: 28)
@@ -691,32 +665,27 @@ struct TerminalStrip: View {
                 HStack(spacing: 6) {
                     Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
                         .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    if subscriptionDesktop {
-                        Button { showHelp.toggle() } label: {
-                            HStack(spacing: 4) {
-                                Text(terminalStatus).font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(terminalStatusColor).lineLimit(1).minimumScaleFactor(0.8)
-                                Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
-                            }
-                            .frame(height: 22)
-                            .contentShape(Rectangle())
+                    Button { showHelp.toggle() } label: {
+                        HStack(spacing: 4) {
+                            Text(displayedStatus).font(.system(size: 10, weight: .medium))
+                                .foregroundColor(displayedStatusColor).lineLimit(1).minimumScaleFactor(0.8)
+                            Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
                         }
-                        .buttonStyle(.plain)
-                        .help(t("cli.statusHelp"))
-                        .accessibilityLabel("\(t("cli.statusAccessibility")): \(terminalStatus)")
-                        .accessibilityHint(t("cli.statusHelp"))
-                        .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
-                    } else {
-                        Text(apiSourceTag).font(.system(size: 10, weight: .medium))
-                            .foregroundColor(apiSourceColor).lineLimit(1).minimumScaleFactor(0.8)
+                        .frame(height: 22)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .help(statusHelp)
+                    .accessibilityLabel("\(t("cli.statusAccessibility")): \(displayedStatus)")
+                    .accessibilityHint(statusHelp)
+                    .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
                     Spacer(minLength: 4)
                 }
                 .frame(height: 22)
-                Text(subscriptionDesktop ? terminalDetail : apiDetail)
+                Text(displayedDetail)
                     .font(.system(size: 10.5)).foregroundColor(.sub)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                    .help(subscriptionDesktop ? terminalDetail : apiDetail)
+                    .help(displayedDetail)
             }
         }
         .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
@@ -831,46 +800,46 @@ struct TerminalStrip: View {
 
     private var helpPopover: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(terminalStatus).font(.system(size: 11, weight: .semibold)).foregroundColor(terminalStatusColor)
-                Text(terminalDetail).font(.system(size: 10.5)).foregroundColor(.sub)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let terminalBoundary {
-                    Text(terminalBoundary).font(.system(size: 10)).foregroundColor(.sub)
-                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                }
-                if showsConnectionPhase, let bindingCheckedLine {
-                    Text(bindingCheckedLine).font(.system(size: 10)).foregroundColor(.sub)
-                }
-            }
-            primaryAction
-            Divider().opacity(0.5)
-            DisclosureGroup(t("cli.advanced")) {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(t("cli.defaultStatus")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
-                    Text(status).font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
-                    Text(detail).font(.system(size: 10)).foregroundColor(.sub)
+            if subscriptionDesktop {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(terminalStatus).font(.system(size: 11, weight: .semibold)).foregroundColor(terminalStatusColor)
+                    Text(terminalDetail).font(.system(size: 10.5)).foregroundColor(.sub)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
-                    Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
-                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                    if canCopyScoped {
-                        Button(action: copyScopedCommand) {
-                            HStack(spacing: 5) {
-                                Image(systemName: copyFeedback == true ? "checkmark" : "doc.on.doc")
-                                Text(copyTitle)
-                            }
-                            .font(.system(size: 10.5, weight: .medium))
-                            .padding(.horizontal, 9).frame(height: 28)
-                            .foregroundColor(copyFeedback == false ? .warn : .txt)
-                            .background(RoundedRectangle(cornerRadius: 7)
-                                .fill(Color.sub.opacity(copyHover ? 0.14 : 0.08)))
-                        }
-                        .buttonStyle(.plain).disabled(controlsLocked || checking)
-                        .help(t("cli.copyScopedHelp"))
-                        .onHover { copyHover = $0 }
+                    if let terminalBoundary {
+                        Text(terminalBoundary).font(.system(size: 10)).foregroundColor(.sub)
+                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                     }
-                    if protection.desktopScope == .subscription {
+                    if showsConnectionPhase, let bindingCheckedLine {
+                        Text(bindingCheckedLine).font(.system(size: 10)).foregroundColor(.sub)
+                    }
+                }
+                primaryAction
+                Divider().opacity(0.5)
+                DisclosureGroup(t("cli.advanced")) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(t("cli.defaultStatus")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
+                        Text(status).font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
+                        Text(detail).font(.system(size: 10)).foregroundColor(.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
+                        Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
+                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                        if canCopyScoped {
+                            Button(action: copyScopedCommand) {
+                                HStack(spacing: 5) {
+                                    Image(systemName: copyFeedback == true ? "checkmark" : "doc.on.doc")
+                                    Text(copyTitle)
+                                }
+                                .font(.system(size: 10.5, weight: .medium))
+                                .padding(.horizontal, 9).frame(height: 28)
+                                .foregroundColor(copyFeedback == false ? .warn : .txt)
+                                .background(RoundedRectangle(cornerRadius: 7)
+                                    .fill(Color.sub.opacity(copyHover ? 0.14 : 0.08)))
+                            }
+                            .buttonStyle(.plain).disabled(controlsLocked || checking)
+                            .help(t("cli.copyScopedHelp"))
+                            .onHover { copyHover = $0 }
+                        }
                         Button { syncTarget = store.current; confirmSync = true } label: {
                             Text(t("cli.syncTo")).font(.system(size: 10.5, weight: .semibold))
                                 .padding(.horizontal, 9).frame(height: 28)
@@ -882,10 +851,19 @@ struct TerminalStrip: View {
                         .help(t("cli.syncHelp", arguments: ["account": store.current]))
                         .onHover { syncHover = $0 }
                     }
+                    .padding(.top, 8)
                 }
-                .padding(.top, 8)
+                .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(status).font(.system(size: 11, weight: .semibold)).foregroundColor(statusColor)
+                    Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
+                    Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
             }
-            .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
         }
         .frame(width: 320, alignment: .leading).padding(12)
     }
@@ -1032,13 +1010,13 @@ struct ProfileCard: View {
         case .loaded where p.live && !resetReached:
             EmptyView()
         case .loaded where resetReached:
-            Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.resetDueCachedHelp"))
         case .loaded:
-            Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.cacheTimeHelp"))
         case .notRequested, .cached:
-            Text(t("usage.cachedUpdated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
+            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub.opacity(0.8))
                 .help(t("usage.cacheTimeHelp"))
         }
     }
