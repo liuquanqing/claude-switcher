@@ -391,7 +391,7 @@ struct TerminalProtectionCard: View {
                 }
             } else {
                 statusRow
-                if controller.desktopScope != .api {
+                Group {
                     Text(statusDetail.isEmpty ? " " : statusDetail)
                         .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
                         .lineLimit(1).minimumScaleFactor(0.75)
@@ -614,7 +614,7 @@ struct TerminalProtectionCard: View {
     /// The one useful fact per state. The target shown is always the saved one the guard runs with,
     /// never the draft in the settings field.
     private var statusDetail: String {
-        if controller.desktopScope == .api { return "" }
+        if controller.desktopScope == .api { return t("protection.subscriptionOnly") }
         let target = t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")])
         if controller.working { return target }
         if !controller.enabled { return controller.activeCountry == nil ? "" : target }

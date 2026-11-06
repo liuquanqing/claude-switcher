@@ -671,7 +671,9 @@ struct TerminalStrip: View {
                         HStack(spacing: 4) {
                             Text(displayedStatus).font(.system(size: 10, weight: .medium))
                                 .foregroundColor(displayedStatusColor).lineLimit(1).minimumScaleFactor(0.8)
-                            Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
+                            if displayedDetail != nil {
+                                Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
+                            }
                         }
                         .frame(height: 22)
                         .contentShape(Rectangle())
@@ -689,6 +691,14 @@ struct TerminalStrip: View {
                         .font(.system(size: 10.5)).foregroundColor(.sub)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                         .help(displayedDetail)
+                } else {
+                    Button { showHelp = true } label: {
+                        Label(t("cli.authDetails"), systemImage: "info.circle")
+                            .font(.system(size: 10.5)).foregroundColor(.sub)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(statusHelp)
                 }
             }
         }
