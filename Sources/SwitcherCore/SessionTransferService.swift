@@ -89,52 +89,113 @@ public struct SessionTransferService {
         return result
     }
     func removed(_ index: Index, in c: Catalogue) -> Bool {
-        index.archived || c.archived.contains(index.logical) || [index.cli, index.logical, index.cli + ".json", index.logical + ".json"].contains(where: c.deleted.contains)
+        index.archived || listed(index, in: c)
     }
-    func hasTranscript(_ cli: String) throws -> Bool {
-        guard Disk.segment(cli) else { return false }
+    func listed(_ index: Index, in c: Catalogue) -> Bool {
+        c.archived.contains(index.logical) || [index.cli, index.logical, index.cli + ".json", index.logical + ".json"].contains(where: c.deleted.contains)
+    }
+    func removedInTarget(_ source: Index, _ target: Catalogue) -> Bool {
+        listed(source, in: target) || target.indexes.values.contains { old in
+            (old.logical == source.logical || old.cli == source.cli || old.name == source.name) && removed(old, in: target)
+        }
+    }
+    func hasTranscript(_ cli: String) throws -> Bool { try transcript(cli) != nil }
+    func transcript(_ cli: String) throws -> URL? {
+        guard Disk.segment(cli) else { return nil }
         let projects = try Disk.directories(transcripts)
-        var matches = 0
+        var matches: [URL] = []
         for project in projects {
             let file = project.appendingPathComponent(cli + ".jsonl")
             if FileManager.default.fileExists(atPath: file.path) {
                 _ = try Disk.identity(file, directory: false)
                 guard FileManager.default.isReadableFile(atPath: file.path) else { throw SessionTransferFailure("引用的原文不可读取。") }
-                matches += 1
+                matches.append(file)
             }
         }
-        return matches == 1
+        return matches.count == 1 ? matches[0] : nil
     }
-    func row(_ index: Index, _ kind: SessionTransferKind, _ reason: String) -> SessionTransferRow {
+    func modifiedMilliseconds(_ file: URL) throws -> Double {
+        var info = stat()
+        guard lstat(file.path, &info) == 0 else { throw SessionTransferFailure("引用的原文不可读取。") }
+        return Double(info.st_mtimespec.tv_sec) * 1000 + Double(info.st_mtimespec.tv_nsec) / 1_000_000
+    }
+    static let continuationFields = ["cliSessionId", "priorCliSessionIds", "priorCliSessionLeftAt", "rewindEdges", "transcriptModelStates",
+                                     "lastAssistantCliSessionId", "lastAssistantUuid", "postTurnSummary", "postTurnSummaryFor",
+                                     "completedTurns", "lastActivityAt", "lastTurnEdgeAt", "latestUserFrameAt"]
+    func continuation(_ source: Index, from old: Index, updates: Bool) throws -> (SessionTransferKind, String, Data?) {
+        let unconfirmed = "无法确认是同一段对话，不覆盖。"
+        guard old.cwd == source.cwd else { return (.blocked, "两边项目路径不同，不覆盖。", nil) }
+        let fork = "两边各自聊过，可能已分叉，不覆盖。"
+        if let targetChain = old.object["priorCliSessionIds"] as? [String], targetChain.contains(source.cli) {
+            guard let leftAt = (old.object["priorCliSessionLeftAt"] as? [String: Any]).flatMap({ Index.number($0[source.cli]) }),
+                  let sd = source.time, sd <= leftAt, let sourceTranscript = try transcript(source.cli),
+                  try modifiedMilliseconds(sourceTranscript) <= leftAt else {
+                return (.blocked, fork, nil)
+            }
+            return (.skip, "目标进度较新，保留目标。", nil)
+        }
+        guard let chain = source.object["priorCliSessionIds"] as? [String] else { return (.blocked, unconfirmed, nil) }
+        let oldPrior = old.object["priorCliSessionIds"]
+        guard oldPrior == nil || oldPrior is [String] else { return (.blocked, unconfirmed, nil) }
+        let oldChain = (oldPrior as? [String] ?? []) + [old.cli]
+        guard chain.count >= oldChain.count, Array(chain.prefix(oldChain.count)) == oldChain else { return (.blocked, unconfirmed, nil) }
+        guard let leftAt = (source.object["priorCliSessionLeftAt"] as? [String: Any]).flatMap({ Index.number($0[old.cli]) }),
+              let sd = source.time, let dd = old.time else {
+            return (.blocked, "缺少切换记录，无法确认是否分叉，不覆盖。", nil)
+        }
+        guard let oldTranscript = try transcript(old.cli) else { return (.blocked, "早期聊天记录文件缺失，无法复制。", nil) }
+        guard dd <= leftAt, sd > dd, try modifiedMilliseconds(oldTranscript) <= leftAt else { return (.blocked, fork, nil) }
+        if let st = source.turns, let dt = old.turns, dt > st { return (.blocked, fork, nil) }
+        guard updates else { return (.skip, "目标停在旧记录；开启更新后可接上。", nil) }
+        var object = old.object
+        // The segment chain is one unit: references, rewind edges, model state and progress
+        // move together. Titles, settings, connectors and unknown target fields stay with the target.
+        for key in Self.continuationFields { object[key] = source.object[key] }
+        return (.update, "来源换了新记录继续聊过，勾选后目标会接上，标题与设置保留。", try Disk.encode(object))
+    }
+    func row(_ index: Index, _ kind: SessionTransferKind, _ reason: String, continuation: Bool = false) -> SessionTransferRow {
         SessionTransferRow(id: index.name, title: index.title, cwd: index.cwd,
-            lastActivity: Date(timeIntervalSince1970: (index.time ?? Index.number(index.object["createdAt"]) ?? 0) / 1000), kind: kind, reason: reason, identity: index.identity)
+            lastActivity: Date(timeIntervalSince1970: (index.time ?? Index.number(index.object["createdAt"]) ?? 0) / 1000), kind: kind, reason: reason,
+            identity: index.identity, continuation: continuation)
     }
     func decision(_ source: Index, sourceCatalogue: Catalogue, target: Catalogue, updates: Bool) throws -> (SessionTransferRow, SessionTransferChange?) {
-        func result(_ kind: SessionTransferKind, _ reason: String, before: Data? = nil, after: Data? = nil, destinationTitle: String? = nil) -> (SessionTransferRow, SessionTransferChange?) {
-            (row(source, kind, reason), after.map { SessionTransferChange(name: source.name, title: destinationTitle ?? source.title, kind: kind, before: before, after: $0) })
+        func result(_ kind: SessionTransferKind, _ reason: String, before: Data? = nil, after: Data? = nil, destinationTitle: String? = nil,
+                    continuation: Bool = false) -> (SessionTransferRow, SessionTransferChange?) {
+            (row(source, kind, reason, continuation: continuation),
+             after.map { SessionTransferChange(name: source.name, title: destinationTitle ?? source.title, kind: kind, before: before, after: $0) })
         }
-        if removed(source, in: sourceCatalogue) || removed(source, in: target) { return result(.blocked, "归档或删除的会话不自动带回。") }
+        if removed(source, in: sourceCatalogue) {
+            return result(.skip, removedInTarget(source, target) ? "两边都已归档或删除，保持现状。" : "来源已归档或删除，不复制。")
+        }
+        if listed(source, in: target) { return result(.blocked, "目标已归档或删除，保留目标状态。") }
         do {
-            guard try hasTranscript(source.cli) else { return result(.blocked, "引用原文缺失或不唯一，不能只复制空索引。") }
+            guard try hasTranscript(source.cli) else { return result(.blocked, "聊天记录文件缺失或重复，无法复制。") }
             if let value = source.object["priorCliSessionIds"] {
                 guard let previous = value as? [String], previous.allSatisfy(Disk.segment) else { return result(.blocked, "历史分段标识格式未支持。") }
                 for id in Set(previous) where id != source.cli {
-                    guard try hasTranscript(id) else { return result(.blocked, "历史分段原文缺失，暂不自动复制。") }
+                    guard try hasTranscript(id) else { return result(.blocked, "早期聊天记录文件缺失，无法复制。") }
                 }
             }
         } catch { return result(.blocked, "引用原文不可读取，保留该会话不改。") }
-        guard target.unreadable.isEmpty else { return result(.blocked, "目标有不可读索引，不能把未知记录当作不存在。") }
+        guard target.unreadable.isEmpty else { return result(.blocked, "目标里有无法读取的记录，为免误判，暂不复制。") }
         let related = target.indexes.values.filter { $0.logical == source.logical || $0.cli == source.cli || $0.name == source.name }
         guard related.count <= 1 else { return result(.blocked, "目标有多个相关会话，无法唯一确认，保留现状。") }
         if let old = related.first {
             if removed(old, in: target) { return result(.blocked, "目标已归档或删除，保留目标状态。") }
+            if old.logical == source.logical, old.cli != source.cli, old.name == source.name {
+                let (kind, reason, after) = try continuation(source, from: old, updates: updates)
+                return result(kind, reason, before: after == nil ? nil : old.bytes, after: after, destinationTitle: old.title, continuation: kind == .update)
+            }
             guard old.logical == source.logical, old.cli == source.cli else {
-                return result(.blocked, "同名、分支或续接关系未能确认，不覆盖目标。")
+                return result(.blocked, "无法确认是同一段对话，不覆盖。")
             }
             guard old.name == source.name else { return result(.skip, "目标已有同一会话，保留目标条目。") }
-            guard old.cwd == source.cwd else { return result(.blocked, "项目路径不同，不自动改写目标会话。") }
+            guard old.cwd == source.cwd else { return result(.blocked, "两边项目路径不同，不覆盖。") }
+            if source.turns == nil, old.turns == nil, let sd = source.time, old.time == sd {
+                return result(.skip, "目标已同步，无需重复复制。")
+            }
             guard let st = source.turns, let dt = old.turns, let sd = source.time, let dd = old.time else {
-                return result(.blocked, "进度字段不完整，不能安全更新。")
+                return result(.blocked, "缺少可比较的进度，不覆盖。")
             }
             if dt > st || dd > sd { return result(.skip, "目标进度较新，保留目标。") }
             if dt == st && dd == sd { return result(.skip, "目标已同步，无需重复复制。") }

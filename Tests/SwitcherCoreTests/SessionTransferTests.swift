@@ -18,11 +18,12 @@ final class SessionTransferTests: FixtureTest {
         transcripts = try directory("projects"); _ = try directory("projects/project")
         backups = folder.appendingPathComponent("backups")
     }
-    @discardableResult func index(_ name: String = "one", cli: String? = nil, logical: String? = nil, turns: Int = 20, time: Int = 2000,
+    @discardableResult func index(_ name: String = "one", cli: String? = nil, logical: String? = nil, turns: Int? = 20, time: Int = 2000,
                                  space: SessionTransferSpace? = nil, extras: [String: Any] = [:], transcript: Bool = true) throws -> String {
         let dest = space ?? source!, id = cli ?? "cli-" + name, file = "local_" + name + ".json"
         var value: [String: Any] = ["sessionId": logical ?? "logical-" + name, "cliSessionId": id, "title": "具体会话：" + name,
-            "cwd": "/fake/project", "completedTurns": turns, "lastActivityAt": time]
+            "cwd": "/fake/project", "lastActivityAt": time]
+        if let turns { value["completedTurns"] = turns }
         extras.forEach { value[$0] = $1 }
         try writeJSON(value, dest.directory.appendingPathComponent(file))
         if transcript {
@@ -107,6 +108,97 @@ final class SessionTransferTests: FixtureTest {
     func testArchivedAndDeletedEntriesNeverResurrect() throws {
         try index(extras: ["isArchived": true]); XCTAssertThrowsError(try plan())
         try index(extras: ["isArchived": false]); try Data().write(to: target.directory.appendingPathComponent("deleted_cli-one")); XCTAssertThrowsError(try plan())
+    }
+    func testArchivedOnBothSidesIsSkippedInsteadOfPending() throws {
+        try index(extras: ["isArchived": true])
+        XCTAssertEqual(try onlyRow().kind, .skip, "Archived only in the source needs no decision and is never copied")
+        XCTAssertEqual(try onlyRow().reason, "来源已归档或删除，不复制。"); XCTAssertThrowsError(try plan())
+        let file = try index(space: target, extras: ["isArchived": true]), before = try bytes(file, in: target)
+        XCTAssertEqual(try onlyRow().kind, .skip); XCTAssertEqual(try onlyRow().reason, "两边都已归档或删除，保持现状。")
+        XCTAssertFalse(try onlyRow().selectable); XCTAssertThrowsError(try plan(updates: true)); XCTAssertEqual(try bytes(file, in: target), before)
+        try index(space: target); try writeJSON(["archived": ["logical-one"]], target.directory.appendingPathComponent("archived-sessions.idx"))
+        XCTAssertEqual(try onlyRow().kind, .skip, "A target archive list entry counts as archived on the target")
+        try index(extras: ["isArchived": false])
+        XCTAssertEqual(try onlyRow().kind, .blocked, "Archived only in the target keeps the target state")
+    }
+    func testIdenticalProgressWithoutTurnCountIsSynced() throws {
+        try index(turns: nil); let file = try index(turns: nil, space: target), before = try bytes(file, in: target)
+        XCTAssertEqual(try onlyRow().kind, .skip); XCTAssertEqual(try onlyRow().reason, "目标已同步，无需重复复制。")
+        XCTAssertThrowsError(try plan(updates: true)); XCTAssertEqual(try bytes(file, in: target), before)
+        try index(turns: nil, time: 3000)
+        XCTAssertEqual(try onlyRow().kind, .blocked, "A newer source without a turn count is still not comparable")
+        try index(turns: 20)
+        XCTAssertEqual(try onlyRow().kind, .blocked, "A turn count on only one side is still not comparable")
+    }
+    let joinedAt = 1_700_000_000_000
+    func continuationPair(targetTime: Int? = nil, oldTranscriptAt: Int? = nil, targetTurns: Int = 120,
+                          targetPrior: [String]? = nil, sourceExtras: [String: Any] = [:]) throws -> String {
+        var extras: [String: Any] = ["priorCliSessionIds": ["first-cli", "old-cli"], "rewindEdges": [["parent": "old-cli", "child": "new-cli"]],
+                                     "transcriptModelStates": ["old-cli": [:], "new-cli": [:]], "lastAssistantCliSessionId": "new-cli",
+                                     "title": "来源标题", "model": "source-model",
+                                     "priorCliSessionLeftAt": ["first-cli": joinedAt - 9000, "old-cli": joinedAt]]
+        sourceExtras.forEach { extras[$0] = $1 }
+        let file = try index(cli: "new-cli", turns: 130, time: joinedAt + 5000, extras: extras)
+        try Data("FICTIONAL TRANSCRIPT first-cli\n".utf8).write(to: transcripts.appendingPathComponent("project/first-cli.jsonl"))
+        try index(cli: "old-cli", turns: targetTurns, time: targetTime ?? joinedAt - 3000, space: target,
+                  extras: ["priorCliSessionIds": targetPrior ?? ["first-cli"], "title": "目标标题", "model": "target-model",
+                           "remoteMcpServersConfig": ["target-only"], "targetUnknown": 7, "postTurnSummary": ["old": true],
+                           "transcriptModelStates": ["old-cli": [:]]])
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(oldTranscriptAt ?? joinedAt - 2000) / 1000)],
+                                              ofItemAtPath: transcripts.appendingPathComponent("project/old-cli.jsonl").path)
+        return file
+    }
+    func onlyRow(updates: Bool = true) throws -> SessionTransferRow { try XCTUnwrap(service.rows(source: source, target: target, updateExisting: updates).first) }
+    func testVerifiedContinuationMovesSegmentChainAndKeepsTargetSettings() throws {
+        let file = try continuationPair(), before = try bytes(file, in: target)
+        let row = try onlyRow()
+        XCTAssertEqual(row.kind, .update); XCTAssertTrue(row.continuation); XCTAssertTrue(row.selectable)
+        XCTAssertEqual(try onlyRow(updates: false).kind, .skip, "Continuation follows the same update switch")
+        let receipt = try service.execute(plan([file], updates: true))
+        XCTAssertEqual(receipt.updatedCount, 1); XCTAssertEqual(receipt.items.first?.title, "目标标题")
+        let after = try Disk.json(bytes(file, in: target))
+        XCTAssertEqual(after["cliSessionId"] as? String, "new-cli"); XCTAssertEqual(after["priorCliSessionIds"] as? [String], ["first-cli", "old-cli"])
+        XCTAssertEqual(after["completedTurns"] as? Int, 130); XCTAssertEqual(after["lastActivityAt"] as? Int, joinedAt + 5000)
+        XCTAssertEqual(after["lastAssistantCliSessionId"] as? String, "new-cli"); XCTAssertNotNil(after["rewindEdges"])
+        XCTAssertEqual((after["transcriptModelStates"] as? [String: Any])?.keys.sorted(), ["new-cli", "old-cli"])
+        XCTAssertNil(after["postTurnSummary"], "A chain field absent in the source is not left pointing at the old segment")
+        XCTAssertEqual(after["title"] as? String, "目标标题"); XCTAssertEqual(after["model"] as? String, "target-model")
+        XCTAssertNotNil(after["remoteMcpServersConfig"]); XCTAssertEqual(after["targetUnknown"] as? Int, 7)
+        XCTAssertEqual(try Data(contentsOf: backups.appendingPathComponent(receipt.id + "/before-0.json")), before)
+        XCTAssertEqual(try service.restore(receipt.id, to: target, undo: true).state, .undone); XCTAssertEqual(try bytes(file, in: target), before)
+    }
+    func testContinuationWithoutEvidenceOrAfterForkStaysPending() throws {
+        let fork = "两边各自聊过，可能已分叉，不覆盖。"
+        let cases: [(String, () throws -> String, String)] = [
+            ("missing switch time", { try self.continuationPair(sourceExtras: ["priorCliSessionLeftAt": ["first-cli": 1]]) }, "缺少切换记录，无法确认是否分叉，不覆盖。"),
+            ("target active after switch", { try self.continuationPair(targetTime: self.joinedAt + 1000) }, fork),
+            ("old segment written after switch", { try self.continuationPair(oldTranscriptAt: self.joinedAt + 1000) }, fork),
+            ("target has more turns", { try self.continuationPair(targetTurns: 200) }, fork),
+            ("target chain differs", { try self.continuationPair(targetPrior: ["other-cli"]) }, "无法确认是同一段对话，不覆盖。")
+        ]
+        for (label, make, reason) in cases {
+            let file = try make(), before = try bytes(file, in: target)
+            let row = try onlyRow()
+            XCTAssertEqual(row.kind, .blocked, label); XCTAssertEqual(row.reason, reason, label); XCTAssertFalse(row.continuation, label)
+            XCTAssertThrowsError(try plan([file], updates: true), label); XCTAssertEqual(try bytes(file, in: target), before, label)
+        }
+    }
+    func testOldSegmentAppendAfterPlanInvalidatesContinuation() throws {
+        let file = try continuationPair(), before = try bytes(file, in: target), approved = try plan([file], updates: true)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(joinedAt + 1000) / 1000)],
+                                              ofItemAtPath: transcripts.appendingPathComponent("project/old-cli.jsonl").path)
+        XCTAssertThrowsError(try service.execute(approved)); XCTAssertEqual(try bytes(file, in: target), before)
+    }
+    func testTargetAlreadyOnNewerSegmentIsSkippedUnlessSourceForked() throws {
+        try index(cli: "old-cli", turns: 120, time: joinedAt - 3000)
+        let file = try index(cli: "new-cli", turns: 130, time: joinedAt + 5000, space: target,
+                             extras: ["priorCliSessionIds": ["old-cli"], "priorCliSessionLeftAt": ["old-cli": joinedAt]])
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: Double(joinedAt - 2000) / 1000)],
+                                              ofItemAtPath: transcripts.appendingPathComponent("project/old-cli.jsonl").path)
+        XCTAssertEqual(try onlyRow().kind, .skip); XCTAssertEqual(try onlyRow().reason, "目标进度较新，保留目标。")
+        try index(cli: "old-cli", turns: 125, time: joinedAt + 1000)
+        XCTAssertEqual(try onlyRow().kind, .blocked); XCTAssertEqual(try onlyRow().reason, "两边各自聊过，可能已分叉，不覆盖。")
+        XCTAssertThrowsError(try plan([file], updates: true))
     }
     func testMalformedArchiveListStopsInsteadOfAssumingEmpty() throws {
         try index(); try Data("broken".utf8).write(to: target.directory.appendingPathComponent("archived-sessions.idx"))

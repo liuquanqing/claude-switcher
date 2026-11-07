@@ -16,20 +16,12 @@ private enum SessionTransferSheet: Identifiable {
     }
 }
 
-private extension Color {
-    /// Primary action fill: white label on it is ~5.5:1; against the window background it is ~3.1:1 (non-text).
-    static let importAccent = Color(hex: 0x0A64D6)
-    /// Lighter blue for tints and small accent text on dark surfaces (~7:1 on Color.bg). Native checkboxes
-    /// render tint darker in dark appearance, so this starts brighter than the button fill.
-    static let importAccentSoft = Color(hex: 0x5AA2FF)
-}
-
-/// Solid blue primary action with white label; the destructive variant keeps the system-red-like `.bad`
-/// with a dark label (white on it is only ~3.4:1). Disabled drops to a neutral raised surface so it stays
-/// visible but no longer looks clickable.
+/// Ivory primary action with the window's ink as label (~15:1), matching the app's warm-neutral palette
+/// instead of a separate hue. The destructive variant keeps `.bad` with a dark label (white on it is only
+/// ~3.4:1). Disabled drops to a neutral raised surface so it stays visible but no longer looks clickable.
 private struct ImportProminentButtonStyle: ButtonStyle {
-    var tint: Color = .importAccent
-    var label: Color = .white
+    var tint: Color = .txt
+    var label: Color = .bg
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
@@ -41,53 +33,69 @@ private struct ImportProminentButtonStyle: ButtonStyle {
             .background(RoundedRectangle(cornerRadius: 6)
                 .fill(isEnabled ? tint : Color.cardHi)
                 .overlay(RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.black.opacity(isEnabled && configuration.isPressed ? 0.18 : 0))))
+                    .fill(Color.black.opacity(isEnabled && configuration.isPressed ? 0.14 : 0))))
             .overlay(RoundedRectangle(cornerRadius: 6)
-                .stroke(isEnabled ? Color.white.opacity(0.10) : Color.stroke, lineWidth: 1))
+                .stroke(isEnabled ? Color.clear : Color.stroke, lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
-@MainActor
-private struct MixedSelectionCheckbox: NSViewRepresentable {
+/// Checkbox drawn in the same ivory as the primary action. Native tinting turns light fills muddy or hides
+/// the checkmark in dark appearance, so the box is drawn directly; the outline uses `sub` (~6.4:1 on bg).
+private struct ImportCheckboxMark: View {
+    let state: NSControl.StateValue
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(state == .off ? Color.clear : Color.txt)
+            RoundedRectangle(cornerRadius: 4)
+                .strokeBorder(state == .off ? Color.sub : Color.txt, lineWidth: 1.2)
+            if state != .off {
+                Image(systemName: state == .on ? "checkmark" : "minus")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundColor(.bg)
+            }
+        }
+        .frame(width: 15, height: 15)
+    }
+}
+
+private struct ImportCheckboxStyle: ToggleStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            ImportCheckboxMark(state: configuration.isOn ? .on : .off)
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+    }
+}
+
+private struct MixedSelectionCheckbox: View {
     let title: String
     let state: NSControl.StateValue
+    let value: String
     let isEnabled: Bool
     let help: String
     let action: () -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(action: action)
-    }
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(checkboxWithTitle: title, target: context.coordinator, action: #selector(Coordinator.toggle(_:)))
-        button.allowsMixedState = true
-        button.contentTintColor = NSColor(Color.importAccentSoft)
-        return button
-    }
-
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.action = action
-        button.attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: 12),
-            .foregroundColor: NSColor(Color.sub)
-        ])
-        button.state = state
-        button.isEnabled = isEnabled
-        button.toolTip = help
-    }
-
-    @MainActor final class Coordinator: NSObject {
-        var action: () -> Void
-
-        init(action: @escaping () -> Void) {
-            self.action = action
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 7) {
+                ImportCheckboxMark(state: state)
+                Text(title)
+                    .font(.system(size: 12))
+                    .foregroundColor(.sub)
+            }
+            .contentShape(Rectangle())
         }
-
-        @objc func toggle(_ sender: NSButton) {
-            action()
-        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .opacity(isEnabled ? 1 : 0.45)
+        .help(help)
+        .accessibilityValue(Text(value))
     }
 }
 
@@ -99,6 +107,7 @@ struct CopyThreadsView: View {
     @State private var instructionsCopied = false
     @State private var instructionCopySequence = 0
     @State private var showingScopeHelp = false
+    @State private var showsSettled = false
     private let store: Store
 
     init(store: Store) {
@@ -133,22 +142,25 @@ struct CopyThreadsView: View {
         controller.language == "en" ? 72 : 48
     }
 
-    private var selectedSummary: String {
-        let plannedRows = controller.rows.filter { row in
+    private var plannedRows: [SessionTransferRow] {
+        controller.rows.filter { row in
             controller.picked.contains(row.id) &&
                 (row.kind == .add || (row.kind == .update && controller.updateExisting))
         }
+    }
+
+    private var selectedSummary: String {
+        let plannedRows = plannedRows
         let added = plannedRows.filter { $0.kind == .add }.count
-        let updated = plannedRows.filter { $0.kind == .update }.count
+        let updated = plannedRows.filter { $0.kind == .update && !$0.continuation }.count
+        let continued = plannedRows.filter(\.continuation).count
         let visibleIDs = Set(controller.visibleRows.map(\.id))
         let outsideCount = plannedRows.filter { !visibleIDs.contains($0.id) }.count
-        let arguments = [
-            "selected": String(plannedRows.count),
-            "added": String(added),
-            "updated": String(updated)
-        ]
-        let key = updated > 0 ? (added > 0 ? "selectedChanges" : "selectedUpdates") : "selectedCount"
-        let summary = text(key, arguments: arguments)
+        var parts = [text("selectedCount", arguments: ["selected": String(plannedRows.count)])]
+        for (key, count) in [("summaryAdded", added), ("summaryUpdated", updated), ("summaryContinued", continued)] where count > 0 {
+            parts.append(text(key, arguments: ["count": String(count)]))
+        }
+        let summary = parts.joined(separator: " · ")
         guard outsideCount > 0 else { return summary }
         return text("selectedOutside", arguments: [
             "summary": summary,
@@ -217,7 +229,6 @@ struct CopyThreadsView: View {
             } else {
                 navigationBar
                 directionEditor
-                scopeLabel
             }
 
             if !controller.isShowingCopyResult, let prompt = missingSelectionPrompt {
@@ -280,6 +291,7 @@ struct CopyThreadsView: View {
             .foregroundColor(.sub)
             .help(text("backHelp"))
             Spacer()
+            scopeLabel
             Button(text(instructionsCopied ? "copiedInstructions" : "copyForClaude")) {
                 copyInstructions()
             }
@@ -304,7 +316,7 @@ struct CopyThreadsView: View {
                     if !controller.sourceID.isEmpty && controller.sourceID == controller.currentEndpointID {
                         Text(text("currentAccount"))
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.importAccentSoft)
+                            .foregroundColor(.claude)
                     }
                 }
                 if controller.sourceSpaces.count > 1 {
@@ -340,7 +352,7 @@ struct CopyThreadsView: View {
                     if !controller.targetID.isEmpty && controller.targetID == controller.currentEndpointID {
                         Text(text("currentAccount"))
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.importAccentSoft)
+                            .foregroundColor(.claude)
                     }
                 }
                 if controller.targetSpaces.count > 1 {
@@ -358,7 +370,7 @@ struct CopyThreadsView: View {
     }
 
     private var scopeLabel: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 2) {
             Text(text("copyScopeLabel"))
                 .font(.system(size: 11))
                 .foregroundColor(.sub)
@@ -380,8 +392,8 @@ struct CopyThreadsView: View {
                     .frame(width: 340)
                     .background(Color.bg)
             }
-            Spacer()
         }
+        .padding(.trailing, 10)
     }
 
     private var searchAndUpdate: some View {
@@ -390,6 +402,11 @@ struct CopyThreadsView: View {
                 .textFieldStyle(.roundedBorder)
                 .disabled(controller.isWorking)
             if !controller.isShowingCopyResult {
+                Text(text("newDateLabel"))
+                    .font(.system(size: 11))
+                    .foregroundColor(.sub)
+                    .fixedSize()
+                    .padding(.trailing, -6)
                 Picker(text("newDateRange"), selection: Binding(get: { controller.newSessionAgeDays ?? 0 }, set: { controller.setNewSessionAge($0 == 0 ? nil : $0) })) {
                     Text(text("newLastWeek")).tag(7)
                     Text(text("newLastMonth")).tag(30)
@@ -425,6 +442,7 @@ struct CopyThreadsView: View {
             MixedSelectionCheckbox(
                 title: text("selectCopyable"),
                 state: visibleSelectionState,
+                value: text(visibleSelectionState == .on ? "checkOn" : visibleSelectionState == .mixed ? "checkMixed" : "checkOff"),
                 isEnabled: !selectableVisibleRows.isEmpty && !controller.isWorking,
                 help: text("selectCopyableHelp"),
                 action: controller.selectAllVisible
@@ -444,22 +462,143 @@ struct CopyThreadsView: View {
         }
     }
 
-    private var sessionList: some View {
-        List(controller.visibleRows) { row in
-            sessionRow(row)
+    private enum RowGroup { case actionable, notCopied, settled }
+
+    private func group(_ row: SessionTransferRow) -> RowGroup {
+        switch row.kind {
+        case .add, .update: return .actionable
+        case .blocked: return .notCopied
+        case .skip: return .settled
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
+    }
+
+    private var sessionList: some View {
+        let rows = controller.visibleRows
+        let actionable = rows.filter { group($0) == .actionable }
+        let notCopied = rows.filter { group($0) == .notCopied }
+        let settled = rows.filter { group($0) == .settled }
+        let settledOpen = showsSettled || !controller.query.isEmpty
+        let hiddenOlder = controller.hiddenOlderAdditionsCount
+        return ScrollView {
+            LazyVStack(alignment: .leading, spacing: 2) {
+                if !rows.isEmpty || hiddenOlder > 0 {
+                    groupHeader(text(controller.isShowingCopyResult ? "groupResult" : "groupActionable"), count: actionable.count)
+                    ForEach(actionable) { sessionRow($0) }
+                    if actionable.isEmpty {
+                        Text(text("groupEmpty"))
+                            .font(.system(size: 12))
+                            .foregroundColor(.sub)
+                            .padding(.leading, rowTextInset)
+                            .padding(.vertical, 6)
+                    }
+                    if hiddenOlder > 0 { hiddenAdditionsRow(hiddenOlder) }
+                }
+                if !notCopied.isEmpty {
+                    groupHeader(text("groupNotCopied"), count: notCopied.count, help: text("groupNotCopiedHelp"))
+                    ForEach(notCopied) { sessionRow($0) }
+                }
+                if !settled.isEmpty {
+                    settledHeader(count: settled.count, open: settledOpen)
+                    if settledOpen { ForEach(settled) { sessionRow($0) } }
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.bottom, 6)
+        }
         .frame(minHeight: 180)
         .layoutPriority(1)
         .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.25)))
         .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.75), lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: 9))
         .overlay {
-            if controller.visibleRows.isEmpty {
+            if rows.isEmpty && hiddenOlder == 0 {
                 Text(emptyListMessage)
                     .font(.system(size: 12))
                     .foregroundColor(.sub)
             }
+        }
+    }
+
+    /// Leading inset that lines secondary lines up with row titles (row padding + mark column + spacing).
+    private var rowTextInset: CGFloat { controller.isShowingCopyResult ? 9 : 39 }
+
+    private func groupHeader(_ title: String, count: Int, help: String? = nil) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.sub)
+            Text(String(count))
+                .font(.system(size: 11).monospacedDigit())
+                .foregroundColor(.sub)
+            Spacer()
+        }
+        .padding(.horizontal, 9)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .help(help ?? "")
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private func settledHeader(count: Int, open: Bool) -> some View {
+        Button { showsSettled.toggle() } label: {
+            HStack(spacing: 6) {
+                Image(systemName: open ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: 10)
+                Text(text("groupSettled"))
+                    .font(.system(size: 11, weight: .semibold))
+                Text(String(count))
+                    .font(.system(size: 11).monospacedDigit())
+                Spacer()
+            }
+            .foregroundColor(.sub)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!controller.query.isEmpty)
+        .padding(.horizontal, 9)
+        .padding(.top, 10)
+        .padding(.bottom, 2)
+        .help(text("groupSettledHelp"))
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(Text(text(open ? "expanded" : "collapsed")))
+    }
+
+    private func hiddenAdditionsRow(_ count: Int) -> some View {
+        HStack(spacing: 8) {
+            Text(text(count == 1 ? "hiddenOlderOne" : "hiddenOlder", arguments: ["count": String(count)]))
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+            Button(text("showAllDates")) { controller.setNewSessionAge(nil) }
+                .buttonStyle(.link)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.txt)
+                .disabled(controller.isWorking)
+            Spacer()
+        }
+        .padding(.leading, rowTextInset)
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func leadingMark(_ row: SessionTransferRow) -> some View {
+        if controller.isShowingCopyResult {
+            EmptyView()
+        } else if row.selectable {
+            Toggle("", isOn: pickedBinding(row))
+                .toggleStyle(ImportCheckboxStyle())
+                .labelsHidden()
+                .disabled(controller.isWorking)
+                .accessibilityLabel(Text(row.title))
+        } else if row.kind == .blocked {
+            Image(systemName: "exclamationmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundColor(.warn)
+                .frame(width: 20, height: 20)
+                .accessibilityLabel(Text(text("notCopied")))
+        } else {
+            Color.clear.frame(width: 20, height: 20)
         }
     }
 
@@ -469,19 +608,14 @@ struct CopyThreadsView: View {
         let path = result?.cwd ?? row.cwd
         let isPicked = !controller.isShowingCopyResult && controller.picked.contains(row.id)
         let showsOriginalTitle = result.map { $0.title != row.title } ?? false
+        let settled = group(row) == .settled
+        let status = rowStatus(row, result: result)
         return HStack(alignment: .top, spacing: 10) {
-            if !controller.isShowingCopyResult {
-                Toggle("", isOn: pickedBinding(row))
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
-                    .tint(.importAccentSoft)
-                    .disabled(!row.selectable || controller.isWorking)
-                    .accessibilityLabel(Text(row.title))
-            }
+            leadingMark(row)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.txt)
+                    .foregroundColor(settled ? .sub : .txt)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(title)
@@ -513,26 +647,25 @@ struct CopyThreadsView: View {
                 Text(activityTime(row.lastActivity))
                     .font(.system(size: 11).monospacedDigit())
                     .foregroundColor(.sub)
-                    .frame(width: 66, alignment: .trailing)
-                Text(rowStatus(row, result: result))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(rowStatusColor(row, result: result))
-                    .lineLimit(1)
-                    .frame(width: 88, alignment: .trailing)
+                if let status {
+                    Text(status)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(rowStatusColor(row, result: result))
+                        .lineLimit(1)
+                }
             }
+            .fixedSize()
+            .frame(minWidth: 66, alignment: .trailing)
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
-        .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.importAccent.opacity(0.22) : Color.clear))
+        .background(RoundedRectangle(cornerRadius: 7).fill(isPicked ? Color.cardHi : Color.clear))
         .contentShape(Rectangle())
         .accessibilityHint(generated(row.reason))
         .onTapGesture {
             guard !controller.isShowingCopyResult, row.selectable, !controller.isWorking else { return }
             controller.setPicked(row.id, selected: !controller.picked.contains(row.id))
         }
-        .listRowInsets(EdgeInsets(top: 1, leading: 4, bottom: 1, trailing: 4))
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
     }
 
     private var emptyListMessage: String {
@@ -561,10 +694,10 @@ struct CopyThreadsView: View {
                     ProgressView().controlSize(.small)
                     Text(text("processing"))
                         .font(.system(size: 12))
-                        .foregroundColor(.importAccentSoft)
+                        .foregroundColor(.sub)
                 }
                 Spacer(minLength: 4)
-                Button(text("copy")) {
+                Button(plannedRows.isEmpty ? text("copy") : text("copyCount", arguments: ["count": String(plannedRows.count)])) {
                     Task { await controller.copySelected() }
                 }
                 .buttonStyle(ImportProminentButtonStyle())
@@ -684,48 +817,40 @@ struct CopyThreadsView: View {
         case "目标进度较新，保留目标。": return text("skipTargetNewer")
         case "目标已有这段会话；开启更新后可同步列表进度。": return text("skipUpdatesDisabled")
         case "目标已有同一会话，保留目标条目。": return text("skipExisting")
+        case "两边都已归档或删除，保持现状。": return text("skipBothRemoved")
+        case "来源已归档或删除，不复制。": return text("skipSourceRemoved")
         default: return nil
         }
     }
 
     private func shouldShowReason(_ row: SessionTransferRow) -> Bool {
         guard !row.reason.isEmpty else { return false }
-        return row.kind == .blocked || (row.kind == .skip && skipStatus(row) == nil)
+        return row.kind == .blocked || (row.continuation && !controller.isShowingCopyResult) || (row.kind == .skip && skipStatus(row) == nil)
     }
 
-    private func rowStatus(_ row: SessionTransferRow, result: TransferSessionItem?) -> String {
+    /// Group headers carry the state, so blocked rows need no repeated label; their reason line explains why.
+    private func rowStatus(_ row: SessionTransferRow, result: TransferSessionItem?) -> String? {
         if let result {
             switch result.kind {
             case .add: return text("resultAdded")
-            case .update: return text("resultUpdated")
+            case .update: return text(row.continuation ? "resultContinued" : "resultUpdated")
             case .skip, .blocked: return text("notCopied")
             }
         }
-        if controller.isShowingCopyResult {
-            switch row.kind {
-            case .add, .update: return text("notCopied")
-            case .skip: return skipStatus(row) ?? text("notCopied")
-            case .blocked: return text("needsReview")
-            }
-        }
         switch row.kind {
-        case .add: return text("willAdd")
-        case .update: return text("willUpdate")
+        case .add: return text(controller.isShowingCopyResult ? "notCopied" : "willAdd")
+        case .update: return text(controller.isShowingCopyResult ? "notCopied" : row.continuation ? "willContinue" : "willUpdate")
         case .skip: return skipStatus(row) ?? text("skipRetained")
-        case .blocked: return text("needsReview")
+        case .blocked: return nil
         }
     }
 
+    /// Hue is reserved for meaning: green only for completed writes. Pending actions brighten to ivory once
+    /// selected, so the column reads as "what will happen" without a separate accent colour.
     private func rowStatusColor(_ row: SessionTransferRow, result: TransferSessionItem?) -> Color {
-        if let result {
-            switch result.kind {
-            case .add, .update: return .good
-            case .skip, .blocked: return .warn
-            }
-        }
-        if row.kind == .blocked { return .warn }
-        if controller.isShowingCopyResult { return .sub }
-        return row.kind == .add || row.kind == .update ? .importAccentSoft : .sub
+        if result != nil { return .good }
+        if !controller.isShowingCopyResult && row.selectable && controller.picked.contains(row.id) { return .txt }
+        return .sub
     }
 
     private func activityTime(_ date: Date) -> String {
@@ -891,10 +1016,13 @@ struct CopyThreadsView: View {
         switch confirmation.kind {
         case "copy":
             let updates = confirmation.items.filter { $0.kind == .update }
-            return (text("confirmCopyTitle"), text("confirmCopyBody", arguments: [
+            let body = text("confirmCopyBody", arguments: [
                 "added": String(confirmation.addedCount),
                 "updated": String(confirmation.updatedCount)
-            ]), text("confirmCopyButton"), updates.isEmpty ? confirmation.items : updates)
+            ])
+            let note = confirmation.continuationCount > 0
+                ? text("confirmContinuationNote", arguments: ["count": String(confirmation.continuationCount)]) : ""
+            return (text("confirmCopyTitle"), body + note, text("confirmCopyButton"), updates.isEmpty ? confirmation.items : updates)
         case "undo":
             return (text("confirmUndoTitle"), text("confirmUndoBody"), text("confirmUndoButton"), confirmation.items)
         case "recovery":
@@ -1029,6 +1157,11 @@ struct CopyThreadsView: View {
                             .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.sub)
                             .fixedSize(horizontal: false, vertical: true)
+                        if item.continuation {
+                            Label(text("continuationTag"), systemImage: "arrow.turn.down.right")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.txt)
+                        }
                         if showKind, let label = backupItemKind(item.kind) {
                             Text(label)
                                 .font(.system(size: 10))

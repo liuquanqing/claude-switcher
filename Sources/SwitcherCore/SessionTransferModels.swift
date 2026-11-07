@@ -34,9 +34,11 @@ public struct SessionTransferRow: Identifiable, Sendable, Equatable {
     public let kind: SessionTransferKind
     public let reason: String
     public let identity: String
+    public let continuation: Bool
     public var selectable: Bool { kind == .add || kind == .update }
-    public init(id: String, title: String, cwd: String, lastActivity: Date, kind: SessionTransferKind, reason: String, identity: String = "") {
+    public init(id: String, title: String, cwd: String, lastActivity: Date, kind: SessionTransferKind, reason: String, identity: String = "", continuation: Bool = false) {
         self.id = id; self.title = title; self.cwd = cwd; self.lastActivity = lastActivity; self.kind = kind; self.reason = reason; self.identity = identity
+        self.continuation = continuation
     }
 }
 

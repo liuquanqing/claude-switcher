@@ -673,11 +673,32 @@ actor FixtureGuardWorker: GuardWorking {
   datedSelection.setNewSessionAge(7)
   require(!datedSelection.visibleRows.contains { $0.id == "local_old.json" } && !datedSelection.picked.contains("local_old.json"),
           "a short new-session window hides older additions but never hides the existing update")
+  require(datedSelection.hiddenOlderAdditionsCount == 1, "the list reports how many older additions the date window hides")
   datedSelection.setPicked("local_api.json", selected: false)
   datedSelection.setNewSessionAge(90)
   require(datedSelection.picked == ["local_ui.json"], "changing date scope preserves a manual update deselection")
   datedSelection.setNewSessionAge(nil)
   require(datedSelection.picked == ["local_ui.json"], "returning to all dates does not reselect a cancelled update")
+  require(datedSelection.hiddenOlderAdditionsCount == 0, "all dates leaves no hidden additions to report")
+  let continuationFixture = try SessionTransferDemo.environment(scenario: "continuation")
+  defer { try? FileManager.default.removeItem(at: continuationFixture.1) }
+  let continuing = SessionTransferController(store: Store(demo: true), testEnvironment: continuationFixture.0)
+  try await chooseBusinessToPersonal(continuing)
+  let chainRow = continuing.rows.first { $0.id == "local_chain.json" }
+  require(chainRow?.kind == .update && chainRow?.continuation == true && chainRow?.selectable == true,
+          "a verified segment continuation is offered as its own selectable kind")
+  require(continuing.picked == ["local_ui.json", "local_api.json"], "segment continuation is never selected by default")
+  let chainIndex = continuationFixture.0.endpoints.first { $0.id == "profile:Personal" }!.root.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_chain.json")
+  let chainBefore = try Data(contentsOf: chainIndex)
+  continuing.setPicked("local_chain.json", selected: true); await continuing.copySelected()
+  let chainPending = try Data(contentsOf: chainIndex)
+  require(continuing.confirmation?.continuationCount == 1 && continuing.confirmation?.items.first?.continuation == true
+          && continuing.confirmation?.items.first?.id == "local_chain.json" && chainPending == chainBefore,
+          "continuation is listed first in the confirmation and nothing is written before confirming")
+  continuing.dismissConfirmation(); await continuing.confirmAction(); try await settled(continuing)
+  let chainAfter = try JSONSerialization.jsonObject(with: Data(contentsOf: chainIndex)) as! [String: Any]
+  require(chainAfter["cliSessionId"] as? String == "cli-chain" && chainAfter["completedTurns"] as? Int == 130
+          && continuing.lastOperation?.canUndo == true, "confirmed continuation reaches the same backed-up engine and stays undoable")
   var usageProfile = Profile(name: "missing", snapshot: nil, signedIn: true)
   require(usageProfile.usageState == .notRequested, "missing usage data is not automatically loading")
   usageProfile.blockUsageRefresh("fixture gate denied")

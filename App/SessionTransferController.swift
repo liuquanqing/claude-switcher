@@ -10,6 +10,7 @@ struct TransferSessionItem: Identifiable {
     let title: String
     let cwd: String
     let kind: SessionTransferKind
+    var continuation = false
 }
 struct SessionTransferConfirmation: Identifiable {
     let id = UUID()
@@ -20,6 +21,7 @@ struct SessionTransferConfirmation: Identifiable {
     var items: [TransferSessionItem] = []
     var addedCount: Int = 0
     var updatedCount: Int = 0
+    var continuationCount: Int = 0
 }
 struct SessionTransferOperation: Identifiable {
     let id: String
@@ -182,9 +184,15 @@ actor SessionTransferWorker {
     var visibleRows: [SessionTransferRow] {
         let displayed = isShowingCopyResult ? completedSnapshot?.rows ?? rows : rows
         return displayed.filter { row in
-            (query.isEmpty || "\(row.title) \(row.cwd) \(resultItem(for: row)?.title ?? "")".localizedCaseInsensitiveContains(query))
-                && (isShowingCopyResult || newAdditionsIncludes(row))
+            matchesQuery(row) && newAdditionsIncludes(row)
         }
+    }
+    var hiddenOlderAdditionsCount: Int {
+        guard !isShowingCopyResult else { return 0 }
+        return rows.filter { $0.kind == .add && matchesQuery($0) && !newAdditionsIncludes($0) }.count
+    }
+    private func matchesQuery(_ row: SessionTransferRow) -> Bool {
+        query.isEmpty || "\(row.title) \(row.cwd) \(resultItem(for: row)?.title ?? "")".localizedCaseInsensitiveContains(query)
     }
     private var newAdditionsCutoff: Date {
         if showsCustomNewDate, let customNewSince { return customNewSince }
@@ -320,13 +328,13 @@ actor SessionTransferWorker {
             }
             rows = result
             if preselectMissing {
-                picked = Set(visibleRows.filter { $0.selectable && newAdditionsIncludes($0) }.map(\.id))
+                picked = Set(visibleRows.filter { $0.selectable && !$0.continuation && newAdditionsIncludes($0) }.map(\.id))
                 preselectMissing = false
             } else {
                 picked.formIntersection(result.filter(\.selectable).map(\.id))
             }
             if selectUpdates && updateExisting {
-                picked.formUnion(visibleRows.filter { $0.kind == .update }.map(\.id))
+                picked.formUnion(visibleRows.filter { $0.kind == .update && !$0.continuation }.map(\.id))
             }
             statusMessage = operationStatus; errorMessage = historyError
         } catch {
@@ -346,9 +354,13 @@ actor SessionTransferWorker {
             guard refreshID == intent else { statusMessage = "选择或空间已变化，请重新复制。"; return }
             if plan.updatedCount > 0 {
                 pendingPlan = plan
-                confirmation = SessionTransferConfirmation(title: "更新已有会话？", message: "将新增\(plan.addedCount)条、更新\(plan.updatedCount)条列表索引。旧索引会先自动备份，聊天原文不变。", buttonTitle: "确认复制", kind: "copy", items: plan.changes.map { change in
-                    TransferSessionItem(id: change.name, title: change.title, cwd: plan.rows.first { $0.id == change.name }?.cwd ?? "", kind: change.kind)
-                }, addedCount: plan.addedCount, updatedCount: plan.updatedCount)
+                let items = plan.changes.map { change in
+                    let row = plan.rows.first { $0.id == change.name }
+                    return TransferSessionItem(id: change.name, title: change.title, cwd: row?.cwd ?? "", kind: change.kind, continuation: row?.continuation ?? false)
+                }
+                confirmation = SessionTransferConfirmation(title: "更新已有会话？", message: "将新增\(plan.addedCount)条、更新\(plan.updatedCount)条列表索引。旧索引会先自动备份，聊天原文不变。", buttonTitle: "确认复制", kind: "copy",
+                    items: items.filter(\.continuation) + items.filter { !$0.continuation }, addedCount: plan.addedCount, updatedCount: plan.updatedCount,
+                    continuationCount: items.filter(\.continuation).count)
             } else { try await execute(plan, environment: env); await refresh() }
         } catch { await handle(error, environment: env) }
     }

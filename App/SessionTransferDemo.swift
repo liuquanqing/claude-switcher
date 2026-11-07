@@ -29,6 +29,18 @@ enum SessionTransferDemo {
             }
         }
         let endpoints = [SessionTransferEndpoint(id: "profile:Business", name: "Business", root: a), SessionTransferEndpoint(id: "profile:Personal", name: "Personal", root: b), SessionTransferEndpoint(id: "api", name: "API 工作区", root: api)]
+        if scenario == "continuation" {
+            let sourceFile = a.appendingPathComponent("claude-code-sessions/account-business/org-team/local_chain.json")
+            let targetFile = b.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_chain.json")
+            var source = try JSONSerialization.jsonObject(with: Data(contentsOf: sourceFile)) as! [String: Any]
+            var target = try JSONSerialization.jsonObject(with: Data(contentsOf: targetFile)) as! [String: Any]
+            source["completedTurns"] = 130; source["priorCliSessionIds"] = ["cli-previous"]; source["priorCliSessionLeftAt"] = ["cli-previous": now - 1_000_000]
+            target["lastActivityAt"] = now - 1_200_000
+            try json(source, sourceFile); try json(target, targetFile)
+            let previous = transcripts.appendingPathComponent("cli-previous.jsonl")
+            try Data("{\"sessionId\":\"cli-previous\",\"message\":\"FICTIONAL TEST ONLY\"}\n".utf8).write(to: previous)
+            try fm.setAttributes([.modificationDate: Date(timeIntervalSince1970: (now - 1_100_000) / 1000)], ofItemAtPath: previous.path)
+        }
         let environment = SessionTransferEnvironment(endpoints: endpoints, activeEndpointIDs: [], transcripts: root.appendingPathComponent("projects"), backups: root.appendingPathComponent("backups"))
         if scenario == "recovery" || scenario == "conflict" {
             let engine = SessionTransferService(transcripts: environment.transcripts, backups: environment.backups)
