@@ -446,7 +446,8 @@ struct TerminalStrip: View {
         }
         switch connection.phase {
         case .unlinked, .checking, .opening, .choosing: return accountName
-        case .matched: return verifiedMatch ? accountName : t("cli.unconfirmedDetail")
+        case .matched:
+            return verifiedMatch ? t("cli.verifiedDetail", arguments: ["account": accountName]) : t("cli.unconfirmedDetail")
         case .waitingForLogin:
             return t("cli.waitingDetail", arguments: ["account": accountName])
         case .mismatched:
@@ -476,7 +477,7 @@ struct TerminalStrip: View {
         if showsConnectionPhase { return connectionDetail ?? accountName }
         switch connection.localRecord {
         case .sameAccount:
-            return accountName
+            return t("cli.recordSameDetail", arguments: ["account": accountName])
         case .differentAccount:
             return t("cli.recordDifferentDetail", arguments: ["account": accountName])
         case .notPrepared:
