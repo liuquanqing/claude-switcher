@@ -26,6 +26,14 @@ struct AppSettingsMenu: View {
 
     private var installationInProgress: Bool { store.updating || updater.phase == .installing }
 
+    private var checkTitle: String {
+        if updatePresentation.isChecking { return t("settings.checkingForUpdates") }
+        if updater.phase == .current {
+            return appText("settings.upToDate", language: language, arguments: ["version": updater.currentVersion])
+        }
+        return t("settings.checkForUpdates")
+    }
+
     private var prereleaseBinding: Binding<Bool> {
         Binding(
             get: { updater.includePrereleases },
@@ -45,10 +53,11 @@ struct AppSettingsMenu: View {
 
     var body: some View {
         Menu {
-            Button(t(updatePresentation.isChecking ? "settings.checkingForUpdates" : "settings.checkForUpdates")) {
+            Button(checkTitle) {
                 store.checkApplicationUpdates()
             }
             .disabled(updatePresentation.isChecking)
+            .help(updater.phase == .current ? t("settings.checkAgainHelp") : "")
             Toggle(t("settings.includePrereleases"), isOn: prereleaseBinding)
                 .toggleStyle(.checkbox)
                 .disabled(installationInProgress)
@@ -90,11 +99,7 @@ extension Store {
         ApplicationUpdatePresentation.shared.check(updater: updater, language: appLanguage) { [self] feedback in
             switch feedback {
             case .current:
-                self.applicationUpdateNotice = appText(
-                    "settings.updateCurrent",
-                    language: self.appLanguage,
-                    arguments: ["version": updater.currentVersion]
-                )
+                break
             case .failed(let message):
                 let reason = message?.trimmingCharacters(in: .whitespacesAndNewlines)
                 let detail = reason.flatMap { $0.isEmpty ? nil : $0 }
