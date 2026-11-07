@@ -16,40 +16,49 @@ private enum SessionTransferSheet: Identifiable {
     }
 }
 
-/// Ivory primary action with the window's ink as label (~15:1), matching the app's warm-neutral palette
-/// instead of a separate hue. The destructive variant keeps `.bad` with a dark label (white on it is only
-/// ~3.4:1). Disabled drops to a neutral raised surface so it stays visible but no longer looks clickable.
+/// Primary action in the same tinted-capsule language as the main panel's "Check & Open": a light
+/// Claude-orange wash, a hairline in the same hue and an orange label, rather than a solid fill that would
+/// outweigh the warm-neutral window. The destructive variant uses `.bad` the same way.
 private struct ImportProminentButtonStyle: ButtonStyle {
-    var tint: Color = .txt
-    var label: Color = .bg
-    @Environment(\.isEnabled) private var isEnabled
+    var tint: Color = .claude
 
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(isEnabled ? label : Color.sub)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 5)
-            .background(RoundedRectangle(cornerRadius: 6)
-                .fill(isEnabled ? tint : Color.cardHi)
-                .overlay(RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.black.opacity(isEnabled && configuration.isPressed ? 0.14 : 0))))
-            .overlay(RoundedRectangle(cornerRadius: 6)
-                .stroke(isEnabled ? Color.clear : Color.stroke, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 6))
+        ImportProminentButtonBody(configuration: configuration, tint: tint)
     }
 }
 
-/// Checkbox drawn in the same ivory as the primary action. Native tinting turns light fills muddy or hides
-/// the checkmark in dark appearance, so the box is drawn directly; the outline uses `sub` (~6.4:1 on bg).
+private struct ImportProminentButtonBody: View {
+    let configuration: ButtonStyle.Configuration
+    let tint: Color
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hover = false
+
+    var body: some View {
+        let fill = configuration.isPressed ? 0.26 : hover ? 0.2 : 0.12
+        configuration.label
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundColor(isEnabled ? tint : Color.sub)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 30)
+            .background(RoundedRectangle(cornerRadius: 8)
+                .fill(isEnabled ? tint.opacity(fill) : Color.cardHi))
+            .overlay(RoundedRectangle(cornerRadius: 8)
+                .stroke(isEnabled ? tint.opacity(0.3) : Color.stroke, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .onHover { hover = $0 }
+    }
+}
+
+/// Checked boxes use the Claude accent with the window's ink as the mark (~5.5:1); unchecked boxes keep a
+/// `sub` outline (~6.4:1 on bg). Drawn directly because native tinting turns muddy in dark appearance.
 private struct ImportCheckboxMark: View {
     let state: NSControl.StateValue
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 4)
-                .fill(state == .off ? Color.clear : Color.txt)
+                .fill(state == .off ? Color.clear : Color.claude)
             RoundedRectangle(cornerRadius: 4)
-                .strokeBorder(state == .off ? Color.sub : Color.txt, lineWidth: 1.2)
+                .strokeBorder(state == .off ? Color.sub : Color.claude, lineWidth: 1.2)
             if state != .off {
                 Image(systemName: state == .on ? "checkmark" : "minus")
                     .font(.system(size: 9, weight: .heavy))
@@ -507,9 +516,8 @@ struct CopyThreadsView: View {
         }
         .frame(minHeight: 180)
         .layoutPriority(1)
-        .background(RoundedRectangle(cornerRadius: 9).fill(Color.card.opacity(0.25)))
-        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.stroke.opacity(0.75), lineWidth: 1))
-        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay {
             if rows.isEmpty && hiddenOlder == 0 {
                 Text(emptyListMessage)
@@ -1060,7 +1068,7 @@ struct CopyThreadsView: View {
                     Task { await controller.confirmAction() }
                 }
                 .buttonStyle(confirmation.kind == "preserve"
-                    ? ImportProminentButtonStyle(tint: .bad, label: .bg)
+                    ? ImportProminentButtonStyle(tint: .bad)
                     : ImportProminentButtonStyle())
             }
             if confirmation.kind == "recovery" {

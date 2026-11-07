@@ -26,8 +26,15 @@ struct AppSettingsMenu: View {
 
     private var installationInProgress: Bool { store.updating || updater.phase == .installing }
 
+    private var hasPendingUpdate: Bool {
+        [.available, .downloading, .ready].contains(updater.phase) && updater.release != nil
+    }
+
     private var checkTitle: String {
         if updatePresentation.isChecking { return t("settings.checkingForUpdates") }
+        if hasPendingUpdate, let release = updater.release {
+            return appText("settings.updateAvailable", language: language, arguments: ["version": release.version])
+        }
         if updater.phase == .current {
             return appText("settings.upToDate", language: language, arguments: ["version": updater.currentVersion])
         }
@@ -85,7 +92,17 @@ struct AppSettingsMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: 28, height: 28)
-        .help(t("settings.help"))
+        .overlay(alignment: .topTrailing) {
+            if hasPendingUpdate {
+                Circle()
+                    .fill(Color.claude)
+                    .overlay(Circle().stroke(Color.card, lineWidth: 1.5))
+                    .frame(width: 7, height: 7)
+                    .offset(x: -4, y: 4)
+                    .allowsHitTesting(false)
+            }
+        }
+        .help(t(hasPendingUpdate ? "settings.helpUpdateAvailable" : "settings.help"))
         .accessibilityLabel(t("settings.title"))
         .onHover { hover = $0 }
     }
