@@ -20,7 +20,11 @@ enum InstallTrust {
     static func info(_ app: URL) throws -> [String: Any] {
         try PropertyListSerialization.propertyList(from: Data(contentsOf: app.appendingPathComponent("Contents/Info.plist")), format: nil) as? [String: Any] ?? [:]
     }
-    static func verify(_ app: URL, team: String, build: String) throws {
+    /// Every participating bundle must have a valid Developer ID identity. A
+    /// previously installed local preview may predate notarization; the newly
+    /// downloaded DMG and its app are still required to pass Gatekeeper before
+    /// this helper is invoked. Never exempt the incoming package from this.
+    static func verify(_ app: URL, team: String, build: String, requireNotarization: Bool = false) throws {
         let d = try info(app)
         guard d["CFBundleIdentifier"] as? String == bundleID, d["CFBundleVersion"] as? String == build,
               !d.keys.contains(where: { $0.hasPrefix("CSPreview") }) else { throw SafetyError("更新应用身份或版本不符。") }
@@ -28,9 +32,13 @@ enum InstallTrust {
         let expression = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and identifier \"\(bundleID)\""
         guard SecRequirementCreateWithString(expression as CFString, [], &requirement) == errSecSuccess,
               SecStaticCodeCreateWithPath(app as CFURL, [], &code) == errSecSuccess, let code,
-              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode), requirement) == errSecSuccess,
-              try LocalCommand.run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path]).0 == 0 else {
+              SecStaticCodeCheckValidity(code, SecCSFlags(rawValue: kSecCSStrictValidate | kSecCSCheckAllArchitectures | kSecCSCheckNestedCode), requirement) == errSecSuccess else {
             throw SafetyError("应用签名或系统验证未通过。")
+        }
+        if requireNotarization {
+            guard try LocalCommand.run("/usr/sbin/spctl", ["--assess", "--type", "execute", app.path]).0 == 0 else {
+                throw SafetyError("应用签名或系统验证未通过。")
+            }
         }
     }
     static func verifyGuardPath(_ application: URL) throws {
@@ -81,7 +89,8 @@ enum InstallTrust {
                 throw SafetyError("请先将应用安装到应用程序目录。")
             }
             try InstallTrust.verify(plan.application, team: team, build: replacementDone ? plan.newBuild : plan.oldBuild)
-            try InstallTrust.verify(plan.stagedApplication, team: team, build: replacementDone ? plan.oldBuild : plan.newBuild)
+            try InstallTrust.verify(plan.stagedApplication, team: team, build: replacementDone ? plan.oldBuild : plan.newBuild,
+                                    requireNotarization: !replacementDone)
             try InstallTrust.verifyGuardPath(plan.application)
         }, isRunning: { !running().isEmpty }, exchange: {
             // Recheck both sealed bundles before either the upgrade or rollback.

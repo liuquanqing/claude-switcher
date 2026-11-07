@@ -21,10 +21,10 @@ private enum ApplicationUpdateLocalization {
             "detail.idle": "可检查是否有适用于此 Mac 的新版本。",
             "detail.checking": "正在检查更新…",
             "detail.current": "当前版本已是最新版。",
-            "detail.available": "更新完成后将自动重启切换器。",
-            "detail.downloading": "正在下载；关闭窗口只隐藏进度。",
-            "detail.ready": "已下载并校验，可以安装并重启。",
-            "detail.installing": "正在准备或安装，完成后自动重启…",
+            "detail.available": "下载并安装后自动重启切换器。",
+            "detail.downloading": "正在下载…",
+            "detail.ready": "已下载，可以安装并重启。",
+            "detail.installing": "正在安装并重启…",
             "detail.failedCheck": "检查更新未完成，请重试。",
             "detail.failedDownload": "下载或校验未完成，请重试。",
             "detail.failedInstall": "更新未完成，可重试安装。",
@@ -33,7 +33,7 @@ private enum ApplicationUpdateLocalization {
             "action.releaseNotes": "发布说明",
             "action.later": "稍后",
             "action.cancelUpdate": "取消更新",
-            "action.hideProgress": "隐藏进度",
+            "action.hideProgress": "稍后",
             "action.close": "关闭",
             "action.retryCheck": "重新检查",
             "action.updateAndRelaunch": "更新并重启",
@@ -57,10 +57,10 @@ private enum ApplicationUpdateLocalization {
             "detail.idle": "Check for a new version for this Mac.",
             "detail.checking": "Checking for updates…",
             "detail.current": "This version is up to date.",
-            "detail.available": "The switcher will relaunch after the update.",
-            "detail.downloading": "Downloading. Closing the window only hides progress.",
-            "detail.ready": "Downloaded and verified. Ready to install and relaunch.",
-            "detail.installing": "Preparing or installing. The app will relaunch automatically…",
+            "detail.available": "The switcher relaunches after installation.",
+            "detail.downloading": "Downloading…",
+            "detail.ready": "Downloaded. Ready to install and relaunch.",
+            "detail.installing": "Installing and relaunching…",
             "detail.failedCheck": "The update check didn’t finish. Try again.",
             "detail.failedDownload": "The download or verification didn’t finish. Try again.",
             "detail.failedInstall": "The update didn’t finish. You can retry installation.",
@@ -69,7 +69,7 @@ private enum ApplicationUpdateLocalization {
             "action.releaseNotes": "Release Notes",
             "action.later": "Later",
             "action.cancelUpdate": "Cancel Update",
-            "action.hideProgress": "Hide Progress",
+            "action.hideProgress": "Later",
             "action.close": "Close",
             "action.retryCheck": "Check Again",
             "action.updateAndRelaunch": "Update and Relaunch",
@@ -143,19 +143,15 @@ struct ApplicationUpdateView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Claude Switcher")
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(versionText)
                     .font(.system(.headline, weight: .semibold))
                     .foregroundColor(.txt)
-                Text(versionText)
-                    .font(.system(.subheadline, weight: .medium))
-                    .foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(statusDetail)
                     .font(.callout)
-                    .foregroundColor(.txt)
-                    .lineSpacing(2)
+                    .foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
@@ -201,8 +197,8 @@ struct ApplicationUpdateView: View {
 
             actions
         }
-        .padding(20)
-        .frame(minWidth: 400, idealWidth: 430, maxWidth: 460, alignment: .topLeading)
+        .padding(18)
+        .frame(minWidth: 360, idealWidth: 400, maxWidth: 440, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .background(Color.bg)
         .preferredColorScheme(.dark)
@@ -319,15 +315,15 @@ final class ApplicationUpdateWindowController: NSObject {
             isNewWindow = false
         } else {
             let created = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 430, height: 200),
+                contentRect: NSRect(x: 0, y: 0, width: 400, height: 140),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
             created.isReleasedWhenClosed = false
             created.appearance = NSAppearance(named: .darkAqua)
-            created.contentMinSize = NSSize(width: 400, height: 120)
-            created.contentMaxSize = NSSize(width: 460, height: CGFloat.greatestFiniteMagnitude)
+            created.contentMinSize = NSSize(width: 360, height: 110)
+            created.contentMaxSize = NSSize(width: 440, height: CGFloat.greatestFiniteMagnitude)
             created.level = .normal
             created.tabbingMode = .disallowed
             self.window = created
@@ -343,7 +339,7 @@ final class ApplicationUpdateWindowController: NSObject {
         )
         window.contentViewController = hostingController
         let fittingHeight = hostingController.view.fittingSize.height
-        window.setContentSize(NSSize(width: 430, height: fittingHeight > 0 ? fittingHeight : 200))
+        window.setContentSize(NSSize(width: 400, height: fittingHeight > 0 ? fittingHeight : 140))
 
         if isNewWindow {
             window.center()
