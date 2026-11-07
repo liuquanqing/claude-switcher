@@ -22,8 +22,8 @@ class SigningChecks(unittest.TestCase):
         self.assertEqual(info["CFBundleIdentifier"], "dev.claudeswitcher.candidate")
         self.assertEqual(info["CFBundleShortVersionString"], "1.3.6")
         self.assertEqual(info["CSReleaseChannel"], "preview")
-        self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.9")
-        self.assertEqual(info["CFBundleVersion"], "20261107.9.0")
+        self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.10")
+        self.assertEqual(info["CFBundleVersion"], "20261107.10.0")
         self.assertIn("预览", info["CFBundleDisplayName"])
         self.assertIn("预览", info["CFBundleName"])
         self.assertFalse(any(k.startswith("CSPreview") for k in info))
@@ -99,8 +99,8 @@ class SigningChecks(unittest.TestCase):
             with patch.object(release, "ROOT", root), patch.object(release, "pinned_team", return_value="FAKE123456"), \
                  patch.object(release, "run", side_effect=fake_run), patch.object(sys, "argv", ["release", "prepare"]):
                 release.main()
-            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.9/RELEASE-MANIFEST.json").read_text())
-            self.assertEqual(manifest["release"], "1.3.6-rc.9")
+            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.10/RELEASE-MANIFEST.json").read_text())
+            self.assertEqual(manifest["release"], "1.3.6-rc.10")
             self.assertEqual(manifest["candidateCommit"], "c" * 40)
             self.assertEqual(Path(manifest["appPath"]).name, "Claude Switcher Preview.app")
             self.assertEqual(release.DR_BASELINE_APP_NAME, "Claude Switcher Preview.app")
