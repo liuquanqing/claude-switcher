@@ -389,6 +389,34 @@ struct CopyThreadsView: View {
             TextField(text("search"), text: $controller.query)
                 .textFieldStyle(.roundedBorder)
                 .disabled(controller.isWorking)
+            if !controller.isShowingCopyResult {
+                Picker(text("newDateRange"), selection: Binding(get: { controller.newSessionAgeDays ?? 0 }, set: { controller.setNewSessionAge($0 == 0 ? nil : $0) })) {
+                    Text(text("newLastWeek")).tag(7)
+                    Text(text("newLastMonth")).tag(30)
+                    Text(text("newLastQuarter")).tag(90)
+                    Text(text("newAllDates")).tag(0)
+                }
+                .labelsHidden()
+                .frame(width: controller.language == "en" ? 142 : 112)
+                .disabled(controller.isWorking)
+                .help(text("newDateRangeHelp"))
+                .accessibilityLabel(text("newDateRange"))
+                Button { controller.showsCustomNewDate.toggle() } label: {
+                    Image(systemName: "calendar")
+                        .frame(width: 22, height: 24)
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.sub)
+                .help(text("customNewDate"))
+                .accessibilityLabel(text("customNewDate"))
+                .disabled(controller.isWorking)
+                .popover(isPresented: $controller.showsCustomNewDate, arrowEdge: .bottom) {
+                    DatePicker(text("customNewDate"), selection: Binding(get: { controller.customNewSince ?? Date() }, set: { date in controller.setCustomNewDate(date) }), displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .labelsHidden()
+                        .padding(10)
+                }
+            }
         }
     }
 

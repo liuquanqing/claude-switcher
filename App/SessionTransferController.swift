@@ -119,6 +119,9 @@ actor SessionTransferWorker {
     @Published private(set) var picked: Set<String> = []
     @Published var query = ""
     @Published private(set) var updateExisting = true
+    @Published private(set) var newSessionAgeDays: Int? = 30
+    @Published private(set) var customNewSince: Date?
+    @Published var showsCustomNewDate = false
     @Published private(set) var isWorking = false
     @Published private(set) var statusMessage: String?
     @Published private(set) var errorMessage: String?
@@ -145,6 +148,7 @@ actor SessionTransferWorker {
     private var operationStatus: String?
     private var preselectMissing = true
     private var loadedSelectionScope: String?
+    private var loadedNewSessionAgeDays: Int??
     private let demoRoot: URL?
     private let commandURL: URL
 
@@ -177,9 +181,18 @@ actor SessionTransferWorker {
     deinit { if let demoRoot { try? FileManager.default.removeItem(at: demoRoot) } }
     var visibleRows: [SessionTransferRow] {
         let displayed = isShowingCopyResult ? completedSnapshot?.rows ?? rows : rows
-        return displayed.filter {
-            query.isEmpty || "\($0.title) \($0.cwd) \(resultItem(for: $0)?.title ?? "")".localizedCaseInsensitiveContains(query)
+        return displayed.filter { row in
+            (query.isEmpty || "\(row.title) \(row.cwd) \(resultItem(for: row)?.title ?? "")".localizedCaseInsensitiveContains(query))
+                && (isShowingCopyResult || newAdditionsIncludes(row))
         }
+    }
+    private var newAdditionsCutoff: Date {
+        if showsCustomNewDate, let customNewSince { return customNewSince }
+        guard let newSessionAgeDays else { return .distantPast }
+        return Date().addingTimeInterval(-Double(newSessionAgeDays) * 86400)
+    }
+    private func newAdditionsIncludes(_ row: SessionTransferRow) -> Bool {
+        row.kind != .add || newSessionAgeDays == nil || row.lastActivity >= newAdditionsCutoff
     }
     var isShowingCopyResult: Bool {
         guard let snapshot = completedSnapshot, let operation = lastOperation else { return false }
@@ -237,6 +250,17 @@ actor SessionTransferWorker {
         updateExisting = value
         if !value { picked.subtract(rows.filter { $0.kind == .update }.map(\.id)) }
         pendingPlan = nil; confirmation = nil; queueRefresh(selectUpdates: value)
+    }
+    func setNewSessionAge(_ days: Int?) {
+        guard !writing, days != newSessionAgeDays else { return }
+        newSessionAgeDays = days
+        showsCustomNewDate = false
+        picked.subtract(rows.filter { $0.kind == .add && !newAdditionsIncludes($0) }.map(\.id))
+    }
+    func setCustomNewDate(_ date: Date) {
+        guard !writing else { return }
+        customNewSince = Calendar.current.startOfDay(for: date)
+        showsCustomNewDate = true
     }
     func swapDirection() {
         guard !isWorking, !sourceID.isEmpty, !targetID.isEmpty, sourceID != targetID,
@@ -296,7 +320,7 @@ actor SessionTransferWorker {
             }
             rows = result
             if preselectMissing {
-                picked = Set(visibleRows.filter(\.selectable).map(\.id))
+                picked = Set(visibleRows.filter { $0.selectable && newAdditionsIncludes($0) }.map(\.id))
                 preselectMissing = false
             } else {
                 picked.formIntersection(result.filter(\.selectable).map(\.id))

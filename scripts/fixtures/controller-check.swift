@@ -659,6 +659,25 @@ actor FixtureGuardWorker: GuardWorking {
   selection.setUpdates(false); try await settled(selection)
   selection.setTargetSpace(selection.targetSpaces[0].id); try await settled(selection)
   require(selection.picked.count == 4 && selection.rows.allSatisfy { $0.kind == .add }, "new explicitly chosen API space defaults to missing sessions after resolving that scope")
+  let datedFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: datedFixture.1) }
+  let datedRoot = datedFixture.0.endpoints[0].root.appendingPathComponent("claude-code-sessions/account-business/org-team")
+  try JSONSerialization.data(withJSONObject: ["sessionId": "logical-old", "cliSessionId": "cli-ui", "title": "120 天前的旧记录", "cwd": "/demo/old", "completedTurns": 4, "lastActivityAt": Date().addingTimeInterval(-120 * 86400).timeIntervalSince1970 * 1000]).write(to: datedRoot.appendingPathComponent("local_old.json"))
+  let datedSelection = SessionTransferController(store: Store(demo: true), testEnvironment: datedFixture.0)
+  try await chooseBusinessToPersonal(datedSelection)
+  require(datedSelection.newSessionAgeDays == 30 && datedSelection.visibleRows.count == 4 && datedSelection.picked == ["local_ui.json", "local_api.json"],
+          "the default month keeps a new session and an older existing conversation update")
+  datedSelection.setNewSessionAge(90)
+  require(datedSelection.visibleRows.count == 4 && datedSelection.picked == ["local_ui.json", "local_api.json"],
+          "all dates reveals older additions without removing safe updates")
+  datedSelection.setNewSessionAge(7)
+  require(!datedSelection.visibleRows.contains { $0.id == "local_old.json" } && !datedSelection.picked.contains("local_old.json"),
+          "a short new-session window hides older additions but never hides the existing update")
+  datedSelection.setPicked("local_api.json", selected: false)
+  datedSelection.setNewSessionAge(90)
+  require(datedSelection.picked == ["local_ui.json"], "changing date scope preserves a manual update deselection")
+  datedSelection.setNewSessionAge(nil)
+  require(datedSelection.picked == ["local_ui.json"], "returning to all dates does not reselect a cancelled update")
   var usageProfile = Profile(name: "missing", snapshot: nil, signedIn: true)
   require(usageProfile.usageState == .notRequested, "missing usage data is not automatically loading")
   usageProfile.blockUsageRefresh("fixture gate denied")
