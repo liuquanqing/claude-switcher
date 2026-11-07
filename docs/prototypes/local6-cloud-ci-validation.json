@@ -1,0 +1,52 @@
+{
+  "completedAtSingapore": "2026-10-29T02:48:59+08:00",
+  "runURL": "https://github.com/liuquanqing/claude-switcher/actions/runs/40747931686",
+  "runID": 40747931686,
+  "testedPublicCommit": "d63f77a3807981371315a58dc4556894faa75829",
+  "result": "success",
+  "runner": "macos-15-intel",
+  "coreTests": 176,
+  "controllerChecks": 106,
+  "releaseBuildAndSignatureVerification": "passed",
+  "earlierFailures": [
+    "macOS arm64 hosted capacity: job was not acquired",
+    "missing optional rg executable in controller source enumeration"
+  ],
+  "fixes": [
+    "use standard macos-15-intel runner",
+    "enumerate Swift sources using Bash built-ins"
+  ],
+  "applicationCoreFixturesAndBuildSourcesUnchangedFromReleaseTag": true,
+  "releasedAssetsUnchanged": true,
+  "realLoginsSessionsAndGuardOperations": false,
+  "steps": [
+    {
+      "name": "Set up job",
+      "result": "success"
+    },
+    {
+      "name": "Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      "result": "success"
+    },
+    {
+      "name": "Core tests with synthetic data",
+      "result": "success"
+    },
+    {
+      "name": "Isolated controller checks",
+      "result": "success"
+    },
+    {
+      "name": "Build and verify signatures",
+      "result": "success"
+    },
+    {
+      "name": "Post Run actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+      "result": "success"
+    },
+    {
+      "name": "Complete job",
+      "result": "success"
+    }
+  ]
+}

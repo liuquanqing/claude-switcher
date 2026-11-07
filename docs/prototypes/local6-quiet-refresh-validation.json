@@ -1,0 +1,33 @@
+{
+  "at": "2026-10-28T18:18:36.565275+00:00",
+  "version": "1.3.0-local.6",
+  "build": "20261029.6.7",
+  "sourceHashes": {
+    "App/CLILoginController.swift": "497c83f41702eb140c2fbe869b8abac5245cbdfbf33431b234907c7ebf5be2db",
+    "App/Views.swift": "80a3e861cc8742477f91ff1d33eecf67ba02eeb4d98d7f7e146dc364d601222d",
+    "App/main.swift": "2cc81f9da442f0571581d1e6f11f1c7997ab218e14da93e41e4dce79818b96f5",
+    "App/CLIStatusPresentation.swift": "dbf03bb33ca6eb0be4967b1af57b2422a0adc52cc5b4952192def51c22114a1c",
+    "scripts/fixtures/controller-check.swift": "08a3558e128a2de6e03a771d2f5e0e1e287d3b6145d013d356dfe48f35b06c51",
+    "build.sh": "a953b413e7b895cf672eb84da010fda60da7df50abab140b7032bc6eb91300ba",
+    "scripts/package-release.sh": "a3738263ab33e3083d16963c40fedf0bb28be8a224267cf67c8cad6169d5c7fc"
+  },
+  "publicSourceEqual": true,
+  "coreTests": 176,
+  "controllerChecks": 106,
+  "nativeFakeUI": [
+    "checking retains prior conclusion; info button disabled",
+    "first unverified no inline check action",
+    "API identity verified is neutral; no match claim"
+  ],
+  "actualAccountsUsedAsFixtures": false,
+  "installed": true,
+  "screenshots": [
+    "checking-main.png",
+    "checking-info.png",
+    "unverified-main.png",
+    "api-main.png"
+  ],
+  "installationBuild": "20261029.6.7",
+  "helpersUnchanged": true,
+  "guardStillRegistered": true
+}

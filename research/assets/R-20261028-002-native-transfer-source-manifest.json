@@ -1,0 +1,19 @@
+{
+  "date": "2026-10-28",
+  "scope": "frozen backend command review; native UI/Package/LocalCommand implementation were not included",
+  "invocationID": "5b5e0d6d-e391-4434-a53e-7bb2e4a896c5",
+  "artifact": "research/assets/R-20261028-002-native-transfer-claude.md",
+  "artifactSHA256": "1e2d5dd247d78076bfb71172ed9d89a864be7fbb9a5502580ca6d1953989481a",
+  "files": {
+    "App/SessionTransferController.swift": "a1cc3855b539398af40bd8a4a665ab6cdb69144dad4907b18b3c2f7a7ef33844",
+    "App/SessionTransferDemo.swift": "21376a480e9c63b0cc8231389ef40725f293fa9b93968ab4a2fefd3d8bfb3fe7",
+    "Sources/ClaudeSessionTransfer/main.swift": "93aa5d1d0832eb54cfaede10b00feec495c83767b8a276b3bc1b1c57001d98be",
+    "Sources/SwitcherCore/SessionTransferCommand.swift": "360a91547afdb3edf89e585dc8dc33a05b041d9ab2e7257f7c072c629812d2ba",
+    "Sources/SwitcherCore/SessionTransferDisk.swift": "625d30318bf271fb00a8a29d7951c7d6915950095ffdff01e21286860bfacd99",
+    "Sources/SwitcherCore/SessionTransferJournal.swift": "a73dbc2954c103e1215d33d4560626cbc7f614c471feda78f1fdc275b295d840",
+    "Sources/SwitcherCore/SessionTransferModels.swift": "75e5ffac4da81537ef8a91c48988d4cb2f6222cb218cf094f5b4233fbb331c8f",
+    "Sources/SwitcherCore/SessionTransferService.swift": "0cc2d10e70e974e167abcbe27ac1fca8f98a2e72b48b7f7bf5e2ffe381a2e702",
+    "Tests/SwitcherCoreTests/SessionTransferTests.swift": "cdea1ba2b4c82ae70566d97337f095993f512910368c7cfaf6a6ed0670a972bb",
+    "build.sh": "1c05ae33a86e7380da5e135c807dfc182700d3b9e6436af76e0a7a1efa72ca90"
+  }
+}
