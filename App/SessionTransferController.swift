@@ -118,7 +118,7 @@ actor SessionTransferWorker {
     @Published private(set) var rows: [SessionTransferRow] = []
     @Published private(set) var picked: Set<String> = []
     @Published var query = ""
-    @Published private(set) var updateExisting = false
+    @Published private(set) var updateExisting = true
     @Published private(set) var isWorking = false
     @Published private(set) var statusMessage: String?
     @Published private(set) var errorMessage: String?
@@ -296,7 +296,7 @@ actor SessionTransferWorker {
             }
             rows = result
             if preselectMissing {
-                picked = Set(visibleRows.filter { $0.kind == .add }.map(\.id))
+                picked = Set(visibleRows.filter(\.selectable).map(\.id))
                 preselectMissing = false
             } else {
                 picked.formIntersection(result.filter(\.selectable).map(\.id))

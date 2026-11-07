@@ -389,14 +389,6 @@ struct CopyThreadsView: View {
             TextField(text("search"), text: $controller.query)
                 .textFieldStyle(.roundedBorder)
                 .disabled(controller.isWorking)
-            if !controller.isShowingCopyResult {
-                Toggle(text("updateExisting"), isOn: updateBinding)
-                    .toggleStyle(.checkbox)
-                    .font(.system(size: 12))
-                    .tint(.importAccentSoft)
-                    .disabled(controller.isWorking)
-                    .help(text("updateHelp"))
-            }
         }
     }
 
