@@ -238,13 +238,13 @@ struct TerminalProtectionCard: View {
     private var reportOriginHelp: String? {
         guard let report = controller.lastCheckReport else { return nil }
         switch report.origin {
-        case .manualInput: return t("protection.manualInputOrigin")
+        case .manualInput: return t("protection.manualInputOrigin") + "\n" + t("protection.diagnosticOnly")
         case .operation: return t("protection.operationOrigin")
         }
     }
 
     private func networkCell(_ item: NetworkItem) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 2) {
             Text(item.title).font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
             HStack(spacing: 4) {
                 Image(systemName: item.status.icon).font(.system(size: 10))
@@ -253,7 +253,7 @@ struct TerminalProtectionCard: View {
             }
             .foregroundColor(item.status.color)
         }
-        .padding(.horizontal, 8).padding(.vertical, 6)
+        .padding(.horizontal, 8).padding(.vertical, 5)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 6).fill(Color.card))
         .help(item.help ?? "")
@@ -310,7 +310,7 @@ struct TerminalProtectionCard: View {
             VStack(alignment: .leading, spacing: 0) {
                 resultHeaderRow
                 if resultsExpanded {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 6) {
                         if controller.checking || controller.lastCheckReport?.validationMessage == nil {
                             HStack(spacing: 6) {
                                 ForEach(networkItems, id: \.title) { networkCell($0) }
@@ -322,22 +322,8 @@ struct TerminalProtectionCard: View {
                             Text(note).font(.system(size: 9.5)).foregroundColor(.warn)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            if isOperationReport {
-                                Spacer(minLength: 0)
-                            } else {
-                                Text(t("protection.diagnosticOnly"))
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-                            Link("IP / WebRTC ↗", destination: URL(string: "https://ip.net.coffee/claude/")!)
-                                .foregroundColor(.claude)
-                                .help(t("protection.webCheckHelp"))
-                                .accessibilityLabel(t("protection.webCheckAccessibility"))
-                        }
-                        .font(.system(size: 9.5)).foregroundColor(.sub)
                     }
-                    .padding(.horizontal, 10).padding(.bottom, 10).padding(.top, 2)
+                    .padding(.horizontal, 10).padding(.bottom, 8).padding(.top, 2)
                 }
             }
             .padding(.top, 2).padding(.bottom, resultsExpanded ? 0 : 2)
@@ -562,14 +548,14 @@ struct TerminalProtectionCard: View {
         controller.enabled && !needsRetry && controller.operationPhase == .idle
     }
 
-    private func protectionAction(compact: Bool = false) -> some View {
+    private func protectionAction() -> some View {
         Button(action: runProtectionAction) {
             HStack(spacing: 5) {
                 if controller.working { ProgressView().controlSize(.mini) }
-                Text(primaryProtectionTitle).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+                Text(primaryProtectionTitle).font(.system(size: 10, weight: .medium)).lineLimit(1)
             }
-            .padding(.horizontal, protectionActionIsSecondary ? 9 : 12)
-            .frame(maxWidth: compact || protectionActionIsSecondary ? nil : .infinity)
+            .padding(.horizontal, protectionActionIsSecondary ? 8 : 12)
+            .frame(maxWidth: protectionActionIsSecondary ? nil : .infinity)
             .frame(height: 28)
             .foregroundColor(protectionActionIsSecondary ? .txt : .white)
             .background(RoundedRectangle(cornerRadius: 7)
@@ -730,7 +716,7 @@ struct TerminalProtectionCard: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 4).padding(.vertical, 4)
-                .frame(width: 164)
+                .frame(width: language == "en" ? 184 : 164)
                 .frame(maxHeight: .infinity)
                 .background(showSettings ? panelTint : Color.clear)
             }
@@ -770,7 +756,7 @@ struct TerminalProtectionCard: View {
 
     private var settings: some View {
         let scopeHelp = t(controller.desktopScope == .api ? "protection.apiServiceControlHelp" : "protection.scopeExplanation")
-        return VStack(alignment: .leading, spacing: 10) {
+        return VStack(alignment: .leading, spacing: 7) {
             if hasNotices {
                 VStack(alignment: .leading, spacing: 8) { notices }
             }
@@ -781,87 +767,9 @@ struct TerminalProtectionCard: View {
                     .help(scopeHelp)
                     .accessibilityHint(scopeHelp)
                 Spacer(minLength: 8)
-                protectionAction(compact: true)
+                protectionAction()
             }
-            HStack(alignment: .bottom, spacing: 10) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(t("protection.targetCountry")).font(.system(size: 10)).foregroundColor(.sub)
-                        .frame(height: 22)
-                    TextField("SG", text: $controller.country)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                        .multilineTextAlignment(.center).foregroundColor(.txt)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 28)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.bg))
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
-                        .help(t("protection.countryHelp"))
-                        .accessibilityLabel(t("protection.targetCountry"))
-                        .disabled(operationLocked || controller.working || controller.checking)
-                }
-                .frame(width: 78, alignment: .leading)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 2) {
-                        Text(t("protection.proxyMode")).font(.system(size: 10)).foregroundColor(.sub)
-                        Button { showProxyHelp.toggle() } label: {
-                            Image(systemName: "questionmark.circle")
-                                .font(.system(size: 10)).foregroundColor(.sub)
-                                .frame(width: 22, height: 22)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .help(t("protection.compatibility"))
-                        .accessibilityLabel(t("protection.compatibility"))
-                        .popover(isPresented: $showProxyHelp, arrowEdge: .bottom) {
-                            Text(modeDetail)
-                                .font(.system(size: 10.5)).foregroundColor(.txt)
-                                .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                                .frame(width: 240, alignment: .leading).padding(12)
-                        }
-                    }
-                    .frame(height: 22)
-                    Picker(t("protection.proxyMode"), selection: $controller.mode) {
-                        Text("Shadowrocket").tag(ProxyMode.shadowrocket)
-                        Text(t("protection.autoTUN")).tag(ProxyMode.auto)
-                    }
-                    .pickerStyle(.menu).labelsHidden()
-                    .font(.system(size: 11))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: 28)
-                    .disabled(operationLocked || controller.working || controller.checking)
-                    .help(t("protection.saveToApply"))
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if controller.enabled {
-                    if controller.hasUnsavedChanges {
-                        Button { Task { await controller.enable() } } label: {
-                            Text(t("protection.saveSettings"))
-                                .font(.system(size: 10.5, weight: .semibold))
-                                .frame(width: 76, height: 28)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.white)
-                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.claude))
-                        .disabled(operationLocked || controller.working)
-                        .opacity(operationLocked || controller.working ? 0.55 : 1)
-                        .help(t("protection.saveHelp"))
-                    } else {
-                        Label(t("common.saved"), systemImage: "checkmark")
-                            .font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
-                            .frame(width: 76, height: 28)
-                            .help(t("protection.savedHelp"))
-                            .accessibilityHint(t("protection.savedHelp"))
-                    }
-                }
-            }
-            if let unsavedNote {
-                Text(unsavedNote)
-                    .font(.system(size: 9.5)).foregroundColor(.warn)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, -4)
-            }
-            HStack(spacing: 8) {
+            HStack(spacing: 4) {
                 Button { Task { await controller.checkNow() } } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "network").font(.system(size: 10, weight: .semibold))
@@ -879,7 +787,6 @@ struct TerminalProtectionCard: View {
                 .opacity(operationLocked || controller.working || controller.checking ? 0.55 : 1)
                 .help(t("protection.checkOnlyHelp"))
                 .accessibilityHint(t("protection.checkOnlyHelp"))
-                Spacer(minLength: 8)
                 Button { showCheckHelp.toggle() } label: {
                     Image(systemName: "questionmark.circle")
                         .font(.system(size: 10.5))
@@ -894,10 +801,90 @@ struct TerminalProtectionCard: View {
                 .help(t("protection.checkHelpSummary"))
                 .accessibilityLabel(t("protection.checkHelpButton"))
                 .popover(isPresented: $showCheckHelp, arrowEdge: .bottom) { checkHelpContent }
+                Spacer(minLength: 8)
+                Link(destination: URL(string: "https://ip.net.coffee/claude/")!) {
+                    Text("IP / WebRTC ↗").font(.system(size: 9.5)).foregroundColor(.sub)
+                }
+                .buttonStyle(.plain)
+                .help(t("protection.webCheckHelp"))
+                .accessibilityLabel(t("protection.webCheckAccessibility"))
             }
             checkResults
+            Divider().opacity(0.45)
+            HStack(alignment: .center, spacing: 10) {
+                HStack(spacing: 6) {
+                    Text(t("protection.targetCountry")).font(.system(size: 10)).foregroundColor(.sub)
+                    TextField("SG", text: $controller.country)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .multilineTextAlignment(.center).foregroundColor(.txt)
+                        .frame(width: 44, height: 28)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.bg))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
+                        .help(t("protection.countryHelp"))
+                        .accessibilityLabel(t("protection.targetCountry"))
+                        .disabled(operationLocked || controller.working || controller.checking)
+                }
+                .fixedSize()
+                HStack(spacing: 2) {
+                    Picker(t("protection.proxyMode"), selection: $controller.mode) {
+                        Text("Shadowrocket").tag(ProxyMode.shadowrocket)
+                        Text(t("protection.autoTUN")).tag(ProxyMode.auto)
+                    }
+                    .pickerStyle(.menu).labelsHidden()
+                    .font(.system(size: 11))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 28)
+                    .disabled(operationLocked || controller.working || controller.checking)
+                    .help(t("protection.saveToApply"))
+                    Button { showProxyHelp.toggle() } label: {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 10)).foregroundColor(.sub)
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(t("protection.compatibility"))
+                    .accessibilityLabel(t("protection.compatibility"))
+                    .popover(isPresented: $showProxyHelp, arrowEdge: .bottom) {
+                        Text(modeDetail)
+                            .font(.system(size: 10.5)).foregroundColor(.txt)
+                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                            .frame(width: 240, alignment: .leading).padding(12)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if controller.enabled {
+                    if controller.hasUnsavedChanges {
+                        Button { Task { await controller.enable() } } label: {
+                            Text(t("protection.saveSettings"))
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .frame(height: 28)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.white)
+                        .background(RoundedRectangle(cornerRadius: 7).fill(Color.claude))
+                        .disabled(operationLocked || controller.working)
+                        .opacity(operationLocked || controller.working ? 0.55 : 1)
+                        .help(t("protection.saveHelp"))
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold)).foregroundColor(.sub)
+                            .frame(width: 24, height: 28)
+                            .help(t("protection.savedHelp"))
+                            .accessibilityHint(t("protection.savedHelp"))
+                    }
+                }
+            }
+            if let unsavedNote {
+                Text(unsavedNote)
+                    .font(.system(size: 9.5)).foregroundColor(.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, -4)
+            }
         }
-        .padding(12)
+        .padding(.horizontal, 12).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

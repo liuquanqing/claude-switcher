@@ -181,7 +181,7 @@ struct Header: View {
             HStack(spacing: 0) {
                 HStack(spacing: 5) {
                     Circle().fill(running ? Color.good : Color.sub.opacity(0.7)).frame(width: 6, height: 6)
-                    Text(appText(running ? "desktop.running" : "desktop.stopped", language: language))
+                    Text(appText(running ? "desktop.runningShort" : "desktop.stopped", language: language))
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundColor(running ? .txt : .sub)
                         .lineLimit(1).fixedSize()
@@ -206,7 +206,7 @@ struct Header: View {
         .help(desktopHelp)
         .onHover { openHover = $0 }
         .accessibilityLabel(appText("desktop.accessibility", language: language, arguments: [
-            "state": appText(running ? "desktop.running" : "desktop.stopped", language: language),
+            "state": appText(running ? "desktop.runningShort" : "desktop.stopped", language: language),
             "action": actionTitle
         ]))
         .accessibilityHint(desktopHelp)

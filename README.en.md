@@ -14,9 +14,9 @@ Accounts, usage, sessions and network checks meet in one place.
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.9/ClaudeSwitcher-1.3.6-rc.9-arm64-developer-id-preview.dmg)
+[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/ClaudeSwitcher-1.3.6-rc.11-arm64-developer-id-preview.dmg)
 
-**1.3.6 RC9 · Preview** · Apple Silicon · macOS 13+
+**1.3.6 RC11 · Preview** · Apple Silicon · macOS 13+
 
 [Download](#download) · [Features](#features) · [Quick start](#quick-start) · [Scope](#scope) · [中文](README.md)
 
@@ -39,8 +39,8 @@ Claude Switcher keeps that work in the menu bar: see the current account, check 
 
 | | |
 | --- | --- |
-| **Account switching** | Keep separate Claude Desktop data directories for different working identities. |
-| **Desktop + CLI** | Copy a dedicated CLI launch command or explicitly replace the default CLI login. [Details](docs/design/cli-directory-link/README.md) |
+| **Account switching** | Keep separate Claude Desktop data directories for different working identities; leave the default CLI login unchanged. |
+| **Desktop + CLI** | Reuse a verified CLI directory first, recover an old backup or sign in officially when needed. No automatic default-login overwrite. [Details](docs/design/cli-directory-link/README.md) |
 | **Preflight** | Inspect the proxy, TUN interface, Claude domains and expected region before changing accounts. |
 | **Background guard** | Observe explicitly confirmed subscription desktops while the panel is closed. |
 | **Session copying** | Copy, update, back up, undo and restore supported local desktop session indexes. |
@@ -61,7 +61,7 @@ Known failures, unknown states and unresolved conflicts stop the operation befor
 
 ## Screens
 
-Open Settings in the footer to switch the entire app between Chinese and English. Account names, session content, and paths stay as they are.
+Refresh subscription usage or check for updates directly in the footer. Global language, launch at login and prerelease preferences remain in Settings. Account names, session content, and paths stay as they are.
 
 <table>
 <tr>
@@ -80,13 +80,13 @@ All account details in these screenshots are fictional. See [bilingual protectio
 
 ## Download
 
-Version 1.3.6 RC9 refines subscription and API states, reads native CLI usage output, and checks the query route before requesting usage. See [release notes](docs/releases/1.3.6-rc.9.md).
+Version 1.3.6 RC11 refreshes subscription usage from Desktop without requiring CLI sign-in, improves CLI reuse and backup recovery, and simplifies terminal status, session import and protection settings. See [release notes](docs/releases/1.3.6-rc.11.md).
 
-**[Download Claude Switcher 1.3.6 RC9 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.9/ClaudeSwitcher-1.3.6-rc.9-arm64-developer-id-preview.dmg)**
+**[Download Claude Switcher 1.3.6 RC11 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/ClaudeSwitcher-1.3.6-rc.11-arm64-developer-id-preview.dmg)**
 
 For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher.app` to Applications.
 
-[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.9) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.9/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
+[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.11) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
 
 This prerelease is Developer ID signed and notarized by Apple. Normal first-open and Keychain prompts may still apply. [Stable 1.3.5](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5) remains available; see each release for signing status and [the installation guide](docs/INSTALL.md).
 

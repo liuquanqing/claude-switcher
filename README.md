@@ -14,9 +14,9 @@
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.9/ClaudeSwitcher-1.3.6-rc.9-arm64-developer-id-preview.dmg)
+[![下载 macOS DMG](https://img.shields.io/badge/macOS-%E4%B8%8B%E8%BD%BD_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/ClaudeSwitcher-1.3.6-rc.11-arm64-developer-id-preview.dmg)
 
-**1.3.6 RC9 · 预览版** · Apple Silicon · macOS 13+
+**1.3.6 RC11 · 预览版** · Apple Silicon · macOS 13+
 
 [下载](#下载) · [核心能力](#核心能力) · [快速开始](#快速开始) · [边界与验证](#边界与验证) · [English](README.en.md)
 
@@ -47,14 +47,14 @@
 
 **在账号之间从容切换**
 
-为不同工作身份保留独立的 Claude Desktop 数据目录，用更短的路径完成切换。
+为不同工作身份保留独立的 Claude Desktop 数据目录；默认 CLI 登录保持原样。
 
 </td>
 <td width="50%" valign="top">
 
 **桌面与 CLI 一起对齐**
 
-桌面切换保留默认 CLI 登录。可复制当前档案的独立目录命令，或显式确认同步默认 CLI。[使用说明](docs/design/cli-directory-link/README.md)
+优先复用已核验的 CLI 目录；需要时恢复旧备份或走官方登录，不自动覆盖默认登录。[使用说明](docs/design/cli-directory-link/README.md)
 
 </td>
 </tr>
@@ -106,7 +106,7 @@ flowchart LR
 
 ## 界面
 
-从底部设置菜单切换全局中文与 English；检查更新与登录时启动也收在这里。账号名称、会话内容和路径保留原样。
+底部直接刷新订阅额度或检查更新；全局中英文、登录时启动与预览版偏好收在设置里。账号名称、会话内容和路径保留原样。
 
 <table>
 <tr>
@@ -125,13 +125,13 @@ English
 
 ## 下载
 
-1.3.6 RC9 统一普通与 API 模式的界面层级，兼容官方 CLI 额度输出，并在查询前复核出口。详见[本版说明](docs/releases/1.3.6-rc.9.md)。
+1.3.6 RC11 恢复桌面账号独立查询订阅额度，不要求 CLI 登录；优化 CLI 复用与备份恢复，并精简终端状态、会话导入和保护设置。详见[本版说明](docs/releases/1.3.6-rc.11.md)。
 
-**[下载 Claude Switcher 1.3.6 RC9 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.9/ClaudeSwitcher-1.3.6-rc.9-arm64-developer-id-preview.dmg)**
+**[下载 Claude Switcher 1.3.6 RC11 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/ClaudeSwitcher-1.3.6-rc.11-arm64-developer-id-preview.dmg)**
 
 适用于 **Apple Silicon（M1 及更新芯片）· macOS 13+**。打开 DMG，将预览应用拖入“应用程序”。启用独立守卫的旧版本请先阅读升级说明，保留它使用的运行组件。
 
-[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.9) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.9/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
+[版本说明](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.11) · [SHA256 校验文件](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/SHA256SUMS) · [所有版本](https://github.com/liuquanqing/claude-switcher/releases)
 
 > 本预览版使用 Developer ID 签名并通过 Apple 公证，仍可能需要正常的首次打开及钥匙串授权。[1.3.5 正式版](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5)保留，签名状态以各版本说明为准。升级与卸载见[安装说明](docs/INSTALL.md)。
 
