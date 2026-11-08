@@ -166,6 +166,47 @@ struct TerminalProtectionCard: View {
         return draft != target || modeChanged
     }
 
+    private func freshNetworkExit(now: Date) -> (country: String, checkedAt: Date)? {
+        guard !controller.checking, !controller.working, !controller.hasUnsavedChanges,
+              let activeCountry = controller.activeCountry?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              !activeCountry.isEmpty, let activeMode = controller.activeProxyMode else { return nil }
+
+        func normalized(_ country: String?) -> String? {
+            country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        }
+        func fresh(_ checkedAt: Date) -> Bool {
+            let age = now.timeIntervalSince(checkedAt)
+            return age >= 0 && age <= SafetyConfig.maximumReceiptAge
+        }
+
+        let reportIsNewest = controller.lastCheckReport.map { report in
+            controller.guardCheckedAt.map { report.checkedAt >= $0 } ?? true
+        } ?? false
+        if reportIsNewest, let report = controller.lastCheckReport {
+            guard fresh(report.checkedAt), report.validationMessage == nil, report.passed,
+                  normalized(report.targetCountry) == activeCountry, report.proxyMode == activeMode,
+                  let observation = report.observation,
+                  let country = normalized(observation.country), country == activeCountry else { return nil }
+            return (country, report.checkedAt)
+        }
+
+        guard let checkedAt = controller.guardCheckedAt, fresh(checkedAt),
+              controller.enabled, controller.guardOnline, controller.lastDecision.allowed,
+              normalized(controller.lastDecision.expectedCountry) == activeCountry,
+              let country = normalized(controller.lastDecision.observedCountry), country == activeCountry else { return nil }
+        return (country, checkedAt)
+    }
+
+    private func networkSummary(now: Date, includeTime: Bool = true) -> String {
+        guard let exit = freshNetworkExit(now: now) else {
+            return t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")])
+        }
+        let exitText = t("protection.observedExit", arguments: ["country": exit.country])
+        guard includeTime else { return exitText }
+        let time = AppLocalization.date(exit.checkedAt, language: language, timeStyle: .short)
+        return exitText + " · " + time
+    }
+
     /// Stale completed network results lose their verdict colour; early gate failures keep their actual reason.
     private var displayVerdict: (text: String, color: Color, icon: String) {
         if resultStale, controller.lastCheckReport?.observation != nil {
@@ -378,30 +419,33 @@ struct TerminalProtectionCard: View {
     }
 
     private var protectionHeader: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if protectedSummaryCountry != nil {
-                ViewThatFits(in: .horizontal) {
-                    protectedSummary(inlineCountry: true)
-                    protectedSummary(inlineCountry: false)
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            let detail = statusDetail(now: context.date)
+            VStack(alignment: .leading, spacing: 4) {
+                if protectedSummaryCountry(now: context.date) != nil {
+                    ViewThatFits(in: .horizontal) {
+                        protectedSummary(inlineCountry: true, now: context.date)
+                        protectedSummary(inlineCountry: false, now: context.date)
+                    }
+                } else {
+                    statusRow
+                    Group {
+                        Text(detail.isEmpty ? " " : detail)
+                            .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                            .lineLimit(1).minimumScaleFactor(0.75)
+                            .padding(.leading, 26)
+                            .opacity(detail.isEmpty ? 0 : 1)
+                            .accessibilityHidden(detail.isEmpty)
+                    }
                 }
-            } else {
-                statusRow
-                Group {
-                    Text(statusDetail.isEmpty ? " " : statusDetail)
-                        .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                        .lineLimit(1).minimumScaleFactor(0.75)
-                        .padding(.leading, 26)
-                        .opacity(statusDetail.isEmpty ? 0 : 1)
-                        .accessibilityHidden(statusDetail.isEmpty)
+                if controller.desktopScope == .subscription && needsRetry {
+                    protectionAction()
                 }
             }
-            if controller.desktopScope == .subscription && needsRetry {
-                protectionAction()
-            }
+            .padding(.horizontal, 2).padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .accessibilityLabel(t("protection.statusAccessibility", arguments: ["title": statusTitle, "detail": detail]))
         }
-        .padding(.horizontal, 2).padding(.vertical, 4)
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .accessibilityLabel(t("protection.statusAccessibility", arguments: ["title": statusTitle, "detail": statusDetail]))
     }
 
     private var statusRow: some View {
@@ -431,17 +475,17 @@ struct TerminalProtectionCard: View {
         }
     }
 
-    private func protectedSummary(inlineCountry: Bool) -> some View {
+    private func protectedSummary(inlineCountry: Bool, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 if inlineCountry {
-                    inlineStatusContent
+                    inlineStatusContent(now: now)
                 } else {
                     statusContent.padding(.horizontal, 6)
                 }
                 settingsToggleButton
             }
-            if !inlineCountry, let country = protectedSummaryCountry {
+            if !inlineCountry, let country = protectedSummaryCountry(now: now) {
                 Text(country)
                     .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
                     .lineLimit(1).padding(.leading, 32)
@@ -449,11 +493,11 @@ struct TerminalProtectionCard: View {
         }
     }
 
-    private var inlineStatusContent: some View {
+    private func inlineStatusContent(now: Date) -> some View {
         HStack(spacing: 5) {
             Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
                 .frame(width: 14, height: 14)
-            if let country = protectedSummaryCountry {
+            if let country = protectedSummaryCountry(now: now) {
                 (Text(statusTitle) + Text(" · " + country).foregroundColor(.sub))
                     .font(.system(size: 11, weight: .semibold))
                     .lineLimit(1).fixedSize(horizontal: true, vertical: false)
@@ -465,11 +509,11 @@ struct TerminalProtectionCard: View {
         .foregroundColor(statusColor)
     }
 
-    private var protectedSummaryCountry: String? {
+    private func protectedSummaryCountry(now: Date) -> String? {
         guard controller.enabled, !controller.working, protectedDesktop,
               let country = controller.activeCountry?.trimmingCharacters(in: .whitespacesAndNewlines),
               !country.isEmpty else { return nil }
-        return country
+        return networkSummary(now: now)
     }
 
     private var statusContent: some View {
@@ -606,11 +650,11 @@ struct TerminalProtectionCard: View {
         if protectedDesktop { return t("protection.active") }
         return t("protection.unconfirmedStatus")
     }
-    /// The one useful fact per state. The target shown is always the saved one the guard runs with,
-    /// never the draft in the settings field.
-    private var statusDetail: String {
+    /// The one useful fact per state. Any actual exit is tied to a fresh check of the saved configuration;
+    /// otherwise the target remains the saved one, never the draft in the settings field.
+    private func statusDetail(now: Date) -> String {
         if controller.desktopScope == .api { return t("protection.subscriptionOnly") }
-        let target = t("common.target", arguments: ["country": controller.activeCountry ?? t("common.notSet")])
+        let target = networkSummary(now: now, includeTime: false)
         if controller.working { return target }
         if !controller.enabled { return controller.activeCountry == nil ? "" : target }
         if !controller.guardOnline || controller.lastDecision.reason == .terminationFailed { return target }

@@ -485,14 +485,26 @@ struct TerminalStrip: View {
         return "\(local.prefix(2))***@\(domain)"
     }
 
-    private var terminalSummary: String {
+    private var normalIdentity: String? {
+        guard subscriptionDesktop else { return nil }
         if verifiedMatch {
-            return store.active?.snapshot?.email.flatMap(maskedEmail) ?? accountName
+            return accountName
         }
         if !showsConnectionPhase, !defaultMismatch, !usageLoginRequired, case .sameAccount = connection.localRecord {
             return accountName
         }
-        return terminalStatus
+        return nil
+    }
+
+    private var normalIdentityDetail: String? {
+        guard subscriptionDesktop, verifiedMatch else { return nil }
+        let match = t("cli.matchShort")
+        guard let email = store.active?.snapshot?.email.flatMap(maskedEmail) else { return match }
+        return "\(match) · \(email)"
+    }
+
+    private var terminalSummary: String {
+        normalIdentity ?? terminalStatus
     }
 
     private var terminalStatus: String {
@@ -549,7 +561,7 @@ struct TerminalStrip: View {
 
     private var needsPreparation: Bool {
         if showsConnectionPhase {
-            return connection.phase == .choosing || connection.phase == .mismatched
+            return connection.phase == .unlinked || connection.phase == .choosing || connection.phase == .mismatched
         }
         if defaultMismatch { return true }
         switch connection.localRecord {
@@ -563,19 +575,19 @@ struct TerminalStrip: View {
             switch connection.phase {
             case .waitingForLogin: return t("cli.confirmLogin")
             case .failed: return t("cli.retry")
-            case .choosing: return t("cli.prepare")
+            case .unlinked, .choosing: return t("cli.prepare")
             case .mismatched: return t("common.switch")
-            default: break
+            case .checking, .opening, .matched, .unconfirmed: break
             }
         }
         if defaultMismatch { return t("common.switch") }
         if usageLoginRequired { return t("cli.openForLogin") }
         if case .differentAccount = connection.localRecord { return t("common.switch") }
-        return t(needsPreparation ? "cli.prepare" : "cli.open")
+        return t(needsPreparation ? "cli.prepare" : "cli.confirmLogin")
     }
 
     private var showsInlineAction: Bool {
-        guard subscriptionDesktop, !connection.isBusy else { return false }
+        guard subscriptionDesktop, !connection.isBusy, normalIdentity == nil else { return false }
         if showsConnectionPhase {
             switch connection.phase {
             case .checking, .opening: return false
@@ -753,13 +765,14 @@ struct TerminalStrip: View {
     var body: some View {
         let displayedStatus = subscriptionDesktop ? terminalStatus : status
         let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
+        let normalIdentity = subscriptionDesktop ? self.normalIdentity : nil
+        let normalIdentityDetail = subscriptionDesktop ? self.normalIdentityDetail : nil
         let summary = subscriptionDesktop ? terminalSummary : accountDetail ?? status
         let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
         let title = Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
         let identity = Text(summary).font(.system(size: 10.5)).foregroundColor(displayedStatusColor)
             .lineLimit(1).truncationMode(.middle)
-            .frame(maxWidth: .infinity, alignment: .leading)
         let statusInfo = Button { showHelp.toggle() } label: {
             Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
                 .frame(width: 28, height: 28)
@@ -777,11 +790,18 @@ struct TerminalStrip: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     title
+                    if normalIdentity != nil { identity }
                     statusInfo
                     Spacer(minLength: 4)
                 }
                 .frame(height: 28)
-                identity
+                if normalIdentity == nil {
+                    identity.frame(maxWidth: .infinity, alignment: .leading)
+                } else if let normalIdentityDetail {
+                    Text(normalIdentityDetail).font(.system(size: 10.5)).foregroundColor(displayedStatusColor)
+                        .lineLimit(1).truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             if showsInlineAction {
                 Spacer(minLength: 4)
