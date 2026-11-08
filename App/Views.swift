@@ -1486,9 +1486,12 @@ struct LanguageMenu: View {
 struct Panel: View {
     @ObservedObject var store: Store
     @ObservedObject var protection: ProtectionController
+    @ObservedObject private var updater = ApplicationUpdater.shared
+    @ObservedObject private var updatePresentation = ApplicationUpdatePresentation.shared
     @Environment(\.appLanguage) private var language
     @State private var quitHover = false
     @State private var bannerDismissHover = false
+    @State private var updateNoticeSequence = 0
     let cols = [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)]
 
     private func t(_ key: String, arguments: [String: String] = [:]) -> String {
@@ -1500,6 +1503,17 @@ struct Panel: View {
             return AppLocalization.decision(protection.lastDecision, language: language)
         }
         return AppLocalization.message(message, language: language)
+    }
+
+    private func dismissUpdateNoticeAfterDelay() {
+        updateNoticeSequence += 1
+        let sequence = updateNoticeSequence
+        guard store.applicationUpdateNotice != nil else { return }
+        Task {
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard updateNoticeSequence == sequence else { return }
+            store.applicationUpdateNotice = nil
+        }
     }
 
     /// One timestamp for the newest real sample; unsuccessful attempts never change it.
@@ -1629,6 +1643,20 @@ struct Panel: View {
                     ProgressView().controlSize(.small)
                     Text(generated(b)).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
                         .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
+                } else if updatePresentation.isChecking {
+                    ProgressView().controlSize(.small)
+                    Text(t("settings.checkingForUpdates")).font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
+                        .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
+                } else if let notice = store.applicationUpdateNotice {
+                    let failed = updater.phase == .failed
+                    let current = updater.phase == .current
+                    Label(failed ? t("settings.updateFailedShort") : notice,
+                          systemImage: failed ? "exclamationmark.triangle.fill" : current ? "checkmark.circle.fill" : "info.circle")
+                        .font(.system(size: 11, weight: .medium))
+                        .lineLimit(1).minimumScaleFactor(0.85).layoutPriority(-1)
+                        .foregroundColor(failed ? .warn : current ? .good : .sub)
+                        .help(notice)
+                        .accessibilityHint(notice)
                 } else if store.refreshing || store.statusRefreshInProgress {
                     ProgressView().controlSize(.small)
                     Text(t("common.refreshing")).font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
@@ -1652,6 +1680,7 @@ struct Panel: View {
                 ) {
                     Task { await store.refreshAllStatuses() }
                 }
+                ApplicationUpdateButton(store: store)
                 AppSettingsMenu(store: store)
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {
@@ -1673,6 +1702,8 @@ struct Panel: View {
             }
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
+            .onAppear(perform: dismissUpdateNoticeAfterDelay)
+            .onChange(of: store.applicationUpdateNotice) { _ in dismissUpdateNoticeAfterDelay() }
         }
         .padding(12)
         .frame(width: 500)
