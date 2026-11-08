@@ -6,7 +6,8 @@ import SwitcherCore
 enum BoundedCLICommand {
     struct Output: Sendable { let status: Int32; let text: String; let timedOut: Bool }
     static func run(home: URL, executable: URL, arguments: [String], inherited: [String: String],
-                                timeoutSeconds: TimeInterval, graceSeconds: TimeInterval, combineStderr: Bool = true) async throws -> Output {
+                                timeoutSeconds: TimeInterval, graceSeconds: TimeInterval, combineStderr: Bool = true,
+                                input: Data? = nil) async throws -> Output {
         try await Task.detached(priority: .utility) {
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("switcher-current-cli-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -16,6 +17,18 @@ enum BoundedCLICommand {
             process.environment = inherited
             process.currentDirectoryURL = directory
             process.standardInput = FileHandle.nullDevice
+            if let input {
+                let pipe = Pipe()
+                let writer = pipe.fileHandleForWriting
+                // A bounded, nonblocking write before launch keeps a request
+                // header out of the process arguments and off disk.
+                guard input.count <= 4096, fcntl(writer.fileDescriptor, F_SETFL, O_NONBLOCK) == 0 else {
+                    throw SafetyError("额度请求输入不可用。")
+                }
+                try writer.write(contentsOf: input)
+                try writer.close()
+                process.standardInput = pipe
+            }
             process.standardOutput = output; process.standardError = combineStderr ? output : FileHandle.nullDevice
             let fd = output.fileHandleForReading.fileDescriptor
             guard fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK) == 0 else { throw SafetyError("官方 CLI 输出通道不可用。") }

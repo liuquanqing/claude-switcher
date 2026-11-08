@@ -28,7 +28,10 @@ struct LocalAccountObservation: Equatable {
         let cliChanged = localAccountObservation != nil && localAccountObservation?.cliIdentityFingerprint != observation.cliIdentityFingerprint
         localAccountObservation = observation
         if changed { usageRefreshPolicy.credentialsChanged(profile: current); usageCatchUpPending = true }
-        if cliChanged { cliConnection.defaultLoginDidChange() }
+        if cliChanged {
+            invalidateCLIStatus()
+            cliConnection.defaultLoginDidChange()
+        }
         if protection.desktopScope == .subscription,
            let actual = observation.desktopAccountID, let saved = active?.snapshot?.identity.accountID,
            CLIReportedStatus.sameAccountRecord(CLIIdentity(accountID: actual, organizationID: nil, email: nil),
@@ -67,8 +70,25 @@ struct LocalAccountObservation: Equatable {
         guard !isDemo, !updating, busy == nil, !refreshing, !cliStatusRefreshing, !automaticRefreshInProgress, !statusRefreshInProgress else { return }
         automaticRefreshInProgress = true
         defer { automaticRefreshInProgress = false }
-        // Startup, wake and timer observe only metadata and an existing quota
-        // sample. They never launch Claude Code, touch Keychain or recover a login.
+        // Metadata observation is cheap. Only the active subscription desktop
+        // gets a bounded, silent usage request when the sample is due.
         _ = await observeAccountMetadata()
+        guard protection.desktopScope == .subscription, claudeRunning || panelIsVisible(),
+              protection.enabled, let profile = active, profile.signedIn || localAccountObservation?.desktopAccountID != nil else { return }
+        let name = current, now = Date()
+        // An older application's fresh quota sample may carry no identity.
+        let sampled = profile.snapshot?.identity.isComplete == true ? profile.snapshot?.fetchedAt : nil
+        guard usageRefreshPolicy.shouldRequest(profile: name, sampledAt: sampled, resetsAt: [],
+                                               active: true, trigger: .periodic, now: now),
+              usageRefreshPolicy.permitsExplicitRequest(profile: name, now: now) else { return }
+        usageRefreshPolicy.began(profile: name, now: now)
+        do {
+            _ = try await refreshCurrentDesktopUsage(allowInteraction: false)
+            usageNotice = nil
+            linkedUsageDetails = nil
+        } catch {
+            guard current == name else { return }
+            usageRefreshPolicy.failed(profile: name, now: Date(), retryAfter: (error as? DesktopUsageHTTPFailure)?.retryAfter)
+        }
     }
 }

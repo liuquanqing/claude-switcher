@@ -20,7 +20,10 @@ let support = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
 let liveDir = support.appendingPathComponent("Claude")
 let parkDir = support.appendingPathComponent("Claude-Profiles")
 let currentFile = parkDir.appendingPathComponent(".current")
-let cacheDir = parkDir.appendingPathComponent(".cache")
+let legacyCacheDir = parkDir.appendingPathComponent(".cache")
+// The upstream app also writes its own .cache, without the identity fields
+// Preview needs for terminal matching. Never write back to that shared cache.
+let cacheDir = support.appendingPathComponent("ClaudeSwitcher/usage-cache", isDirectory: true)
 let defaultProfiles = ["Personal", "Business"]
 let demoMode = CommandLine.arguments.contains("--demo") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewMode") as? Bool == true
 let demoPopover = demoMode && (CommandLine.arguments.contains("--demo-popover")
@@ -40,12 +43,14 @@ struct Snapshot: Codable {
     var session: Window?
     var weekly: Window?
     var weeklyOpus: Window?
+    var weeklySonnet: Window?
+    var weeklyFable: Window?
     var extraEnabled: Bool?
     var fetchedAt: Date
     var identity: CLIIdentity { CLIIdentity(accountID: accountID, organizationID: organizationID, email: email) }
 }
 
-enum ProfileUsageState: Equatable, Sendable { case notRequested, loading, cached, loaded, blocked, failed }
+enum ProfileUsageState: Equatable, Sendable { case notRequested, loading, cached, loaded, blocked, loginRequired, failed }
 
 struct Profile: Identifiable {
     var id: String { name }
@@ -64,7 +69,9 @@ struct Profile: Identifiable {
         switch result {
         case nil: signedIn = false; error = nil; usageState = .notRequested
         case .success(let value)?: snapshot = value; signedIn = true; error = nil; usageState = .loaded
-        case .failure(let value)?: error = value.localizedDescription; usageState = .failed
+        case .failure(let value)?:
+            error = value.localizedDescription
+            usageState = (value as? AccountUsageQuery.Failure) == .loginRequired ? .loginRequired : .failed
         }
     }
 }
@@ -140,18 +147,21 @@ func planName(_ org: [String: Any]?) -> String? {
     return type.isEmpty ? nil : type.capitalized
 }
 
-func loadCache(_ name: String) -> Snapshot? {
+func loadCache(_ name: String, directory: URL = cacheDir, legacy: URL = legacyCacheDir) -> Snapshot? {
     guard ProfileTransaction.validName(name) else { return nil }
-    guard let d = try? Data(contentsOf: cacheDir.appendingPathComponent("\(name).json")) else { return nil }
     let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
-    return try? dec.decode(Snapshot.self, from: d)
+    for root in [directory, legacy] {
+        if let data = try? Data(contentsOf: root.appendingPathComponent("\(name).json")),
+           let sample = try? dec.decode(Snapshot.self, from: data) { return sample }
+    }
+    return nil
 }
 
-func saveCache(_ name: String, _ s: Snapshot) {
+func saveCache(_ name: String, _ s: Snapshot, directory: URL = cacheDir) {
     guard ProfileTransaction.validName(name) else { return }
-    try? fm.createDirectory(at: cacheDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try? fm.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
-    let output = cacheDir.appendingPathComponent("\(name).json")
+    let output = directory.appendingPathComponent("\(name).json")
     try? enc.encode(s).write(to: output, options: .atomic)
     try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.path)
 }
@@ -171,6 +181,7 @@ final class Store: ObservableObject {
     @Published var lastRefresh: Date?
     @Published var banner: String?
     @Published var usageNotice: String?
+    @Published var linkedUsageDetails: String?
     @Published var openAtLogin = false
     @Published var applicationUpdateNotice: String?
     @Published var updating = false
@@ -197,6 +208,7 @@ final class Store: ObservableObject {
     var onChange: (() -> Void)?
     var onLanguageChange: (() -> Void)?
     var onShowAccounts: (() -> Void)?
+    var onPresentCopyWindow: (() -> Void)?
     func returnToAccounts() { onShowAccounts?() }
     let protection: ProtectionController
     let isDemo: Bool
@@ -206,6 +218,7 @@ final class Store: ObservableObject {
     private var accountRefreshTimer: Timer?
     var localAccountObservation: LocalAccountObservation?
     var usageRefreshPolicy = UsageRefreshPolicy()
+    var desktopManualUsagePolicy = UsageRefreshPolicy()
     var automaticRefreshInProgress = false
     @Published var statusRefreshInProgress = false
     var usageCatchUpPending = false
@@ -460,6 +473,8 @@ final class Store: ObservableObject {
         snapshot.session = sample.session.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
         snapshot.weekly = sample.weekly.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
         snapshot.weeklyOpus = sample.weeklyOpus.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
+        snapshot.weeklySonnet = sample.weeklySonnet.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
+        snapshot.weeklyFable = sample.weeklyFable.map { Window(used: $0.used, resetsAt: $0.resetsAt) }
         snapshot.fetchedAt = sample.fetchedAt
         acceptSubscriptionUsageResult(.success(snapshot), for: profiles[index].name, contextUnchanged: true)
     }
@@ -610,6 +625,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
             store.onShowAccounts = { [weak self] in self?.showPanel() }
+            store.onPresentCopyWindow = { [weak self] in self?.popover.close() }
             store.panelIsVisible = { [weak self] in self?.popover.isShown == true }
             popover.behavior = .transient
             popover.animates = true

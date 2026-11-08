@@ -5,6 +5,8 @@ public struct SubscriptionUsageSample: Sendable {
     public let session: OfficialUsageWindow?
     public let weekly: OfficialUsageWindow?
     public let weeklyOpus: OfficialUsageWindow?
+    public let weeklySonnet: OfficialUsageWindow?
+    public let weeklyFable: OfficialUsageWindow?
 
     public static func read(_ data: Data) throws -> Self {
         let object = try CLIJSON.object(data)
@@ -27,7 +29,10 @@ public struct SubscriptionUsageSample: Sendable {
             return OfficialUsageWindow(used: used.doubleValue, resetsAt: reset)
         }
         let session = try window("five_hour"), weekly = try window("seven_day")
-        guard session != nil || weekly != nil else { throw SafetyError("订阅暂无可读额度，保留原数据。") }
-        return Self(session: session, weekly: weekly, weeklyOpus: try window("seven_day_opus"))
+        let opus = try window("seven_day_opus"), sonnet = try window("seven_day_sonnet"), fable = try window("seven_day_fable")
+        guard [session, weekly, opus, sonnet, fable].contains(where: { $0 != nil }) else {
+            throw SafetyError("订阅暂无可读额度，保留原数据。")
+        }
+        return Self(session: session, weekly: weekly, weeklyOpus: opus, weeklySonnet: sonnet, weeklyFable: fable)
     }
 }

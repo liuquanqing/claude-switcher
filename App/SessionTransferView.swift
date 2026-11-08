@@ -108,14 +108,171 @@ private struct MixedSelectionCheckbox: View {
     }
 }
 
+private struct TransferSpacePicker: View {
+    let label: String
+    @Binding var selection: String
+    let options: [TransferSpaceOption]
+    let language: String
+    @State private var isOpen = false
+
+    private func text(_ key: String, _ arguments: [String: String] = [:]) -> String {
+        SessionTransferLocalization.text(key, language: language, arguments: arguments)
+    }
+
+    private func maskedEmail(_ email: String) -> String {
+        guard let separator = email.lastIndex(of: "@") else { return email }
+        let local = email[..<separator]
+        let domain = email[email.index(after: separator)...]
+        guard !local.isEmpty, !domain.isEmpty else { return email }
+        return "\(local.prefix(3))…@\(domain)"
+    }
+
+    private func name(_ option: TransferSpaceOption) -> String {
+        option.accountEmail.map(maskedEmail) ?? option.profileName ?? option.accountName
+            ?? option.organizationName ?? option.title ?? text("spaceUnnamed")
+    }
+
+    private func detail(_ option: TransferSpaceOption) -> String {
+        let primary = name(option)
+        var seen = Set<String>()
+        return [option.organizationName, option.title, option.profileName, option.accountName]
+            .compactMap { $0 }
+            .filter { value in
+                guard value != primary, !value.isEmpty, !seen.contains(value) else { return false }
+                seen.insert(value)
+                return true
+            }
+            .joined(separator: " · ")
+    }
+
+    private func selectedName(_ option: TransferSpaceOption) -> String {
+        let primary = name(option)
+        guard options.contains(where: { $0.id != option.id && name($0) == primary }) else { return primary }
+        let detail = detail(option)
+        return detail.isEmpty ? primary : primary + " · " + detail
+    }
+
+    private func tooltip(_ option: TransferSpaceOption) -> String {
+        var lines: [String] = []
+        if let email = option.accountEmail {
+            lines.append(text("spaceEmailDetail", ["email": email]))
+        }
+        if let profile = option.profileName {
+            lines.append(text("spaceProfileDetail", ["name": profile]))
+        }
+        if let account = option.accountName {
+            lines.append(text("spaceAccountNameDetail", ["name": account]))
+        }
+        if option.accountEmail == nil && option.profileName == nil && option.accountName == nil {
+            lines.append(text("spaceIdentityUnknown"))
+        }
+        if let organization = option.organizationName {
+            lines.append(text("spaceOrganizationDetail", ["name": organization]))
+        }
+        if let title = option.title {
+            lines.append(text("spaceSessionDetail", ["title": title]))
+        }
+        lines.append(text("spaceAccountReference", ["id": option.space.account]))
+        lines.append(text("spaceReference", ["id": option.space.organization]))
+        return lines.joined(separator: "\n")
+    }
+
+    var body: some View {
+        let selected = options.first { $0.id == selection }
+        let title = selected.map(selectedName) ?? text("chooseSpace")
+        Button { isOpen.toggle() } label: {
+            HStack(spacing: 6) {
+                Text(title).lineLimit(1)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 9, weight: .semibold))
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(selected == nil ? .sub : .txt)
+            .padding(.horizontal, 9)
+            .frame(width: 170, height: 24)
+            .background(Color.cardHi, in: RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+        .accessibilityValue(title)
+        .help(selected.map(tooltip) ?? text("spacePickerHelp"))
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            chooser
+        }
+    }
+
+    private var chooser: some View {
+        let matches = options.filter(\.matchesProfile)
+        let others = Dictionary(grouping: options.filter { !$0.matchesProfile }, by: { $0.space.account })
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(label).font(.system(size: 13, weight: .semibold)).foregroundColor(.txt)
+            Text(text("spacePickerHelp")).font(.system(size: 11)).foregroundColor(.sub)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(matches) { row($0) }
+                    if !others.isEmpty {
+                        if !matches.isEmpty || options.count > 1 {
+                            Text(text(matches.isEmpty ? "spaceLocalGroupUnmatched" : "spaceLocalGroup"))
+                                .font(.system(size: 11, weight: .semibold)).foregroundColor(.sub)
+                        }
+                        ForEach(others.keys.sorted(), id: \.self) { account in
+                            ForEach(others[account] ?? []) { row($0) }
+                        }
+                    }
+                }
+                .padding(.trailing, 5)
+            }
+            .frame(height: 270)
+        }
+        .padding(12)
+        .frame(width: 330)
+        .background(Color.bg)
+    }
+
+    private func row(_ option: TransferSpaceOption) -> some View {
+        let isSelected = option.id == selection
+        return Button {
+            selection = option.id
+            isOpen = false
+        } label: {
+            HStack(alignment: .top, spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(name(option)).font(.system(size: 12, weight: .medium)).foregroundColor(.txt).lineLimit(1)
+                        if let count = option.count {
+                            Text(text("spaceIndexCount", ["count": String(count)]))
+                                .font(.system(size: 10)).foregroundColor(.sub)
+                        }
+                    }
+                    let detail = detail(option)
+                    if !detail.isEmpty {
+                        Text(detail).font(.system(size: 11)).foregroundColor(.sub).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                if isSelected {
+                    Image(systemName: "checkmark").font(.system(size: 11, weight: .semibold)).foregroundColor(.claude)
+                }
+            }
+            .padding(8)
+            .background(isSelected ? Color.cardHi : Color.card, in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .help(tooltip(option))
+    }
+}
+
 @MainActor
 struct CopyThreadsView: View {
     @ObservedObject private var controller: SessionTransferController
     @FocusState private var modalCancelFocused: Bool
     @State private var handoffCopied = false
     @State private var instructionsCopied = false
+    @State private var isCopyingInstructions = false
     @State private var instructionCopySequence = 0
-    @State private var showingScopeHelp = false
     @State private var showsSettled = false
     private let store: Store
 
@@ -300,15 +457,30 @@ struct CopyThreadsView: View {
             .foregroundColor(.sub)
             .help(text("backHelp"))
             Spacer()
-            scopeLabel
-            Button(text(instructionsCopied ? "copiedInstructions" : "copyForClaude")) {
+            Text(text("copyScopeLabel"))
+                .font(.system(size: 11))
+                .foregroundColor(.sub)
+                .help(text("copyScopeHelp"))
+            Spacer()
+            Button {
                 copyInstructions()
+            } label: {
+                HStack(spacing: 5) {
+                    if isCopyingInstructions {
+                        ProgressView().controlSize(.small)
+                        Text(text("preparingInstructions"))
+                    } else {
+                        Label(text(instructionsCopied ? "copiedTerminalInstructions" : "copyTerminalInstructions"),
+                              systemImage: instructionsCopied ? "checkmark" : "terminal")
+                    }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .frame(minHeight: 18)
             }
-            .buttonStyle(.link)
-            .font(.system(size: 11))
-            .foregroundColor(.sub)
+            .buttonStyle(.bordered)
             .fixedSize()
-            .disabled(!controller.canExport || controller.isWorking)
+            .disabled(!controller.canExport || isCopyingInstructions)
+            .help(text("copyForClaudeHelp"))
         }
     }
 
@@ -334,7 +506,8 @@ struct CopyThreadsView: View {
                             .frame(width: directionLabelWidth, alignment: .leading)
                             .font(.system(size: 11))
                             .foregroundColor(.sub)
-                        spacePicker(text("sourceSpace"), selection: sourceSpaceBinding, options: controller.sourceSpaces)
+                        TransferSpacePicker(label: text("sourceSpace"), selection: sourceSpaceBinding,
+                                            options: controller.sourceSpaces, language: controller.language)
                     }
                 }
             }
@@ -370,39 +543,14 @@ struct CopyThreadsView: View {
                             .frame(width: directionLabelWidth, alignment: .leading)
                             .font(.system(size: 11))
                             .foregroundColor(.sub)
-                        spacePicker(text("targetSpace"), selection: targetSpaceBinding, options: controller.targetSpaces)
+                        TransferSpacePicker(label: text("targetSpace"), selection: targetSpaceBinding,
+                                            options: controller.targetSpaces, language: controller.language)
                     }
                 }
             }
             Spacer(minLength: 0)
         }
-    }
-
-    private var scopeLabel: some View {
-        HStack(spacing: 2) {
-            Text(text("copyScopeLabel"))
-                .font(.system(size: 11))
-                .foregroundColor(.sub)
-            Button { showingScopeHelp.toggle() } label: {
-                Image(systemName: "info.circle")
-                    .font(.system(size: 11))
-                    .frame(width: 20, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .foregroundColor(.sub)
-            .accessibilityLabel(Text(text("copyScopeAccessibility")))
-            .popover(isPresented: $showingScopeHelp, arrowEdge: .bottom) {
-                Text(text("copyScopeHelp"))
-                    .font(.system(size: 11))
-                    .foregroundColor(.txt)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(12)
-                    .frame(width: 340)
-                    .background(Color.bg)
-            }
-        }
-        .padding(.trailing, 10)
+        .disabled(controller.isWorking)
     }
 
     private var searchAndUpdate: some View {
@@ -698,7 +846,7 @@ struct CopyThreadsView: View {
                     .fixedSize()
                     .disabled(controller.isWorking)
             } else {
-                if controller.isWorking {
+                if controller.isWorking && !isCopyingInstructions {
                     ProgressView().controlSize(.small)
                     Text(text("processing"))
                         .font(.system(size: 12))
@@ -741,10 +889,13 @@ struct CopyThreadsView: View {
     }
 
     private func copyInstructions() {
+        guard !isCopyingInstructions else { return }
         instructionCopySequence += 1
         let sequence = instructionCopySequence
         instructionsCopied = false
+        isCopyingInstructions = true
         Task {
+            defer { isCopyingInstructions = false }
             guard let instructions = await controller.generateInstructions(),
                   !instructions.isEmpty,
                   sequence == instructionCopySequence else { return }
@@ -785,25 +936,6 @@ struct CopyThreadsView: View {
                     .tag(option.id)
             }
         }
-        .frame(width: 170)
-        .disabled(controller.isWorking)
-        .help(selectedName)
-    }
-
-    private func spacePicker(_ label: String, selection: Binding<String>, options: [TransferSpaceOption]) -> some View {
-        let selectedName = options.first { $0.id == selection.wrappedValue }.map {
-            SessionTransferLocalization.spaceName($0.name, language: controller.language)
-        } ?? text("chooseSpace")
-        return Picker(label, selection: selection) {
-            Text(text("chooseSpace")).tag("")
-            ForEach(options) { option in
-                Text(SessionTransferLocalization.spaceName(option.name, language: controller.language))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .tag(option.id)
-            }
-        }
-        .labelsHidden()
         .frame(width: 170)
         .disabled(controller.isWorking)
         .help(selectedName)
@@ -1239,12 +1371,14 @@ enum CopyWindow {
     }
 
     static func show(_ store: Store) {
+        store.onPresentCopyWindow?()
         let controller = controller(for: store)
         var viewWillRefresh = false
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 580),
                              styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
             w.isReleasedWhenClosed = false
+            w.collectionBehavior.insert(.moveToActiveSpace)
             w.appearance = NSAppearance(named: .darkAqua)
             w.contentMinSize = NSSize(width: 680, height: 520)
             window = w
@@ -1260,8 +1394,12 @@ enum CopyWindow {
         if !viewWillRefresh && !controller.isWorking {
             Task { await controller.refresh() }
         }
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
+        // Let the menu/popover dismissal finish before taking focus.
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            window?.makeKeyAndOrderFront(nil)
+            window?.orderFrontRegardless()
+        }
     }
 
     static func returnToAccounts(_ store: Store) {

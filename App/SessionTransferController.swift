@@ -4,7 +4,40 @@ import Combine
 import SwitcherCore
 
 struct TransferLocationOption: Identifiable, Sendable { let id: String; let name: String }
-struct TransferSpaceOption: Identifiable, Sendable { let id: String; let name: String }
+struct TransferSpaceOption: Identifiable, Sendable {
+    let space: SessionTransferSpace
+    let matchesProfile: Bool
+    let profileName: String?
+    let accountName: String?
+    let organizationName: String?
+    let count: Int?
+    let title: String?
+    var accountEmail: String? = nil
+    var id: String { space.id }
+}
+
+private struct TransferAccountNames {
+    let identity: CLIIdentity
+    let account: String?
+    let organization: String?
+    let email: String?
+
+    init?(document: URL?) {
+        guard let document, let data = try? Data(contentsOf: document),
+              let json = try? CLIJSON.object(data), let record = json["oauthAccount"] as? [String: Any] else { return nil }
+        let identity = CLIIdentity.profile(record)
+        guard identity.isComplete else { return nil }
+        func name(_ key: String) -> String? {
+            guard let value = (record[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty else { return nil }
+            return value
+        }
+        self.identity = identity
+        email = identity.email
+        account = name("displayName") ?? name("fullName")
+        organization = name("organizationName")
+    }
+}
 struct TransferSessionItem: Identifiable {
     let id: String
     let title: String
@@ -39,9 +72,12 @@ struct SessionTransferEnvironment: Sendable {
     let activeEndpointIDs: Set<String>
     let transcripts: URL
     let backups: URL
+    var savedIdentities: [String: CLIIdentity] = [:]
+    var cliMetadataDocument: URL?
 }
 struct SessionTransferLoaded: Sendable {
     let spaces: [String: [SessionTransferSpace]]
+    let options: [String: [TransferSpaceOption]]
     let errors: [String: String]
     let receipts: [SessionTransferReceipt]
     let historyError: String?
@@ -67,12 +103,39 @@ actor SessionTransferWorker {
     func load(_ env: SessionTransferEnvironment) -> SessionTransferLoaded {
         let engine = service(env)
         var spaces: [String: [SessionTransferSpace]] = [:], errors: [String: String] = [:]
+        var options: [String: [TransferSpaceOption]] = [:]
+        let localNames = TransferAccountNames(document: env.cliMetadataDocument)
         for endpoint in env.endpoints {
-            do { spaces[endpoint.id] = try engine.spaces(in: endpoint) }
+            do {
+                let discovered = try engine.spaces(in: endpoint)
+                spaces[endpoint.id] = discovered
+                options[endpoint.id] = discovered.map { space in
+                    let identity = CLIIdentity(accountID: space.account, organizationID: space.organization, email: nil)
+                    let matches = env.savedIdentities[endpoint.id]?.samePrincipal(as: identity) == true
+                    let profiles = env.endpoints.filter { env.savedIdentities[$0.id]?.samePrincipal(as: identity) == true }
+                    let profileName = matches ? endpoint.name : (profiles.count == 1 ? profiles.first?.name : nil)
+                    let accountMatches = CLIReportedStatus.sameAccountRecord(localNames?.identity, identity) == true
+                    let accountProfiles = env.endpoints.filter {
+                        CLIReportedStatus.sameAccountRecord(env.savedIdentities[$0.id], identity) == true
+                    }
+                    let organizationMatches = localNames?.identity.samePrincipal(as: identity) == true
+                    let emails = (accountProfiles.compactMap { env.savedIdentities[$0.id]?.email }
+                        + [accountMatches ? localNames?.email : nil].compactMap { $0 })
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                        .filter { !$0.isEmpty }
+                    let email = Set(emails).count == 1 ? emails.first : nil
+                    let preview = discovered.count > 1 ? try? engine.spacePreview(space) : nil
+                    return TransferSpaceOption(space: space, matchesProfile: matches, profileName: profileName,
+                        accountName: (accountMatches ? localNames?.account : nil)
+                            ?? (accountProfiles.count == 1 ? accountProfiles.first?.name : nil),
+                        organizationName: organizationMatches ? localNames?.organization : nil,
+                        count: preview?.count, title: preview?.title, accountEmail: email)
+                }
+            }
             catch { spaces[endpoint.id] = []; errors[endpoint.id] = error.localizedDescription }
         }
-        do { return SessionTransferLoaded(spaces: spaces, errors: errors, receipts: try engine.receipts(), historyError: nil) }
-        catch { return SessionTransferLoaded(spaces: spaces, errors: errors, receipts: [], historyError: "备份记录无法确认，已停止新复制。备份位置：\(env.backups.path)") }
+        do { return SessionTransferLoaded(spaces: spaces, options: options, errors: errors, receipts: try engine.receipts(), historyError: nil) }
+        catch { return SessionTransferLoaded(spaces: spaces, options: options, errors: errors, receipts: [], historyError: "备份记录无法确认，已停止新复制。备份位置：\(env.backups.path)") }
     }
     func rows(_ env: SessionTransferEnvironment, source: SessionTransferSpace, target: SessionTransferSpace, updates: Bool) throws -> [SessionTransferRow] {
         try service(env).rows(source: source, target: target, updateExisting: updates)
@@ -95,14 +158,11 @@ actor SessionTransferWorker {
     func restore(_ env: SessionTransferEnvironment, id: String, space: SessionTransferSpace, undo: Bool) throws -> SessionTransferReceipt {
         try service(env).restore(id, to: space, undo: undo, requireIdle: { try self.idle(env, space) })
     }
-    func export(_ env: SessionTransferEnvironment, plan: SessionTransferPlan, command: URL) throws -> String {
-        guard FileManager.default.isExecutableFile(atPath: command.path) else { throw SessionTransferFailure("未找到备用复制工具，请使用完整构建的应用。") }
-        try service(env).revalidate(plan)
+    func saveInstructions(_ env: SessionTransferEnvironment, plan: SessionTransferPlan, command: URL) throws -> String {
         let request = try SessionTransferRequest(plan: plan, transcripts: env.transcripts, backups: env.backups)
         let path = env.backups.deletingLastPathComponent().appendingPathComponent("session-transfer-requests/" + UUID().uuidString + ".json")
         try request.save(to: path)
-        _ = try SessionTransferRequest.load(from: path)
-        return request.instructions(command: command, request: path)
+        return try SessionTransferRequest.load(from: path).instructions(command: command, request: path)
     }
     func backup(_ env: SessionTransferEnvironment, id: String) throws -> SessionTransferReceipt {
         try service(env).checkedBackup(id)
@@ -233,9 +293,13 @@ actor SessionTransferWorker {
             let root = profile.name == current ? liveDir : parkDir.appendingPathComponent(profile.name)
             return SessionTransferEndpoint(id: "profile:" + profile.name, name: profile.name, root: root, marker: currentFile, expectedMarker: current)
         } + [SessionTransferEndpoint(id: "api", name: "API 工作区", root: support.appendingPathComponent("Claude-3p"))]
+        var savedIdentities: [String: CLIIdentity] = [:]
+        for profile in store.profiles { savedIdentities["profile:" + profile.name] = profile.snapshot?.identity }
+        let home = FileManager.default.homeDirectoryForCurrentUser
         return SessionTransferEnvironment(endpoints: endpoints, activeEndpointIDs: ["profile:" + current, "api"],
-            transcripts: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude/projects"),
-            backups: support.appendingPathComponent("ClaudeSwitcher/session-migrations"))
+            transcripts: home.appendingPathComponent(".claude/projects"),
+            backups: support.appendingPathComponent("ClaudeSwitcher/session-migrations"), savedIdentities: savedIdentities,
+            cliMetadataDocument: home.appendingPathComponent(".claude.json"))
     }
     private func clearSelection() {
         completedSnapshot = nil
@@ -307,7 +371,7 @@ actor SessionTransferWorker {
             }
             if !locations.contains(where: { $0.id == targetID }) { targetID = "" }
             let a = spaces[sourceID] ?? [], b = spaces[targetID] ?? []
-            sourceSpaces = a.map { TransferSpaceOption(id: $0.id, name: $0.name) }; targetSpaces = b.map { TransferSpaceOption(id: $0.id, name: $0.name) }
+            sourceSpaces = loaded.options[sourceID] ?? []; targetSpaces = loaded.options[targetID] ?? []
             if !a.contains(where: { $0.id == sourceSpaceID }) { sourceSpaceID = a.count == 1 ? a[0].id : "" }
             if !b.contains(where: { $0.id == targetSpaceID }) { targetSpaceID = b.count == 1 ? b[0].id : "" }
             if let last = preferredReceipt(loaded.receipts) { display(last, environment: env) } else { latestReceipt = nil; lastOperation = nil }
@@ -486,9 +550,12 @@ actor SessionTransferWorker {
         isWorking = true; errorMessage = nil
         defer { if refreshID == intent { isWorking = false } }
         do {
+            guard FileManager.default.isExecutableFile(atPath: commandURL.path) else {
+                throw SessionTransferFailure("未找到备用复制工具，请使用完整构建的应用。")
+            }
             let plan = try await worker.plan(env, source: source, target: target, selected: picked, updates: updateExisting, expectedSourceIdentities: identities)
             guard refreshID == intent else { throw SessionTransferFailure("选择已变化，请重新生成指令。") }
-            return try await worker.export(env, plan: plan, command: commandURL)
+            return try await worker.saveInstructions(env, plan: plan, command: commandURL)
         } catch { errorMessage = error.localizedDescription; return nil }
     }
 }

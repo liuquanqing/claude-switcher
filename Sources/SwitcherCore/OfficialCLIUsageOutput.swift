@@ -3,7 +3,7 @@ import Foundation
 /// Reads only the native /usage result, never model cost/token counters.
 /// Unknown formats remain unknown. Raw output is never persisted here.
 public enum OfficialCLIUsageOutput {
-    public enum Failure: Error { case commandFailed, invalidReading }
+    public enum Failure: Error { case commandFailed, invalidReading, loginRequired }
     public static func read(_ output: String, identity: CLIIdentity, observedAt: Date) throws -> OfficialCLIUsageCache? {
         guard identity.isComplete else { throw Failure.invalidReading }
         var text = output.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -17,8 +17,11 @@ public enum OfficialCLIUsageOutput {
         }
         text = text.replacingOccurrences(of: "\u{001B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
         let lower = text.lowercased()
-        if ["login expired", "not logged in", "please run /login", "unauthorized", "forbidden",
-            "failed to load usage", "temporarily unavailable", "unknown skill", "unknown command"].contains(where: lower.contains) {
+        if ["login expired", "not logged in", "please run /login"].contains(where: lower.contains) {
+            throw Failure.loginRequired
+        }
+        if ["unauthorized", "forbidden", "failed to load usage", "temporarily unavailable",
+            "temporarily limiting requests to the usage page", "unknown skill", "unknown command"].contains(where: lower.contains) {
             throw Failure.commandFailed
         }
         let regex = try NSRegularExpression(pattern: #"^Current (session|week(?: \(([^)]+)\))?):\s*([0-9]+(?:\.[0-9]+)?)%\s+used(?:\s*[·•]\s*resets\s+(.+))?\s*$"#,
@@ -27,11 +30,13 @@ public enum OfficialCLIUsageOutput {
         var windows: [String: OfficialUsageWindow] = [:]
         for match in regex.matches(in: text, range: NSRange(location: 0, length: source.length)) {
             func group(_ i: Int) -> String? { match.range(at:i).location == NSNotFound ? nil : source.substring(with:match.range(at:i)) }
-            let label = group(1)!.lowercased(), scope = group(2)?.lowercased()
+            let label = group(1)!.lowercased()
+            let rawScope = group(2)?.trimmingCharacters(in: .whitespaces).lowercased()
+            let scope = rawScope?.hasSuffix(" only") == true ? rawScope.map { String($0.dropLast(5)) } : rawScope
             let key: String
             if label == "session" { key = "session" }
             else if scope == nil || scope == "all models" { key = "weekly" }
-            else if scope == "opus" || scope == "opus only" { key = "opus" }
+            else if let scope, ["opus", "sonnet", "fable"].contains(scope) { key = scope }
             else { continue }
             guard let used = Double(group(3)!), used.isFinite, (0...100).contains(used) else { throw Failure.invalidReading }
             let value = OfficialUsageWindow(used: used, resetsAt: group(4).flatMap {
@@ -40,9 +45,10 @@ public enum OfficialCLIUsageOutput {
             if let previous = windows[key], previous != value { throw Failure.invalidReading }
             windows[key] = value
         }
-        guard windows["session"] != nil || windows["weekly"] != nil else { return nil }
+        guard !windows.isEmpty else { return nil }
         return OfficialCLIUsageCache(identity: identity, fetchedAt: observedAt,
-                                     session: windows["session"], weekly: windows["weekly"], weeklyOpus: windows["opus"])
+                                     session: windows["session"], weekly: windows["weekly"], weeklyOpus: windows["opus"],
+                                     weeklySonnet: windows["sonnet"], weeklyFable: windows["fable"])
     }
     private static func reset(_ raw: String, now: Date, span: TimeInterval) -> Date? {
         var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -54,7 +60,8 @@ public enum OfficialCLIUsageOutput {
             zone = named; text = String(text[..<index]).trimmingCharacters(in:.whitespaces)
         }
         var calendar = Calendar(identifier:.gregorian); calendar.timeZone = zone
-        for format in ["MMM d, yyyy 'at' h:mma", "MMM d, yyyy 'at' ha", "MMM d 'at' h:mma", "MMM d 'at' ha", "h:mma", "ha"] {
+        for format in ["MMM d, yyyy 'at' h:mma", "MMM d, yyyy 'at' ha", "MMM d, yyyy, h:mma", "MMM d, yyyy, ha",
+                       "MMM d 'at' h:mma", "MMM d 'at' ha", "MMM d, h:mma", "MMM d, ha", "h:mma", "ha"] {
             let formatter = DateFormatter(); formatter.locale = Locale(identifier:"en_US_POSIX")
             formatter.calendar = calendar; formatter.timeZone = zone; formatter.dateFormat = format
             formatter.defaultDate = now; formatter.isLenient = false

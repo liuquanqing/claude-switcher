@@ -30,6 +30,7 @@ struct UsageQueryDiagnostic: Encodable {
 }
 struct RefreshDiagnostics:Encodable {
     var usageQueries: [UsageQueryDiagnostic] = []
+    var desktopUsageStages: [String] = []
     var startedAt=Date()
     var completedAt:Date?
     var outcome="pending"

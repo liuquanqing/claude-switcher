@@ -61,6 +61,25 @@ public struct SessionTransferService {
             try Disk.directories(account).map { SessionTransferSpace(endpoint: endpoint, account: account.lastPathComponent, organization: $0.lastPathComponent) }
         }
     }
+    public func spacePreview(_ space: SessionTransferSpace) throws -> (count: Int, title: String?) {
+        _ = try Disk.scope(space); _ = try Disk.marker(space.endpoint)
+        let keys: Set<URLResourceKey> = [.isRegularFileKey, .contentModificationDateKey]
+        let files = try FileManager.default.contentsOfDirectory(at: space.directory, includingPropertiesForKeys: Array(keys))
+        var count = 0
+        var newest: (file: URL, date: Date)?
+        for file in files where Disk.name(file.lastPathComponent) {
+            guard let values = try? file.resourceValues(forKeys: keys), values.isRegularFile == true else { continue }
+            count += 1
+            let date = values.contentModificationDate ?? .distantPast
+            if let newest, date < newest.date || (date == newest.date && file.lastPathComponent >= newest.file.lastPathComponent) { continue }
+            newest = (file, date)
+        }
+        guard let newest, let metadata = try? Disk.json(Disk.data(newest.file)),
+              let rawTitle = metadata["title"] as? String else { return (count, nil) }
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (count, title.isEmpty ? nil : title)
+    }
+
     func catalogue(_ space: SessionTransferSpace) throws -> Catalogue {
         _ = try Disk.scope(space); _ = try Disk.marker(space.endpoint)
         var result = Catalogue()

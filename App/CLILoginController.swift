@@ -165,6 +165,8 @@ import SwitcherCore
         defer { cliStatusRefreshing = false }
         let result = await operation()
         guard current == profileAtStart, cliStatusGeneration == generationAtStart else { invalidateCLIStatus(); return }
+        // A saved account label is weaker than an explicit official report.
+        if result.metadataOnly, cliStatus == .needsLogin, cliStatusCheckedAt != nil, result.status != .different { return }
         let sameIdentity = result.identity.map { cliObservedIdentity?.samePrincipal(as: $0) == true } ?? false
         let sameProfile = result.profile == cliProfile
             || (cliProfile == nil && cliStatus == .reported && result.profile == current)
@@ -311,42 +313,81 @@ import SwitcherCore
             cliStatus = cliProfile == nil ? .needsLogin : (cliProfile == current ? .matched : .different)
             return
         }
+        await observeOfficialDefaultCLI()
+    }
+
+    func observeOfficialDefaultCLI() async {
         await updateCLIStatus { (await reportedCLIStatus(configuration: cliConfiguration())).presentation }
     }
 
-    func moveTerminal(to target: String) async {
-        guard !updating else { return }
-        if isDemo {
-            guard protection.desktopScope == .subscription else { banner = "API 或未知桌面模式不执行订阅账号同步。"; return }
+    func prepareTerminalIdentity() async -> Bool {
+        guard protection.desktopScope == .subscription, !updating, busy == nil else { return false }
+        if active?.snapshot?.identity.isComplete == true { return true }
+        guard !isDemo else { return false }
+        let name = current
+        busy = "核对当前桌面账号…"; defer { busy = nil }
+        do {
             let gate = await protection.preflight(target: .cli)
-            guard gate.allowed else { banner = gate.message; return }
+            guard gate.allowed else { throw SafetyError(gate.message) }
+            let account = try await profileDescriptor(name, allowInteraction: true)
+            guard current == name, protection.desktopScope == .subscription, account.identity?.isComplete == true else {
+                throw SafetyError("桌面账号身份尚未确认，暂不能关联 CLI。")
+            }
+            cliConnection.contextDidChange()
+            return true
+        } catch { banner = error.localizedDescription; return false }
+    }
+
+    @discardableResult
+    func moveTerminal(to target: String, confirmedIdentity: CLIIdentity? = nil) async -> Bool {
+        guard !updating else { return false }
+        if isDemo {
+            guard protection.desktopScope == .subscription else { banner = "API 或未知桌面模式不执行订阅账号同步。"; return false }
+            let gate = await protection.preflight(target: .cli)
+            guard gate.allowed else { banner = gate.message; return false }
             banner = nil; cliProfile = target; cliEmail = profiles.first { $0.name == target }?.snapshot?.email
-            cliStatus = cliEmail == nil ? .needsLogin : .matched; return
+            cliStatus = cliEmail == nil ? .needsLogin : .matched; return cliStatus == .matched
         }
-        guard busy == nil, !refreshing, !statusRefreshInProgress else { return }
+        guard busy == nil, !refreshing, !statusRefreshInProgress else { return false }
+        guard let confirmedIdentity, active?.snapshot?.identity.samePrincipal(as: confirmedIdentity) == true else {
+            banner = "当前账号已变化，请重新检查旧 CLI 备份。"; return false
+        }
         banner = nil; busy = "检查网络与默认 CLI 登录…"
         defer { busy = nil }
         let gate = await protection.preflight(target: .cli)
-        guard gate.allowed else { banner = gate.message; return }
+        guard gate.allowed else { banner = gate.message; return false }
         do {
             guard target == current, try confirmedCurrentProfile() == target,
                   DesktopModeInspector.read(support: support) == .subscription else {
                 throw SafetyError("只支持同步到当前订阅桌面账号；API 或未知模式不执行同步。")
             }
             let io = NativeCLIStorage(), transaction = CLITransaction(io: io)
+            guard try io.containsBackup(target) else {
+                throw SafetyError("未找到此账号的旧 CLI 备份，默认登录保持原样。")
+            }
             let context = try await cliContext(target: target, io: io)
+            guard context.0.identity?.samePrincipal(as: confirmedIdentity) == true else {
+                throw SafetyError("当前账号已变化，请重新检查旧 CLI 备份。")
+            }
             try await prepareTargetCLIRecovery(target: context.0, io: io)
             let plan = try await transaction.prepare(target: context.0, profiles: context.1, requiresTargetLogin: true,
                 remote: { try await self.checkedCLIIdentity($0) })
             try transaction.persistOutgoing(plan)
-            guard try confirmedCurrentProfile() == target, DesktopModeInspector.read(support: support) == .subscription else {
+            guard try confirmedCurrentProfile() == target, DesktopModeInspector.read(support: support) == .subscription,
+                  active?.snapshot?.identity.samePrincipal(as: confirmedIdentity) == true else {
                 throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。")
             }
             let restoration = try transaction.apply(plan)
             await refreshCLI(verify: false)
             presentCLIRestoration(restoration, target: target, identity: context.0.identity)
-            busy = nil
-            await refreshAfterLinkedCLIOperation()
-        } catch { banner = error.localizedDescription; await refreshCLI(verify: false) }
+            usageRefreshPolicy.credentialsChanged(profile: target)
+            banner = restoration == .verifiedLogin ? "已恢复默认 CLI 登录。请在新终端使用。"
+                : "已恢复旧 CLI 登录，请在新终端确认登录状态。"
+            return true
+        } catch {
+            banner = error.localizedDescription
+            await refreshCLI(verify: false)
+            return false
+        }
     }
 }

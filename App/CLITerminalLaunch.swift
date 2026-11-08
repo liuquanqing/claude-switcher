@@ -139,6 +139,14 @@ enum CLITerminalLaunch {
                     defaultMetadata: try metadata(home.appendingPathComponent(".claude.json")),
                     isolatedMetadata: isolated, expected: identity)
             } catch { return .unconfirmed }
+        }, hasLegacyBackup: { [weak self] profile in
+            guard let self, !self.isDemo, self.current == profile, ProfileTransaction.validName(profile) else { return false }
+            return try KeychainReadAccess.contains(service: switcherService, account: "cli-" + profile)
+        }, restoreLegacyBackup: { [weak self] expected in
+            guard let self else { throw SafetyError("旧 CLI 备份无法恢复。") }
+            guard await self.moveTerminal(to: expected.profile, confirmedIdentity: expected.identity) else {
+                throw SafetyError(self.banner ?? "旧 CLI 备份无法恢复。")
+            }
         }))
     }
 }

@@ -451,6 +451,44 @@ actor FixtureGuardWorker: GuardWorking {
   require(transfer.lastOperation?.needsRecovery == false && transfer.statusMessage?.contains("未执行恢复") == true && targetAfterPreserve == targetBeforePreserve, "explicit keep-current ends only journal and reports no recovery")
   transfer.setTarget("api"); try await settled(transfer)
   require(transfer.targetSpaces.count == 2 && transfer.targetSpaceID.isEmpty && transfer.picked.isEmpty, "API multi-space never guesses or retains old selection")
+  require(transfer.targetSpaces.allSatisfy { !$0.matchesProfile && $0.count == 0 && $0.title == nil },
+          "empty API spaces remain available and do not inherit the desktop profile identity")
+  var spacePreviewEnvironment = transferFixture.0
+  spacePreviewEnvironment.savedIdentities = ["profile:Personal": CLIIdentity(accountID: "account-personal", organizationID: "org-personal", email: nil)]
+  let cliNamesDocument = transferFixture.1.appendingPathComponent(".claude.json")
+  try JSONSerialization.data(withJSONObject: ["oauthAccount": ["accountUuid": "account-personal",
+    "organizationUuid": "org-personal", "displayName": "Demo User", "organizationName": "Demo Studio",
+    "emailAddress": "fixture@example.invalid"]]).write(to: cliNamesDocument)
+  spacePreviewEnvironment.cliMetadataDocument = cliNamesDocument
+  let sessionsRoot = targetIndex.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+  for path in ["account-personal/org-old", "account-other/org-personal"] {
+   try FileManager.default.createDirectory(at: sessionsRoot.appendingPathComponent(path), withIntermediateDirectories: true)
+  }
+  try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: targetIndex.path)
+  let spacePreview = SessionTransferController(store: transferStore, testEnvironment: spacePreviewEnvironment)
+  await spacePreview.refresh()
+  spacePreview.setTarget("profile:Personal"); try await settled(spacePreview)
+  let exactSpace = spacePreview.targetSpaces.filter(\.matchesProfile)
+  require(exactSpace.count == 1 && exactSpace.first?.title == "接口异常与重试处理" && exactSpace.first?.count == 3,
+          "only a full account and organization match gets the profile label and the local index preview")
+  require(exactSpace.first?.profileName == "Personal" && exactSpace.first?.accountName == "Demo User"
+          && exactSpace.first?.organizationName == "Demo Studio", "a named space shows the saved profile and matching local names")
+  require(spacePreview.targetSpaces.first(where: { $0.space.organization == "org-old" })?.accountName == "Demo User"
+          && spacePreview.targetSpaces.filter { !$0.matchesProfile }.allSatisfy { $0.organizationName == nil && $0.profileName == nil },
+          "an account name may identify its group without reusing an organization or profile name for another space")
+  require(spacePreview.targetSpaces.count == 3 && spacePreview.targetSpaceID.isEmpty && !spacePreview.canCopy,
+          "profile evidence changes presentation only, not explicit destination selection")
+  require(spacePreview.targetSpaces.filter { $0.space.account == "account-personal" }
+            .allSatisfy { $0.accountEmail == "fixture@example.invalid" }
+          && spacePreview.targetSpaces.filter { $0.space.account != "account-personal" }
+            .allSatisfy { $0.accountEmail == nil },
+          "email belongs to the matching account only, never another local account")
+  var conflictingNames = spacePreviewEnvironment
+  conflictingNames.savedIdentities["profile:Personal"] = CLIIdentity(accountID: "account-personal",
+      organizationID: "org-personal", email: "other@example.invalid")
+  let conflictedSpaces = await SessionTransferWorker().load(conflictingNames)
+  require(conflictedSpaces.options["profile:Personal"]?.allSatisfy { $0.accountEmail == nil } == true,
+          "conflicting known email values remain unknown rather than picking a plausible identity")
   let blockedFixture = try SessionTransferDemo.environment()
   defer { try? FileManager.default.removeItem(at: blockedFixture.1) }
   let blockedEnv = SessionTransferEnvironment(endpoints: blockedFixture.0.endpoints, activeEndpointIDs: ["profile:Personal"], transcripts: blockedFixture.0.transcripts, backups: blockedFixture.0.backups)

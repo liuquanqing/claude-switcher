@@ -15,9 +15,15 @@ import SwitcherCore
     require(sample?.weekly?.resetsAt == ISO8601DateFormatter().date(from:"2026-11-08T10:00:00Z"), "native weekly date is interpreted within its window")
     let weekly = try OfficialCLIUsageOutput.read("Current week: 20% used",identity:identity,observedAt:now)
     require(weekly?.session == nil && weekly?.weekly?.used == 20, "plans without a five-hour window remain supported")
+    let model = try OfficialCLIUsageOutput.read("Current week (Fable): 18% used · resets Nov 8, 6pm (Asia/Singapore)\nCurrent week (Sonnet only): 25% used",
+        identity: identity, observedAt: now)
+    require(model?.session == nil && model?.weekly == nil && model?.weeklyFable?.used == 18 && model?.weeklySonnet?.used == 25,
+            "model-only readings remain distinct from aggregate limits")
+    require(model?.weeklyFable?.resetsAt == ISO8601DateFormatter().date(from:"2026-11-08T10:00:00Z"),
+            "comma-delimited reset times retain their timezone")
     let unknownTime = try OfficialCLIUsageOutput.read("Current week: 20% used · resets future-format", identity:identity, observedAt:now)
     require(unknownTime?.weekly?.resetsAt == nil, "unknown reset time is not invented")
-    for bad in ["", "Total cost: $3.40", "Used 13%", "Current week (Sonnet only): 25% used"] {
+    for bad in ["", "Total cost: $3.40", "Used 13%", "Current week (Unknown model): 25% used"] {
         require(try OfficialCLIUsageOutput.read(bad,identity:identity,observedAt:now) == nil, "unrecognized text is not turned into a fresh allowance")
     }
     for bad in ["Current session: 101% used", "Current week: 20% used\nCurrent week: 30% used", "Login expired · Please run /login\nCurrent week: 20% used", "{\"type\":\"result\",\"is_error\":true,\"result\":\"Current week: 20% used\"}"] {
@@ -41,15 +47,35 @@ import SwitcherCore
     require(result.session?.used == 13 && result.weekly?.used == 46, "query accepts valid native output when the official cache was not written")
     require(try Data(contentsOf:file) == original, "switcher does not write the CLI login or cache file")
     require(stages.last == "nativeOutputRead" && stages.contains("runningOfficialCLI"), "sanitized stage diagnostics identify the actual path without storing raw output")
-    do {
-        _ = try await AccountUsageQuery.query(home:root,binding:binding,proxy:UsageQueryProxy(host:"127.0.0.1",port:9999),country:"SG",executable:URL(fileURLWithPath:"/fixture/claude"),run:{_,args,_ in
-            if args.contains("auth") {
-                let report = try JSONSerialization.data(withJSONObject:["loggedIn":true,"authMethod":"api_key","configDirectory":binding.directory.path])
-                return .init(status:0,text:String(decoding:report,as:UTF8.self),timedOut:false)
-            }
-            return .init(status:0,text:args[2] == "/usr/bin/curl" ? "loc=SG\n" : String(decoding:data,as:UTF8.self),timedOut:false)
-        })
-        preconditionFailure("native text was assigned despite an API authentication report")
-    } catch { count += 1 }
+    for (method, reportedID) in [("api_key", "fake-account"), ("claude.ai", "other-account")] {
+        var madeQuery = false
+        do {
+            _ = try await AccountUsageQuery.query(home:root,binding:binding,proxy:UsageQueryProxy(host:"127.0.0.1",port:9999),country:"SG",executable:URL(fileURLWithPath:"/fixture/claude"),run:{_,args,_ in
+                if args.contains("auth") {
+                    let report = try JSONSerialization.data(withJSONObject:["loggedIn":true,"authMethod":method,"configDirectory":binding.directory.path,
+                                                                          "accountId":reportedID,"orgId":"fake-org"])
+                    return .init(status:0,text:String(decoding:report,as:UTF8.self),timedOut:false)
+                }
+                if args.contains("/usage") { madeQuery = true }
+                return .init(status:0,text:args[2] == "/usr/bin/curl" ? "loc=SG\n" : String(decoding:data,as:UTF8.self),timedOut:false)
+            })
+            preconditionFailure("usage accepted despite an API or different account report")
+        } catch { require(!madeQuery, "unmatched native login is blocked before /usage") }
+    }
+    for code: Int32 in [0, 1] {
+        do {
+            _ = try await AccountUsageQuery.query(home: root, binding: binding, proxy: UsageQueryProxy(host: "127.0.0.1", port: 9999),
+                country: "SG", executable: URL(fileURLWithPath: "/fixture/claude"), run: { _, args, _ in
+                    if args[2] == "/usr/bin/curl" { return .init(status: 0, text: "loc=SG\n", timedOut: false) }
+                    precondition(args.contains("auth"), "never request quota with a signed-out report")
+                    let report = try CLIJSON.encode(["loggedIn": false, "authMethod": "none", "configDirectory": binding.directory.path])
+                    return .init(status: code, text: String(decoding: report, as: UTF8.self), timedOut: false)
+                })
+            preconditionFailure("accepted a signed-out login")
+        } catch let failure as AccountUsageQuery.Failure {
+            require(failure == (code == 1 ? .loginRequired : .loginUnconfirmed),
+                    "only a consistent official signed-out status suggests signing in")
+        }
+    }
     return count
 }

@@ -14,6 +14,8 @@ public struct OfficialCLIUsageCache: Sendable, Equatable {
     public let session: OfficialUsageWindow?
     public let weekly: OfficialUsageWindow?
     public let weeklyOpus: OfficialUsageWindow?
+    public let weeklySonnet: OfficialUsageWindow?
+    public let weeklyFable: OfficialUsageWindow?
 
     public static func identity(in document: Data) throws -> CLIIdentity? {
         try CLIIdentity.metadata(CLIJSON.field(document, key: "oauthAccount"))
@@ -52,8 +54,9 @@ public struct OfficialCLIUsageCache: Sendable, Equatable {
             return OfficialUsageWindow(used: used.doubleValue, resetsAt: deadline)
         }
         let session = try window("five_hour"), weekly = try window("seven_day")
-        guard session != nil || weekly != nil else { return nil }
+        let opus = try window("seven_day_opus"), sonnet = try window("seven_day_sonnet"), fable = try window("seven_day_fable")
+        guard [session, weekly, opus, sonnet, fable].contains(where: { $0 != nil }) else { return nil }
         return Self(identity: identity, fetchedAt: Date(timeIntervalSince1970: sampled.doubleValue / 1000),
-                    session: session, weekly: weekly, weeklyOpus: try window("seven_day_opus"))
+                    session: session, weekly: weekly, weeklyOpus: opus, weeklySonnet: sonnet, weeklyFable: fable)
     }
 }

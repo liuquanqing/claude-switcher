@@ -81,6 +81,63 @@ import SwitcherCore
     require(existingIsolated.phase == .matched && reusedDirectory?.choice == .isolated,
             "an already logged-in owned directory is reused without asking for another login")
 
+    var reopenedDefault: CLIBinding?
+    let expiredDefault = CLIConnectionController(operations: .init(context: { context }, load: { _ in nil },
+        save: { _ in }, make: operations.make, status: { _ in .notLoggedIn },
+        launch: { reopenedDefault = $0 }, localRecord: { _, _ in .sameAccount(.defaultLogin) }))
+    await expiredDefault.open()
+    require(expiredDefault.phase == .waitingForLogin && reopenedDefault?.choice == .defaultLogin,
+            "an explicit sign-in action reopens the matching default directory without creating a new profile")
+
+    var backupChecks: [String] = [], restored: [CLIConnectionContext] = [], openedForRecovery: [CLIBinding] = []
+    var backupExists = true, backupReadable = true
+    var reportedDefault: CLIBindingStatus = .notLoggedIn
+    var reportedIsolated: CLIBindingStatus = .notLoggedIn
+    var recoveryBinding: CLIBinding?
+    let recovery = CLIConnectionController(operations: .init(context: { context }, load: { _ in recoveryBinding },
+        save: { recoveryBinding = $0 }, make: operations.make,
+        status: { $0.choice == .defaultLogin ? reportedDefault : reportedIsolated },
+        launch: { openedForRecovery.append($0) }, existingDirectory: { $0.choice == .isolated },
+        localRecord: { _, _ in .sameAccount(.defaultLogin) }, hasLegacyBackup: { profile in
+            backupChecks.append(profile)
+            if !backupReadable { throw SafetyError("fictional access failure") }
+            return backupExists
+        }, restoreLegacyBackup: { restored.append($0) }))
+    let personal = context!
+    await recovery.open()
+    require(recovery.phase == .choosing && recovery.legacyBackupAvailable &&
+            openedForRecovery.isEmpty && restored.isEmpty && recoveryBinding == nil,
+            "signed-out default with an old backup offers explicit restore without launching or changing a binding")
+    await recovery.restoreLegacyBackup(for: .init(profile: personal.profile, identity: other))
+    require(restored.isEmpty && recovery.legacyBackupAvailable, "confirmation for a different identity cannot restore")
+    await recovery.restoreLegacyBackup(for: personal)
+    require(restored == [personal] && !recovery.legacyBackupAvailable && openedForRecovery.isEmpty,
+            "only a matching explicit confirmation restores; it does not launch a terminal")
+
+    reportedIsolated = .matched
+    await recovery.open()
+    require(recovery.phase == .matched && recovery.choice == .isolated && backupChecks.count == 1,
+            "an existing verified isolated login wins over a signed-out default and old backup")
+    reportedIsolated = .notLoggedIn; reportedDefault = .matched
+    await recovery.open()
+    require(recovery.phase == .matched && recovery.choice == .defaultLogin && backupChecks.count == 1,
+            "an unusable remembered directory does not hide a matching default login")
+    reportedDefault = .notLoggedIn
+    backupReadable = false
+    await recovery.open()
+    require(recovery.phase == .choosing && !recovery.legacyBackupAvailable && recovery.detail != nil && openedForRecovery.count == 2,
+            "unknown backup status does not silently start a fresh login")
+    backupReadable = true
+    await recovery.open()
+    context = .init(profile: "Business", identity: other)
+    await recovery.restoreLegacyBackup(for: personal)
+    require(restored == [personal] && !recovery.legacyBackupAvailable,
+            "an account switch invalidates a pending restore confirmation")
+    context = personal; recoveryBinding = nil; backupExists = false
+    await recovery.open()
+    require(recovery.phase == .waitingForLogin && openedForRecovery.last?.choice == .defaultLogin && restored == [personal],
+            "when neither usable login nor backup exists, an explicit open uses official login")
+
     var uncertainLaunches: [CLIBinding] = [], uncertainSaves: [CLIBinding] = []
     let uncertainDefault = CLIConnectionController(operations: .init(context: { context }, load: { _ in nil },
         save: { uncertainSaves.append($0) }, make: operations.make,
@@ -107,6 +164,19 @@ import SwitcherCore
     let quotedHome = root.appendingPathComponent("home with ' quote")
     try FileManager.default.createDirectory(at: quotedHome, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
+    let privateCache = root.appendingPathComponent("preview-cache")
+    let sharedCache = root.appendingPathComponent("original-cache")
+    let old = Snapshot(fetchedAt: .distantPast)
+    let verified = Snapshot(accountID: identity.accountID, organizationID: identity.organizationID, fetchedAt: Date())
+    saveCache("Fixture", old, directory: sharedCache)
+    require(loadCache("Fixture", directory: privateCache, legacy: sharedCache)?.identity.isComplete == false,
+            "an old sample can still be displayed without pretending its identity was verified")
+    saveCache("Fixture", verified, directory: privateCache)
+    saveCache("Fixture", old, directory: sharedCache)
+    require(loadCache("Fixture", directory: privateCache, legacy: sharedCache)?.identity.samePrincipal(as: identity) == true,
+            "an original-version sample cannot overwrite the preview's verified identity")
+    require(loadCache("Fixture", directory: sharedCache, legacy: sharedCache)?.identity.isComplete == false,
+            "preview writes do not modify the original version's cache")
     let fakeCLI = quotedHome.appendingPathComponent("fictional-cli")
     try "#!/bin/sh\n[ -z \"$ANTHROPIC_API_KEY$CLAUDE_ENV_FILE$CLAUDE_CONFIG_DIR\" ] || exit 7\n[ \"$HTTPS_PROXY\" = 'http://fixture.invalid:1234' ] || exit 8\nprintf fixture-ok\n".write(to: fakeCLI, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeCLI.path)

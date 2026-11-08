@@ -39,6 +39,48 @@ struct UsageQueryProxy: Equatable {
 
 enum AccountUsageQuery {
     typealias Runner = (URL, [String], [String: String]) async throws -> BoundedCLICommand.Output
+
+    enum Failure: LocalizedError, Equatable {
+        case loginUnconfirmed, loginRequired, noReading
+        var errorDescription: String? {
+            switch self {
+            case .loginUnconfirmed: return "CLI 订阅登录尚未确认，保留原额度。"
+            case .loginRequired: return "请在对应 Claude Code 中登录后再刷新，原额度已保留。"
+            case .noReading: return "官方 CLI 未返回新的对应账号额度，保留原数据。"
+            }
+        }
+    }
+
+    static func document(for binding: CLIBinding, home: URL) -> URL {
+        (binding.choice == .defaultLogin ? home : binding.directory).appendingPathComponent(".claude.json")
+    }
+
+    static func matchingBinding(for identity: CLIIdentity, profile: String, repository: CLIBindingRepository) throws -> CLIBinding? {
+        if let saved = try repository.load(identity) { return saved }
+        let home = repository.home
+        let owned = try CLIBinding.directory(for: .isolated, identity: identity, home: home)
+        var directories: [(CLIBindingChoice, URL)] = [(.isolated, owned)]
+        if ProfileTransaction.validName(profile) {
+            let legacy = owned.deletingLastPathComponent().appendingPathComponent(profile)
+            if legacy.path != owned.path, FileManager.default.fileExists(atPath: legacy.path) {
+                directories.append((.isolated, legacy))
+            }
+        }
+        directories.append((.defaultLogin, try CLIBinding.directory(for: .defaultLogin, identity: identity, home: home)))
+        for (choice, directory) in directories {
+            let candidate = CLIBinding(identity: identity, choice: choice, directory: directory)
+            try candidate.validate(home: home)
+            guard let bytes = try? Data(contentsOf: document(for: candidate, home: home)),
+                  (try? OfficialCLIUsageCache.identity(in: bytes))?.samePrincipal(as: identity) == true else { continue }
+            return candidate
+        }
+        return nil
+    }
+
+    static func isFresh(_ sample: OfficialCLIUsageCache, now: Date = Date()) -> Bool {
+        (0..<30).contains(now.timeIntervalSince(sample.fetchedAt))
+    }
+
     static func query(home: URL, binding: CLIBinding, proxy: UsageQueryProxy, country: String,
                       executable: URL, inherited: [String: String] = ProcessInfo.processInfo.environment,
                       observe: (String) -> Void = { _ in },
@@ -48,7 +90,7 @@ enum AccountUsageQuery {
         guard country.count == 2, country.allSatisfy({ $0.isASCII && $0.isUppercase }) else {
             throw SafetyError("目标国家无效，未查询额度。")
         }
-        let file = binding.choice == .defaultLogin ? home.appendingPathComponent(".claude.json") : binding.directory.appendingPathComponent(".claude.json")
+        let file = document(for: binding, home: home)
         func identity() throws -> CLIIdentity? {
             do { return try OfficialCLIUsageCache.identity(in: Data(contentsOf: file)) }
             catch { throw SafetyError("CLI 账号尚未对应，保留原额度。") }
@@ -58,9 +100,10 @@ enum AccountUsageQuery {
         }
         let old = try? OfficialCLIUsageCache.read(Data(contentsOf: file))
         let started = Date()
-        if let old, (0..<30).contains(started.timeIntervalSince(old.fetchedAt)) { observe("freshCache"); return old }
+        if let old, isFresh(old, now: started) { observe("freshCache"); return old }
         var env = CLITerminalLaunch.environment(home: home, directory: binding.directory, inherited: inherited)
         env = proxy.environment(env)
+        env.removeValue(forKey: "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
         for key in ["DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER", "CLAUDE_CODE_DISABLE_AUTO_MEMORY"] { env[key] = "1" }
         let run: Runner = supplied ?? { executable, arguments, environment in
             try await BoundedCLICommand.run(home: home, executable: executable, arguments: arguments,
@@ -80,8 +123,23 @@ enum AccountUsageQuery {
                 throw SafetyError("查询出口未通过检查，保留原额度。")
             }
         }
-        guard try identity()?.samePrincipal(as: binding.identity) == true else {
+        guard let localIdentity = try identity(), localIdentity.samePrincipal(as: binding.identity) else {
             throw SafetyError("查询前 CLI 账号发生变化，保留原额度。")
+        }
+        observe("checkingNativeLogin")
+        let status = try await child(executable.path, ["--setting-sources", "", "auth", "status"])
+        guard !status.timedOut, [0, 1].contains(status.status),
+              let report = try? CLIReportedStatus(data: Data(status.text.utf8)),
+              (status.status == 0) == report.loggedIn,
+              try identity()?.samePrincipal(as: binding.identity) == true else {
+            observe("nativeIdentityUnconfirmed")
+            throw Failure.loginUnconfirmed
+        }
+        let match = CLIBindingPolicy.assess(report, binding: binding, metadata: localIdentity)
+        if match == .notLoggedIn { observe("nativeLoginRequired"); throw Failure.loginRequired }
+        guard status.status == 0, match == .matched else {
+            observe("nativeIdentityUnconfirmed")
+            throw Failure.loginUnconfirmed
         }
         observe("runningOfficialCLI")
         let result = try await child(executable.path, ["-p", "/usage", "--output-format", "json", "--tools", "",
@@ -99,9 +157,12 @@ enum AccountUsageQuery {
         let nativeSample: OfficialCLIUsageCache?
         do {
             nativeSample = try OfficialCLIUsageOutput.read(result.text, identity: binding.identity, observedAt: Date())
+        } catch OfficialCLIUsageOutput.Failure.loginRequired {
+            observe("nativeLoginRequired")
+            throw Failure.loginRequired
         } catch OfficialCLIUsageOutput.Failure.invalidReading {
             observe("invalidNativeReading")
-            throw SafetyError("官方 CLI 未返回新的对应账号额度，保留原数据。")
+            throw Failure.noReading
         } catch {
             observe("nativeReportedError")
             throw SafetyError("额度查询未完成，保留原数据。")
@@ -113,95 +174,127 @@ enum AccountUsageQuery {
             return sample
         }
         // A successful native /usage response need not update .claude.json.
-        if let nativeSample {
-            // Text output carries no account UUID. Ask the same official CLI,
-            // with the same directory and auth overrides, before assigning it.
-            observe("confirmingNativeIdentity")
-            let status = try await child(executable.path, ["--setting-sources", "", "auth", "status"])
-            guard !status.timedOut, status.status == 0,
-                  let report = try? CLIReportedStatus(data: Data(status.text.utf8)),
-                  report.usesConfigurationDirectory(binding.directory),
-                  report.loggedIn, report.authMethod == "claude.ai",
-                  report.savedRecord(matching: binding.identity)?.samePrincipal(as: binding.identity) == true,
-                  try identity()?.samePrincipal(as: binding.identity) == true else {
-                observe("nativeIdentityUnconfirmed")
-                throw SafetyError("CLI 账号尚未对应，保留原额度。")
-            }
-            observe("nativeOutputRead"); return nativeSample
-        }
+        if let nativeSample { observe("nativeOutputRead"); return nativeSample }
         observe("noNewReading")
-        throw SafetyError("官方 CLI 未返回新的对应账号额度，保留原数据。")
+        throw Failure.noReading
     }
 }
 
+@MainActor struct PreparedAccountUsageQuery {
+    let canContinue: () -> Bool
+    let read: (CLIBinding, (String) -> Void) async throws -> OfficialCLIUsageCache
+}
+
 @MainActor extension Store {
-    func refreshLinkedAccountUsage() async {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        let repo = CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"), home: home)
-        let captured = profiles.compactMap { p -> (String, CLIIdentity)? in
-            guard let id = p.snapshot?.identity, id.isComplete else { return nil }; return (p.name, id)
+    private func prepareAccountUsageQuery(home: URL) async throws -> PreparedAccountUsageQuery {
+        let gate = await protection.preflight(target: .subscriptionUsage)
+        guard gate.allowed else { throw SafetyError(gate.message) }
+        guard let country = protection.activeCountry else { throw SafetyError("目标国家未设置。") }
+        let proxyText = try await Task.detached { try LocalCommand.run("/usr/sbin/scutil", ["--proxy"]).1 }.value
+        let proxy = try UsageQueryProxy.system(proxyText)
+        let executable = try CLITerminalLaunch.executable(home: home)
+        return PreparedAccountUsageQuery(canContinue: {
+            guard let saved = try? self.protection.files.loadConfig() else { return false }
+            return saved.enabled && saved.expectedCountry == country
+        }, read: { binding, observe in
+            try await AccountUsageQuery.query(home: home, binding: binding, proxy: proxy, country: country,
+                                              executable: executable, observe: observe)
+        })
+    }
+
+    func refreshLinkedAccountUsage(repository supplied: CLIBindingRepository? = nil,
+                                   prepare: (() async throws -> PreparedAccountUsageQuery)? = nil,
+                                   initialIssue: String? = nil, desktopProfile: String? = nil,
+                                   desktopSample: Date? = nil) async {
+        let repo = supplied ?? CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"),
+                                                     home: FileManager.default.homeDirectoryForCurrentUser)
+        let captured = profiles
+        let context = (current, protection.desktopScope)
+        var issues: [String] = initialIssue.map { [$0] } ?? []
+        var selected: [(Int, CLIBinding)] = []
+        var newest = desktopSample
+        func profileIndex(_ name: String, _ identity: CLIIdentity) -> Int? {
+            guard (current, protection.desktopScope) == context else { return nil }
+            return profiles.firstIndex { $0.name == name && $0.snapshot?.identity.samePrincipal(as: identity) == true }
         }
-        var failures: [String] = []
-        var selected: [(String, CLIIdentity, CLIBinding)] = []
-        for (name, identity) in captured {
+        func adopt(_ sample: OfficialCLIUsageCache, for name: String, binding: CLIBinding) throws {
+            guard let index = profileIndex(name, binding.identity), sample.fetchedAt <= Date(),
+                  sample.identity.samePrincipal(as: binding.identity),
+                  try AccountUsageQuery.matchingBinding(for: binding.identity, profile: name, repository: repo) == binding else {
+                throw SafetyError("查询期间账号关联已变化，未采纳结果。")
+            }
+            guard let stored = profiles[index].snapshot, sample.fetchedAt >= stored.fetchedAt else { return }
+            usageNotice = nil
+            applyOfficialUsage(sample)
+            if let usageNotice { throw SafetyError(usageNotice) }
+            newest = max(newest ?? .distantPast, sample.fetchedAt)
+        }
+        defer {
+            if let newest { lastRefresh = newest }
+            let detail = issues.isEmpty ? nil : issues.joined(separator: "\n")
+            usageNotice = newest == nil ? (detail ?? "本轮没有新的订阅额度，保留原数据。") : nil
+            linkedUsageDetails = newest == nil ? nil : detail
+        }
+        for (offset, p) in captured.enumerated() where p.signedIn && p.name != desktopProfile {
             do {
-                guard captured.filter({ $0.1.samePrincipal(as: identity) }).count == 1 else {
+                guard let identity = p.snapshot?.identity, identity.isComplete else {
+                    if p.name != context.0 || initialIssue == nil { issues.append(p.name + "：桌面账号身份尚未确认，保留原额度。") }
+                    continue
+                }
+                guard captured.filter({ CLIReportedStatus.sameAccountRecord($0.snapshot?.identity, identity) == true }).count == 1 else {
                     throw SafetyError("账号身份对应多个档案，暂不查询额度。")
                 }
-                let binding: CLIBinding
-                if let saved = try repo.load(identity) { binding = saved }
-                else {
-                    let document = home.appendingPathComponent(".claude.json")
-                    guard let bytes = try? Data(contentsOf: document),
-                          try OfficialCLIUsageCache.identity(in: bytes)?.samePrincipal(as: identity) == true else { continue }
-                    binding = CLIBinding(identity: identity, choice: .defaultLogin, directory: home.appendingPathComponent(".claude"))
+                guard let binding = try AccountUsageQuery.matchingBinding(for: identity, profile: p.name, repository: repo) else {
+                    throw SafetyError("CLI 账号尚未对应，保留原额度。")
                 }
-                selected.append((name, identity, binding))
-            } catch { failures.append(name + "：" + error.localizedDescription) }
+                if let cached = try? await OfficialCLIUsageReader.readBoundCache(home: repo.home, binding: binding, expected: identity),
+                   cached.fetchedAt <= Date() {
+                    try adopt(cached, for: p.name, binding: binding)
+                    if cached.fetchedAt >= (p.snapshot?.fetchedAt ?? .distantPast) {
+                        lastRefreshDiagnostics?.quotaCacheAdopted = true
+                    }
+                    if AccountUsageQuery.isFresh(cached) { continue }
+                }
+                guard usageRefreshPolicy.shouldRequest(profile: p.name, sampledAt: nil, resetsAt: [], active: true, trigger: .identityChanged, now: Date()),
+                      usageRefreshPolicy.permitsExplicitRequest(profile: p.name, now: Date()) else {
+                    issues.append(p.name + "：额度查询冷却中，保留已有数据。"); continue
+                }
+                selected.append((offset, binding))
+            } catch { issues.append(p.name + "：" + error.localizedDescription) }
         }
-        guard !selected.isEmpty else {
-            usageNotice = failures.first ?? "尚无可查询的 CLI 关联，保留原额度。"; return
-        }
+        guard !selected.isEmpty else { return }
+        let query: PreparedAccountUsageQuery
         do {
-            let gate = await protection.preflight(target: .subscriptionUsage)
-            guard gate.allowed else { usageNotice = gate.message; return }
-            guard let country = protection.activeCountry else { throw SafetyError("目标国家未设置。") }
-            let proxyText = try await Task.detached { try LocalCommand.run("/usr/sbin/scutil", ["--proxy"]).1 }.value
-            let proxy = try UsageQueryProxy.system(proxyText)
-            let executable = try CLITerminalLaunch.executable(home: home)
-            for (name, identity, binding) in selected {
-                guard !updating, busy == nil else { break }
-                guard let saved = try? protection.files.loadConfig(), saved.enabled, saved.expectedCountry == country else {
-                    failures.append("保护配置已变化，已停止后续查询。"); break
-                }
-                guard usageRefreshPolicy.shouldRequest(profile: name, sampledAt: nil, resetsAt: [], active: true, trigger: .identityChanged, now: Date()),
-                      usageRefreshPolicy.permitsExplicitRequest(profile: name, now: Date()) else { continue }
-                usageRefreshPolicy.began(profile: name, now: Date())
-                var stages: [String] = []
-                defer {
-                    let runs = stages.filter { $0 == "runningOfficialCLI" }.count
-                    lastRefreshDiagnostics?.nativeHelperRuns += runs + stages.filter { $0 == "confirmingNativeIdentity" }.count
-                    lastRefreshDiagnostics?.freshQuotaRequests += runs
-                    lastRefreshDiagnostics?.usageQueries.append(.init(profileIndex: captured.firstIndex(where: { $0.0 == name }) ?? -1, stages: stages))
-                }
-                do {
-                    let sample = try await AccountUsageQuery.query(home: home, binding: binding, proxy: proxy, country: country, executable: executable, observe: { stages.append($0) })
-                    guard profiles.first(where: { $0.name == name })?.snapshot?.identity.samePrincipal(as: identity) == true,
-                          try repo.load(identity).map({ $0 == binding }) ?? (binding.choice == .defaultLogin) else {
-                        throw SafetyError("查询期间账号关联已变化，未采纳结果。")
-                    }
-                    usageNotice = nil
-                    applyOfficialUsage(sample)
-                    if let notice = usageNotice { failures.append(name + "：" + notice) }
-                } catch {
-                    usageRefreshPolicy.failed(profile: name, now: Date())
-                    if let index = profiles.firstIndex(where: { $0.name == name && $0.snapshot?.identity.samePrincipal(as: identity) == true }) {
-                        profiles[index].finishUsageRefresh(.failure(error))
-                    }
-                    failures.append(name + "：" + error.localizedDescription)
-                }
+            if let prepare { query = try await prepare() }
+            else { query = try await prepareAccountUsageQuery(home: repo.home) }
+        } catch { issues.append(error.localizedDescription); return }
+        for (offset, binding) in selected {
+            let name = captured[offset].name
+            guard !updating, busy == nil, query.canContinue() else {
+                issues.append("保护配置已变化，已停止后续查询。"); break
             }
-            usageNotice = failures.isEmpty ? nil : failures.joined(separator: "\n")
-        } catch { usageNotice = error.localizedDescription }
+            var stages: [String] = []
+            defer {
+                let runs = stages.filter { $0 == "runningOfficialCLI" }.count
+                lastRefreshDiagnostics?.nativeHelperRuns += runs + stages.filter { $0 == "checkingNativeLogin" }.count
+                lastRefreshDiagnostics?.freshQuotaRequests += runs
+                lastRefreshDiagnostics?.usageQueries.append(.init(profileIndex: offset, stages: stages))
+            }
+            do {
+                guard profileIndex(name, binding.identity) != nil,
+                      try AccountUsageQuery.matchingBinding(for: binding.identity, profile: name, repository: repo) == binding else {
+                    throw SafetyError("查询期间账号关联已变化，未采纳结果。")
+                }
+                usageRefreshPolicy.began(profile: name, now: Date())
+                try adopt(await query.read(binding, { stages.append($0) }), for: name, binding: binding)
+            } catch {
+                // A new login or readable output can be repaired by the user.
+                // Leave the usual one-minute request spacing, rather than
+                // applying the longer backoff for network and service errors.
+                if !(error is AccountUsageQuery.Failure) { usageRefreshPolicy.failed(profile: name, now: Date()) }
+                if let index = profileIndex(name, binding.identity) { profiles[index].finishUsageRefresh(.failure(error)) }
+                issues.append(name + "：" + error.localizedDescription)
+            }
+        }
     }
 }

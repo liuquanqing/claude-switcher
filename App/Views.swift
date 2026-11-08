@@ -61,6 +61,16 @@ func weeklyReset(_ d: Date?, language: String, now: Date = Date()) -> String {
                    arguments: ["date": weekdayTime(d, language: language, now: now)])
 }
 
+func recordedReset(_ date: Date?, language: String, now: Date) -> String {
+    guard let date else { return appText("format.resetUnknown", language: language) }
+    let formatter = DateFormatter()
+    formatter.locale = AppLocalization.locale(for: language)
+    formatter.timeZone = .current
+    formatter.setLocalizedDateFormatFromTemplate(Calendar.current.isDate(date, inSameDayAs: now) ? "HHmm" : "MMMdHHmm")
+    return appText(date <= now ? "usage.lastRecordedReset" : "format.weeklyReset", language: language,
+                   arguments: ["date": formatter.string(from: date)])
+}
+
 func fullDateTime(_ d: Date?, language: String) -> String {
     guard let d else { return appText("format.timeUnknown", language: language) }
     let f = DateFormatter()
@@ -355,17 +365,13 @@ struct TerminalStrip: View {
     @ObservedObject private var protection: ProtectionController
     @ObservedObject private var connection: CLIConnectionController
     @Environment(\.appLanguage) private var language
-    @State private var syncHover = false
     @State private var copyHover = false
     @State private var openHover = false
     @State private var showHelp = false
     @State private var choiceTarget: ChoiceTarget?
+    @State private var restoreTarget: ChoiceTarget?
+    @State private var confirmRestore = false
     @State private var officialReportActive = false
-    @State private var confirmSync = false
-    /// Account name pinned when the dialog opens, so a background refresh or external switch
-    /// can't make the user confirm X and sync Y.
-    @State private var syncTarget = ""
-    @State private var syncStale = false
     @State private var copyFeedback: Bool?
     @State private var copyFeedbackSequence = 0
 
@@ -392,7 +398,9 @@ struct TerminalStrip: View {
     }
 
     private var subscriptionDesktop: Bool { protection.desktopScope == .subscription }
-    private var showsConnectionPhase: Bool { officialReportActive && subscriptionDesktop }
+    private var showsConnectionPhase: Bool {
+        subscriptionDesktop && (officialReportActive || connection.isBusy || verifiedMatch)
+    }
 
     private var summaryTitle: String {
         t(subscriptionDesktop ? "cli.title" : "cli.defaultTitle")
@@ -402,12 +410,6 @@ struct TerminalStrip: View {
 
     private var verifiedMatch: Bool {
         connection.phase == .matched && connection.choice != nil && connection.checkedAt != nil
-    }
-
-    private var bindingCheckedLine: String? {
-        guard let checkedAt = connection.checkedAt else { return nil }
-        let date = AppLocalization.date(checkedAt, language: language, dateStyle: .short, timeStyle: .short, relative: true)
-        return t("cli.lastCheck", arguments: ["date": date])
     }
 
     private var connectionStatus: String {
@@ -445,7 +447,10 @@ struct TerminalStrip: View {
             return generated(reason)
         }
         switch connection.phase {
-        case .unlinked, .checking, .opening, .choosing: return accountName
+        case .unlinked: return t("cli.unlinkedDetail")
+        case .checking: return t("cli.checkingIdentity")
+        case .opening: return t("cli.opening")
+        case .choosing: return t("cli.choiceRequiredDetail")
         case .matched:
             return verifiedMatch ? t("cli.verifiedDetail", arguments: ["account": accountName]) : t("cli.unconfirmedDetail")
         case .waitingForLogin:
@@ -457,10 +462,45 @@ struct TerminalStrip: View {
         }
     }
 
+    private var isolatedBinding: Bool {
+        if case .sameAccount(.isolated) = connection.localRecord { return true }
+        return connection.choice == .isolated
+    }
+
+    private var defaultMismatch: Bool {
+        !isolatedBinding && store.cliStatus == .different
+    }
+
+    private var usageLoginRequired: Bool {
+        if showsConnectionPhase && verifiedMatch { return false }
+        return store.active?.usageState == .loginRequired || (!isolatedBinding && store.cliStatus == .needsLogin)
+    }
+
+    private func maskedEmail(_ email: String) -> String? {
+        let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let separator = email.firstIndex(of: "@"), separator != email.startIndex,
+              email.index(after: separator) != email.endIndex else { return nil }
+        let local = email[..<separator]
+        let domain = email[email.index(after: separator)...]
+        return "\(local.prefix(2))***@\(domain)"
+    }
+
+    private var terminalSummary: String {
+        if verifiedMatch {
+            return store.active?.snapshot?.email.flatMap(maskedEmail) ?? accountName
+        }
+        if !showsConnectionPhase, !defaultMismatch, !usageLoginRequired, case .sameAccount = connection.localRecord {
+            return accountName
+        }
+        return terminalStatus
+    }
+
     private var terminalStatus: String {
         if showsConnectionPhase { return connectionStatus }
+        if defaultMismatch { return t("cli.recordDifferent") }
+        if usageLoginRequired { return t("cli.summaryLoginRequired") }
         switch connection.localRecord {
-        case .sameAccount: return t("cli.recordMatch")
+        case .sameAccount: return accountName
         case .differentAccount: return t("cli.recordDifferent")
         case .notPrepared: return t("cli.recordMissing")
         case .unconfirmed: return t("cli.recordUnconfirmed")
@@ -469,15 +509,18 @@ struct TerminalStrip: View {
 
     private var terminalStatusColor: Color {
         if showsConnectionPhase { return connectionStatusColor }
+        if defaultMismatch || usageLoginRequired { return .warn }
         if case .differentAccount = connection.localRecord { return .warn }
         return .sub
     }
 
     private var terminalDetail: String {
         if showsConnectionPhase { return connectionDetail ?? accountName }
+        if defaultMismatch { return t("cli.recordDifferentDetail", arguments: ["account": accountName]) }
+        if usageLoginRequired { return t("cli.usageLoginHelp") }
         switch connection.localRecord {
         case .sameAccount:
-            return t("cli.recordSameDetail", arguments: ["account": accountName])
+            return t("cli.recordSameDetail")
         case .differentAccount:
             return t("cli.recordDifferentDetail", arguments: ["account": accountName])
         case .notPrepared:
@@ -495,8 +538,9 @@ struct TerminalStrip: View {
             default: return nil
             }
         }
+        if defaultMismatch { return t("cli.recordDifferentHelp") }
         switch connection.localRecord {
-        case .sameAccount: return t("cli.recordMatchHelp")
+        case .sameAccount: return nil
         case .differentAccount: return t("cli.recordDifferentHelp")
         case .notPrepared: return t("cli.recordMissingHelp")
         case .unconfirmed: return t("cli.recordUnconfirmedHelp")
@@ -507,6 +551,7 @@ struct TerminalStrip: View {
         if showsConnectionPhase {
             return connection.phase == .choosing || connection.phase == .mismatched
         }
+        if defaultMismatch { return true }
         switch connection.localRecord {
         case .differentAccount, .notPrepared: return true
         case .sameAccount, .unconfirmed: return false
@@ -518,10 +563,26 @@ struct TerminalStrip: View {
             switch connection.phase {
             case .waitingForLogin: return t("cli.confirmLogin")
             case .failed: return t("cli.retry")
+            case .choosing: return t("cli.prepare")
+            case .mismatched: return t("common.switch")
             default: break
             }
         }
+        if defaultMismatch { return t("common.switch") }
+        if usageLoginRequired { return t("cli.openForLogin") }
+        if case .differentAccount = connection.localRecord { return t("common.switch") }
         return t(needsPreparation ? "cli.prepare" : "cli.open")
+    }
+
+    private var showsInlineAction: Bool {
+        guard subscriptionDesktop, !connection.isBusy else { return false }
+        if showsConnectionPhase {
+            switch connection.phase {
+            case .checking, .opening: return false
+            case .unlinked, .choosing, .waitingForLogin, .matched, .mismatched, .unconfirmed, .failed: return true
+            }
+        }
+        return true
     }
 
     private var primaryActionHelp: String {
@@ -532,13 +593,21 @@ struct TerminalStrip: View {
     private func runPrimaryAction() {
         guard subscriptionDesktop, !controlsLocked, !connection.isBusy else { return }
         showHelp = false
-        officialReportActive = true
+        if showsConnectionPhase, connection.phase == .waitingForLogin {
+            officialReportActive = true
+            Task { await connection.confirmLogin() }
+            return
+        }
+        officialReportActive = false
+        let target = store.current
         Task {
-            if showsConnectionPhase, connection.phase == .waitingForLogin {
-                await connection.confirmLogin()
-            } else {
-                await connection.open()
+            guard await store.prepareTerminalIdentity() else { return }
+            guard subscriptionDesktop, store.current == target, !controlsLocked, !connection.isBusy else {
+                connection.contextDidChange()
+                return
             }
+            officialReportActive = true
+            await connection.open()
         }
     }
 
@@ -546,7 +615,7 @@ struct TerminalStrip: View {
         store.updating || store.busy != nil || store.refreshing || store.statusRefreshInProgress
     }
 
-    /// The strip keeps showing the last finished result while a background check is in flight.
+    /// The advanced default-CLI status keeps its last result while a background check is in flight.
     private var checking: Bool { store.cliStatusRefreshing }
 
     /// When the last check finished. Says nothing about whether it succeeded.
@@ -565,9 +634,6 @@ struct TerminalStrip: View {
         return t("cli.lastObservation", arguments: ["date": value])
     }
 
-    /// Sync is only offered after a check found a difference, and only against a subscription
-    /// desktop; API / unknown desktops have no subscription account to sync to.
-    private var canSync: Bool { store.cliStatus == .different && protection.desktopScope == .subscription }
     private var canCopyScoped: Bool { protection.desktopScope == .subscription }
 
     /// Green needs a real comparison against a subscription desktop. A `matched` seen under another
@@ -609,6 +675,11 @@ struct TerminalStrip: View {
         return value.isEmpty ? nil : value
     }
 
+    private var advancedAccountDetail: String? {
+        let value = [store.cliProfile, store.cliEmail.flatMap(maskedEmail)].compactMap { $0 }.joined(separator: "  ·  ")
+        return value.isEmpty ? nil : value
+    }
+
     private var detail: String {
         switch store.cliStatus {
         case .unverified:
@@ -630,8 +701,22 @@ struct TerminalStrip: View {
         }
     }
 
-    /// One boundary sentence per state. The row already shows the result; this only says what it is
-    /// not. API-mode CLI settings are independent and never covered here.
+    private var advancedStatus: String {
+        if store.cliStatus == .unverified, store.cliStatusCheckedAt == nil { return checkedLine }
+        return status
+    }
+
+    private var advancedDetail: String? {
+        if store.cliStatus == .unverified, store.cliStatusCheckedAt == nil { return nil }
+        switch store.cliStatus {
+        case .matched: return advancedAccountDetail
+        case .different, .reported, .unsupportedStorage: return advancedAccountDetail ?? detail
+        case .otherAuthentication: return nil
+        default: return detail
+        }
+    }
+
+    /// Boundary details stay in help; API-mode CLI settings are not covered here.
     private var detailHelp: String {
         switch store.cliStatus {
         case .reported: return t("cli.reportedHelp")
@@ -640,6 +725,11 @@ struct TerminalStrip: View {
         case .unverified where standaloneVerified: return t("cli.standaloneHelp")
         default: return t("cli.defaultHelp")
         }
+    }
+
+    private var advancedHelp: String {
+        guard store.cliStatusCheckedAt != nil else { return detailHelp }
+        return checkedLine + "\n" + detailHelp
     }
 
     private var copyTitle: String {
@@ -663,51 +753,39 @@ struct TerminalStrip: View {
     var body: some View {
         let displayedStatus = subscriptionDesktop ? terminalStatus : status
         let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
-        let displayedDetail: String? = subscriptionDesktop
-            ? terminalDetail
-            : (store.cliStatus == .otherAuthentication ? accountDetail : detail)
+        let summary = subscriptionDesktop ? terminalSummary : accountDetail ?? status
         let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
+        let title = Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+        let identity = Text(summary).font(.system(size: 10.5)).foregroundColor(displayedStatusColor)
+            .lineLimit(1).truncationMode(.middle)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        let statusInfo = Button { showHelp.toggle() } label: {
+            Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(statusHelp)
+        .accessibilityLabel("\(t("cli.statusAccessibility")): \(displayedStatus)")
+        .accessibilityHint(statusHelp)
+        .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: summaryIcon).font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
                 .frame(width: 28, height: 28)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(0.1)))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
-                    Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
-                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-                    Button { showHelp.toggle() } label: {
-                        HStack(spacing: 4) {
-                            Text(displayedStatus).font(.system(size: 10, weight: .medium))
-                                .foregroundColor(displayedStatusColor).lineLimit(1).minimumScaleFactor(0.8)
-                            if displayedDetail != nil {
-                                Image(systemName: "info.circle").font(.system(size: 9)).foregroundColor(.sub)
-                            }
-                        }
-                        .frame(height: 22)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(statusHelp)
-                    .accessibilityLabel("\(t("cli.statusAccessibility")): \(displayedStatus)")
-                    .accessibilityHint(statusHelp)
-                    .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
+                    title
+                    statusInfo
                     Spacer(minLength: 4)
                 }
-                .frame(height: 22)
-                if let displayedDetail {
-                    Text(displayedDetail)
-                        .font(.system(size: 10.5)).foregroundColor(.sub)
-                        .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                        .help(displayedDetail)
-                } else {
-                    Button { showHelp = true } label: {
-                        Label(t("cli.authDetails"), systemImage: "info.circle")
-                            .font(.system(size: 10.5)).foregroundColor(.sub)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(statusHelp)
-                }
+                .frame(height: 28)
+                identity
+            }
+            if showsInlineAction {
+                Spacer(minLength: 4)
+                primaryAction.padding(.top, 5)
             }
         }
         .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
@@ -717,18 +795,23 @@ struct TerminalStrip: View {
             officialReportActive = false
             showHelp = false
             choiceTarget = nil
+            restoreTarget = nil
+            confirmRestore = false
             connection.contextDidChange()
         }
         .onChange(of: protection.desktopScope) { _ in
             officialReportActive = false
             showHelp = false
             choiceTarget = nil
+            restoreTarget = nil
+            confirmRestore = false
             connection.contextDidChange()
         }
         .onChange(of: store.updating) { updating in
             if updating {
                 choiceTarget = nil
-                confirmSync = false
+                restoreTarget = nil
+                confirmRestore = false
             }
         }
         .onChange(of: connection.expectedProfile) { profile in
@@ -737,12 +820,20 @@ struct TerminalStrip: View {
                 showHelp = false
                 self.choiceTarget = nil
             }
+            if let restoreTarget, profile != restoreTarget.profile {
+                self.restoreTarget = nil
+                confirmRestore = false
+            }
         }
         .onChange(of: store.active?.snapshot?.identity) { identity in
             officialReportActive = false
             showHelp = false
             if let choiceTarget, identity != choiceTarget.identity {
                 self.choiceTarget = nil
+            }
+            if let restoreTarget, identity != restoreTarget.identity {
+                self.restoreTarget = nil
+                confirmRestore = false
             }
             connection.contextDidChange()
         }
@@ -758,8 +849,14 @@ struct TerminalStrip: View {
             }
         }
         .onChange(of: connection.phase) { phase in
+            if phase != .choosing {
+                restoreTarget = nil
+                confirmRestore = false
+            }
             switch phase {
             case .choosing:
+                restoreTarget = nil
+                confirmRestore = false
                 choiceTarget = (store.active?.snapshot?.identity).map {
                     ChoiceTarget(profile: connection.expectedProfile, identity: $0)
                 }
@@ -778,24 +875,11 @@ struct TerminalStrip: View {
         .sheet(item: $choiceTarget) { target in
             choiceSheet(for: target)
         }
-        .confirmationDialog(t("cli.syncTitle", arguments: ["account": syncTarget]), isPresented: $confirmSync,
-                            titleVisibility: .visible) {
-            Button(t("cli.sync")) {
-                guard canSync, !controlsLocked, !checking, store.current == syncTarget else {
-                    syncStale = true
-                    return
-                }
-                let target = syncTarget
-                Task { await store.moveTerminal(to: target) }
+        .onChange(of: choiceTarget?.id) { id in
+            if id == nil {
+                restoreTarget = nil
+                confirmRestore = false
             }
-            Button(t("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(t("cli.syncBody", arguments: ["account": syncTarget]))
-        }
-        .alert(t("cli.staleTitle"), isPresented: $syncStale) {
-            Button(t("cli.ok")) {}
-        } message: {
-            Text(t("cli.staleBody"))
         }
     }
 
@@ -804,9 +888,10 @@ struct TerminalStrip: View {
             HStack(spacing: 5) {
                 if connection.isBusy { ProgressView().controlSize(.mini) }
                 Text(primaryTitle).font(.system(size: 10.5, weight: .medium)).lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .padding(.horizontal, 10)
-            .frame(height: 28)
+            .frame(minWidth: 48).frame(height: 28)
             .foregroundColor(.claude)
             .background(RoundedRectangle(cornerRadius: 7)
                 .fill(Color.claude.opacity(openHover ? 0.16 : 0.08)))
@@ -824,54 +909,48 @@ struct TerminalStrip: View {
         VStack(alignment: .leading, spacing: 10) {
             if subscriptionDesktop {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(terminalStatus).font(.system(size: 11, weight: .semibold)).foregroundColor(terminalStatusColor)
-                    Text(terminalDetail).font(.system(size: 10.5)).foregroundColor(.sub)
+                    Text(accountName).font(.system(size: 11, weight: .semibold)).foregroundColor(.txt)
+                    Text(terminalDetail).font(.system(size: 10.5)).foregroundColor(terminalStatusColor)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let terminalBoundary {
-                        Text(terminalBoundary).font(.system(size: 10)).foregroundColor(.sub)
-                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                    }
-                    if showsConnectionPhase, let bindingCheckedLine {
-                        Text(bindingCheckedLine).font(.system(size: 10)).foregroundColor(.sub)
-                    }
                 }
-                primaryAction
+                .help(terminalBoundary ?? t("cli.statusHelp"))
                 Divider().opacity(0.5)
                 DisclosureGroup(t("cli.advanced")) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(t("cli.defaultStatus")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
-                        Text(status).font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
-                        Text(detail).font(.system(size: 10)).foregroundColor(.sub)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(checkedLine).font(.system(size: 10)).foregroundColor(.sub)
-                        Text(detailHelp).font(.system(size: 10)).foregroundColor(.sub)
-                            .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(t("cli.defaultStatus")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
+                            Text(advancedStatus).font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
+                            if let advancedDetail {
+                                Text(advancedDetail).font(.system(size: 10)).foregroundColor(.sub)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .help(advancedHelp)
+                        Link(destination: URL(string: "https://claude.ai/settings/usage")!) {
+                            Label(t("refresh.officialUsage"), systemImage: "arrow.up.right")
+                                .font(.system(size: 10.5)).foregroundColor(.sub)
+                                .frame(height: 28, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .help(t("refresh.officialUsageHelp"))
                         if canCopyScoped {
                             Button(action: copyScopedCommand) {
                                 HStack(spacing: 5) {
                                     Image(systemName: copyFeedback == true ? "checkmark" : "doc.on.doc")
                                     Text(copyTitle)
                                 }
-                                .font(.system(size: 10.5, weight: .medium))
-                                .padding(.horizontal, 9).frame(height: 28)
-                                .foregroundColor(copyFeedback == false ? .warn : .txt)
-                                .background(RoundedRectangle(cornerRadius: 7)
-                                    .fill(Color.sub.opacity(copyHover ? 0.14 : 0.08)))
+                                .font(.system(size: 10.5))
+                                .padding(.horizontal, 2).frame(height: 28)
+                                .foregroundColor(copyFeedback == false ? .warn : copyHover ? .txt : .sub)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain).disabled(controlsLocked || checking)
+                            .opacity(controlsLocked || checking ? 0.45 : 1)
                             .help(t("cli.copyScopedHelp"))
+                            .accessibilityLabel(copyTitle)
                             .onHover { copyHover = $0 }
                         }
-                        Button { syncTarget = store.current; confirmSync = true } label: {
-                            Text(t("cli.syncTo")).font(.system(size: 10.5, weight: .semibold))
-                                .padding(.horizontal, 9).frame(height: 28)
-                                .foregroundColor(canSync ? .claude : .sub)
-                                .background(RoundedRectangle(cornerRadius: 7)
-                                    .fill(Color.claude.opacity(syncHover && canSync ? 0.22 : 0.1)))
-                        }
-                        .buttonStyle(.plain).disabled(!canSync || controlsLocked || checking)
-                        .help(t("cli.syncHelp", arguments: ["account": store.current]))
-                        .onHover { syncHover = $0 }
                     }
                     .padding(.top, 8)
                 }
@@ -897,30 +976,55 @@ struct TerminalStrip: View {
     }
 
     private func choiceSheet(for target: ChoiceTarget) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
+        let restoreAvailable = connection.phase == .choosing && connection.legacyBackupAvailable
+        return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(t("cli.choiceTitle")).font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
                 Text(t("cli.choiceFor", arguments: ["account": target.profile]))
                     .font(.system(size: 11)).foregroundColor(.sub).lineLimit(1)
-                Text(t("cli.recommendedIsolated")).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
+                if !restoreAvailable {
+                    Text(t("cli.recommendedIsolated")).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
+                }
             }
             if connection.phase == .mismatched {
                 Text(t("cli.choiceMismatch")).font(.system(size: 11)).foregroundColor(.warn)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
+            if let detail = connection.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty {
+                Text(generated(detail)).font(.system(size: 10.5)).foregroundColor(.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if restoreAvailable {
+                Button(t("cli.restoreBackupAction")) {
+                    restoreTarget = target
+                    confirmRestore = true
+                }
                 .buttonStyle(.borderedProminent)
                 .tint(.claude)
                 .keyboardShortcut(.defaultAction)
                 .frame(maxWidth: .infinity)
                 .disabled(choiceActionsDisabled(for: target))
+                Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+                    .disabled(choiceActionsDisabled(for: target))
+            } else {
+                Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.claude)
+                    .keyboardShortcut(.defaultAction)
+                    .frame(maxWidth: .infinity)
+                    .disabled(choiceActionsDisabled(for: target))
+            }
             HStack(spacing: 10) {
                 Button(t("common.cancel")) { choiceTarget = nil }
                     .buttonStyle(.bordered)
                 Spacer()
-                Button(t("cli.defaultAction")) { chooseAndOpen(.defaultLogin, target: target) }
-                    .buttonStyle(.bordered)
-                    .disabled(choiceActionsDisabled(for: target))
+                if !restoreAvailable {
+                    Button(t("cli.defaultAction")) { chooseAndOpen(.defaultLogin, target: target) }
+                        .buttonStyle(.bordered)
+                        .disabled(choiceActionsDisabled(for: target))
+                }
             }
             Text(t("cli.choiceBoundary")).font(.system(size: 10.5)).foregroundColor(.sub)
                 .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
@@ -928,12 +1032,51 @@ struct TerminalStrip: View {
         .padding(20).frame(width: 390, alignment: .leading)
         .background(Color.bg)
         .preferredColorScheme(.dark)
+        .confirmationDialog(t("cli.restoreBackupTitle", arguments: ["account": restoreTarget?.profile ?? target.profile]),
+                            isPresented: $confirmRestore, titleVisibility: .visible) {
+            Button(t("cli.restoreBackupConfirm"), role: .destructive) {
+                guard let target = restoreTarget else { return }
+                restoreLegacyBackup(target)
+            }
+            Button(t("common.cancel"), role: .cancel) { restoreTarget = nil }
+        } message: {
+            Text(t("cli.restoreBackupBody", arguments: ["account": restoreTarget?.profile ?? target.profile]))
+        }
+        .onChange(of: confirmRestore) { presented in
+            if !presented { restoreTarget = nil }
+        }
+    }
+
+    private func restoreLegacyBackup(_ target: ChoiceTarget) {
+        confirmRestore = false
+        restoreTarget = nil
+        guard !choiceActionsDisabled(for: target), subscriptionDesktop,
+              connection.phase == .choosing, connection.legacyBackupAvailable,
+              target.profile == connection.expectedProfile, target.profile == store.current,
+              store.active?.snapshot?.identity == target.identity else {
+            choiceTarget = nil
+            connection.contextDidChange()
+            return
+        }
+        officialReportActive = true
+        choiceTarget = nil
+        Task {
+            guard subscriptionDesktop, !controlsLocked, connection.phase == .choosing,
+                  connection.legacyBackupAvailable, target.profile == connection.expectedProfile,
+                  target.profile == store.current, store.active?.snapshot?.identity == target.identity else {
+                connection.contextDidChange()
+                return
+            }
+            await connection.restoreLegacyBackup(for: .init(profile: target.profile, identity: target.identity))
+        }
     }
 
     private func chooseAndOpen(_ choice: CLIBindingChoice, target: ChoiceTarget) {
         guard !choiceActionsDisabled(for: target) else { return }
         let profile = target.profile
         let identity = target.identity
+        restoreTarget = nil
+        confirmRestore = false
         officialReportActive = true
         choiceTarget = nil
         Task {
@@ -960,7 +1103,9 @@ struct UsageMetric: View {
             Text(title).font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
             HStack(alignment: .firstTextBaseline, spacing: 2) {
                 Text(pct(value)).font(.system(size: prominent ? 28 : 22, weight: .bold, design: .rounded))
-                Text("%").font(.system(size: prominent ? 12 : 11, weight: .semibold, design: .rounded))
+                if value != nil {
+                    Text("%").font(.system(size: prominent ? 12 : 11, weight: .semibold, design: .rounded))
+                }
             }
             .foregroundColor(levelColor(value))
             Bar(value: value, color: levelColor(value), height: 3)
@@ -1006,46 +1151,12 @@ struct ProfileCard: View {
         case .loading: return Placeholder(icon: "", title: t("usage.loading"), spinner: true)
         case .blocked:
             return Placeholder(icon: "shield.lefthalf.filled", title: t("usage.notRequested"), detail: t("usage.afterProtection"))
+        case .loginRequired:
+            return Placeholder(icon: "person.crop.circle.badge.exclamationmark", title: t("cli.summaryLoginRequired"), color: .warn)
         case .failed:
             return Placeholder(icon: "exclamationmark.triangle", title: t("usage.failed"),
                                detail: p.error.map { AppLocalization.message($0, language: language) }, color: .warn)
         case .notRequested, .cached, .loaded: return Placeholder(icon: "chart.bar", title: t("usage.noData"))
-        }
-    }
-
-    @ViewBuilder private func usageFooter(_ snapshot: Snapshot, now: Date) -> some View {
-        let age = ago(snapshot.fetchedAt, language: language, now: now)
-        let resetReached = [snapshot.session?.resetsAt, snapshot.weekly?.resetsAt]
-            .compactMap { $0 }
-            .contains { $0.timeIntervalSince(now) <= 0 }
-        switch p.usageState {
-        case .loading:
-            HStack(spacing: 5) {
-                ProgressView().controlSize(.mini)
-                Text(t("usage.updating"))
-            }.foregroundColor(.sub)
-        case .failed:
-            HStack(spacing: 5) {
-                Image(systemName: "exclamationmark.circle")
-                Text(t("usage.updated", arguments: ["age": age]))
-            }
-                .foregroundColor(.sub).lineLimit(1)
-                .help(p.error.map { AppLocalization.message($0, language: language) } ?? t("usage.requestFailed"))
-                .accessibilityLabel(t("usage.updateFailedDetail"))
-        case .blocked:
-            Text(t("usage.blockedCached", arguments: ["age": age])).foregroundColor(.sub)
-                .help(t("usage.blockedHelp"))
-        case .loaded where p.live && !resetReached:
-            EmptyView()
-        case .loaded where resetReached:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub)
-                .help(t("usage.resetDueCachedHelp"))
-        case .loaded:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub)
-                .help(t("usage.cacheTimeHelp"))
-        case .notRequested, .cached:
-            Text(t("usage.updated", arguments: ["age": age])).foregroundColor(.sub)
-                .help(t("usage.cacheTimeHelp"))
         }
     }
 
@@ -1096,28 +1207,33 @@ struct ProfileCard: View {
                 }
             }
 
-            if p.signedIn, let snapshot = s, snapshot.session != nil || snapshot.weekly != nil {
+            if p.signedIn, let snapshot = s,
+               [snapshot.session, snapshot.weekly, snapshot.weeklyFable, snapshot.weeklySonnet, snapshot.weeklyOpus].contains(where: { $0 != nil }) {
                 TimelineView(.periodic(from: .now, by: 60)) { context in
                     let sampled = fullDateTime(snapshot.fetchedAt, language: language)
+                    let weeklyMetrics: [(String, Window?)] = [
+                        ("usage.weekly", snapshot.weekly), ("usage.fableWeekly", snapshot.weeklyFable),
+                        ("usage.sonnetWeekly", snapshot.weeklySonnet), ("usage.opusWeekly", snapshot.weeklyOpus)
+                    ].filter { $0.1 != nil }
+                    let metrics = snapshot.session == nil ? weeklyMetrics : [("usage.fiveHours", snapshot.session)] + weeklyMetrics
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .top, spacing: 12) {
-                            UsageMetric(title: t("usage.fiveHours"), value: left(snapshot.session),
-                                        reset: countdown(snapshot.session?.resetsAt, language: language, now: context.date),
-                                        resetHelp: t("usage.fiveHoursResetHelp", arguments: [
-                                            "reset": fullDateTime(snapshot.session?.resetsAt, language: language),
-                                            "sampled": sampled
-                                        ]), prominent: true)
-                            Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 58)
-                            UsageMetric(title: t("usage.weekly"), value: left(snapshot.weekly),
-                                        reset: weeklyReset(snapshot.weekly?.resetsAt, language: language, now: context.date),
-                                        resetHelp: t("usage.weeklyResetHelp", arguments: [
-                                            "reset": fullDateTime(snapshot.weekly?.resetsAt, language: language),
-                                            "sampled": sampled
-                                        ]))
+                            ForEach(Array(metrics.prefix(2)), id: \.0) { key, window in
+                                let shortWindow = key == "usage.fiveHours"
+                                let expired = window?.resetsAt.map { $0 <= context.date } ?? false
+                                if key != metrics.first?.0 {
+                                    Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 58)
+                                }
+                                UsageMetric(title: t(key), value: left(window),
+                                            reset: recordedReset(window?.resetsAt, language: language, now: context.date),
+                                            resetHelp: t(shortWindow ? "usage.fiveHoursResetHelp" : key == "usage.weekly"
+                                                ? "usage.weeklyResetHelp" : "usage.modelWeeklyResetHelp", arguments: [
+                                                    "reset": fullDateTime(window?.resetsAt, language: language), "sampled": sampled
+                                                ]) + (expired ? "\n" + t("usage.resetDueCachedHelp") : ""),
+                                            prominent: key == metrics.first?.0)
+                            }
                         }
                         Spacer(minLength: 0)
-                        usageFooter(snapshot, now: context.date).font(.system(size: 10))
-                            .frame(height: 12, alignment: .leading)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 }
@@ -1366,36 +1482,20 @@ struct Panel: View {
         return AppLocalization.message(message, language: language)
     }
 
-    /// Show `lastRefresh` only for a round with a successful usage snapshot, not after failure-only or empty rounds.
+    /// One timestamp for the newest real sample; unsuccessful attempts never change it.
     private func refreshSummary(now: Date) -> (text: String, color: Color, help: String) {
-        if let notice = store.usageNotice {
-            let text = store.profiles.contains(where: { $0.usageState == .blocked })
-                ? t("refresh.blocked") : t("refresh.noNewData")
-            return (text, .sub, generated(notice))
+        let samples = store.profiles.compactMap { profile -> (String, Date)? in
+            guard let sample = profile.snapshot, sample.fetchedAt != .distantPast, sample.fetchedAt <= now,
+                  [sample.session, sample.weekly, sample.weeklyFable, sample.weeklySonnet, sample.weeklyOpus].contains(where: { $0 != nil }) else { return nil }
+            return (profile.name, sample.fetchedAt)
         }
-        if store.profiles.contains(where: { $0.usageState == .blocked }) {
-            return (t("refresh.blocked"), .sub, t("refresh.blockedHelp"))
+        if let last = samples.map(\.1).max() {
+            var help = samples.map { "\($0.0)：\(fullDateTime($0.1, language: language))" }.joined(separator: "\n")
+            if let detail = store.usageNotice ?? store.linkedUsageDetails { help += "\n" + generated(detail) }
+            return (ago(last, language: language, now: now), .sub, help)
         }
-        let failed = store.profiles.filter { $0.usageState == .failed }.count
-        let hasNewData = store.profiles.contains { $0.usageState == .loaded }
-        if failed > 0 {
-            if hasNewData, let last = store.lastRefresh {
-                let age = ago(last, language: language, now: now)
-                return (t("refresh.failureSummary", arguments: ["age": age, "count": String(failed)]), .sub,
-                        t("refresh.failureHelp", arguments: ["sampled": fullDateTime(last, language: language)]))
-            }
-            return (t("refresh.failureCached", arguments: ["count": String(failed)]), .sub,
-                    t("refresh.failureCachedHelp"))
-        }
-        guard hasNewData, let last = store.lastRefresh else {
-            if store.profiles.contains(where: { $0.snapshot != nil }) {
-                return (t("refresh.noNewData"), .sub, t("refresh.noNewDataHelp"))
-            }
-            return (t("refresh.never"), .sub, t("refresh.neverHelp"))
-        }
-        let age = ago(last, language: language, now: now)
-        return (t("refresh.summary", arguments: ["age": age]), .sub,
-                t("refresh.summaryHelp", arguments: ["sampled": fullDateTime(last, language: language)]))
+        let detail = store.usageNotice ?? store.linkedUsageDetails
+        return (t("refresh.never"), .sub, detail.map(generated) ?? t("refresh.neverHelp"))
     }
 
     private var languageBinding: Binding<String> {
@@ -1501,6 +1601,9 @@ struct Panel: View {
                 FooterButton(icon: "folder", help: t("footer.showDirectory")) {
                     if !store.isDemo { NSWorkspace.shared.activateFileViewerSelecting([parkDir]) }
                 }
+                if store.sessionMigrationEnabled {
+                    FooterButton(icon: "doc.on.doc", help: t("footer.import")) { CopyWindow.show(store) }
+                }
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 if let b = store.busy {
                     ProgressView().controlSize(.small)
@@ -1513,22 +1616,15 @@ struct Panel: View {
                 } else {
                     TimelineView(.periodic(from: .now, by: 60)) { context in
                         let summary = refreshSummary(now: context.date)
-                        HStack(spacing: 5) {
-                            Image(systemName: store.usageNotice == nil ? "clock" : "exclamationmark.circle")
-                                .font(.system(size: 10))
-                            Text(summary.text).font(.system(size: 11, weight: .medium))
-                                .lineLimit(1).minimumScaleFactor(0.85)
-                        }
-                        .foregroundColor(summary.color)
-                        .help(summary.help + "\n" + t("refresh.officialCLIHelp")
-                            + (protection.desktopScope == .api ? "\n" + t("api.subscriptionUsageHelp") : ""))
-                        .accessibilityElement(children: .combine)
+                        Label(summary.text, systemImage: "clock")
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1).minimumScaleFactor(0.85)
+                            .foregroundColor(summary.color)
+                            .help(summary.help + "\n" + t("refresh.officialCLIHelp")
+                                + (protection.desktopScope == .api ? "\n" + t("api.subscriptionUsageHelp") : ""))
                     }
                 }
                 Spacer(minLength: 4)
-                if store.sessionMigrationEnabled {
-                    FooterButton(icon: "doc.on.doc", help: t("footer.import")) { CopyWindow.show(store) }
-                }
                 FooterButton(
                     icon: "arrow.clockwise",
                     help: t("footer.refresh"),
