@@ -364,6 +364,7 @@ struct TerminalStrip: View {
     @ObservedObject var store: Store
     @ObservedObject private var protection: ProtectionController
     @ObservedObject private var connection: CLIConnectionController
+    @Binding private var reportsSecondaryLine: Bool
     @Environment(\.appLanguage) private var language
     @State private var copyHover = false
     @State private var openHover = false
@@ -375,10 +376,11 @@ struct TerminalStrip: View {
     @State private var copyFeedback: Bool?
     @State private var copyFeedbackSequence = 0
 
-    init(store: Store) {
+    init(store: Store, showsSecondaryLine: Binding<Bool> = .constant(false)) {
         self.store = store
         self.protection = store.protection
         self.connection = store.cliConnection
+        self._reportsSecondaryLine = showsSecondaryLine
     }
 
     private func t(_ key: String, arguments: [String: String] = [:]) -> String {
@@ -503,8 +505,22 @@ struct TerminalStrip: View {
         return "\(match) · \(email)"
     }
 
+    var showsSecondaryLine: Bool {
+        normalIdentity == nil || normalIdentityDetail != nil
+    }
+
+    private var mismatchedTerminalSummary: String {
+        let identity = isolatedBinding ? nil : advancedAccountDetail
+        return "\(t("cli.recordDifferent")) · \(identity ?? t("cli.unconfirmedIdentity"))"
+    }
+
     private var terminalSummary: String {
-        normalIdentity ?? terminalStatus
+        if showsConnectionPhase, connection.phase == .mismatched { return mismatchedTerminalSummary }
+        if !showsConnectionPhase {
+            if defaultMismatch { return mismatchedTerminalSummary }
+            if case .differentAccount = connection.localRecord { return mismatchedTerminalSummary }
+        }
+        return normalIdentity ?? terminalStatus
     }
 
     private var terminalStatus: String {
@@ -586,8 +602,8 @@ struct TerminalStrip: View {
         return t(needsPreparation ? "cli.prepare" : "cli.confirmLogin")
     }
 
-    private var showsInlineAction: Bool {
-        guard subscriptionDesktop, !connection.isBusy, normalIdentity == nil else { return false }
+    private var showsPrimaryAction: Bool {
+        guard subscriptionDesktop, !connection.isBusy, !verifiedMatch else { return false }
         if showsConnectionPhase {
             switch connection.phase {
             case .checking, .opening: return false
@@ -595,6 +611,10 @@ struct TerminalStrip: View {
             }
         }
         return true
+    }
+
+    private var showsInlineAction: Bool {
+        showsPrimaryAction && normalIdentity == nil
     }
 
     private var primaryActionHelp: String {
@@ -767,6 +787,7 @@ struct TerminalStrip: View {
         let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
         let normalIdentity = subscriptionDesktop ? self.normalIdentity : nil
         let normalIdentityDetail = subscriptionDesktop ? self.normalIdentityDetail : nil
+        let showsSecondaryLine = self.showsSecondaryLine
         let summary = subscriptionDesktop ? terminalSummary : accountDetail ?? status
         let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
         let title = Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
@@ -810,7 +831,11 @@ struct TerminalStrip: View {
         }
         .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear { connection.contextDidChange() }
+        .onAppear {
+            reportsSecondaryLine = showsSecondaryLine
+            connection.contextDidChange()
+        }
+        .onChange(of: showsSecondaryLine) { reportsSecondaryLine = $0 }
         .onChange(of: store.current) { _ in
             officialReportActive = false
             showHelp = false
@@ -929,11 +954,14 @@ struct TerminalStrip: View {
         VStack(alignment: .leading, spacing: 10) {
             if subscriptionDesktop {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(accountName).font(.system(size: 11, weight: .semibold)).foregroundColor(.txt)
+                    Text(terminalSummary).font(.system(size: 11, weight: .semibold)).foregroundColor(.txt)
                     Text(terminalDetail).font(.system(size: 10.5)).foregroundColor(terminalStatusColor)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .help(terminalBoundary ?? t("cli.statusHelp"))
+                if showsPrimaryAction {
+                    primaryAction
+                }
                 Divider().opacity(0.5)
                 DisclosureGroup(t("cli.advanced")) {
                     VStack(alignment: .leading, spacing: 8) {

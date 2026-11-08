@@ -17,9 +17,17 @@ struct TerminalProtectionCard: View {
     /// Manual checks re-expand the result block; operation reports preserve the user's fold state.
     @State private var resultsExpanded = true
     @State private var resultsHover = false
+    @State private var terminalShowsSecondaryLine: Bool
     /// Shared by the status column and the panel beneath it, so the two read as one region.
     private let panelTint = Color.white.opacity(0.03)
     private var operationLocked: Bool { busy || store.updating }
+
+    init(store: Store, controller: ProtectionController, busy: Bool) {
+        self.store = store
+        self.controller = controller
+        self.busy = busy
+        _terminalShowsSecondaryLine = State(initialValue: TerminalStrip(store: store).showsSecondaryLine)
+    }
 
     private func t(_ key: String, arguments: [String: String] = [:]) -> String {
         appText(key, language: language, arguments: arguments)
@@ -422,20 +430,19 @@ struct TerminalProtectionCard: View {
         TimelineView(.periodic(from: .now, by: 5)) { context in
             let detail = statusDetail(now: context.date)
             VStack(alignment: .leading, spacing: 4) {
-                if protectedSummaryCountry(now: context.date) != nil {
-                    ViewThatFits(in: .horizontal) {
-                        protectedSummary(inlineCountry: true, now: context.date)
-                        protectedSummary(inlineCountry: false, now: context.date)
-                    }
+                if protectedTargetCountry != nil {
+                    protectedSummary(inlineCountry: !terminalShowsSecondaryLine, now: context.date)
                 } else {
                     statusRow
-                    Group {
-                        Text(detail.isEmpty ? " " : detail)
-                            .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-                            .lineLimit(1).minimumScaleFactor(0.75)
-                            .padding(.leading, 26)
-                            .opacity(detail.isEmpty ? 0 : 1)
-                            .accessibilityHidden(detail.isEmpty)
+                    if terminalShowsSecondaryLine {
+                        Group {
+                            Text(detail.isEmpty ? " " : detail)
+                                .font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
+                                .lineLimit(1).minimumScaleFactor(0.75)
+                                .padding(.leading, 26)
+                                .opacity(detail.isEmpty ? 0 : 1)
+                                .accessibilityHidden(detail.isEmpty)
+                        }
                     }
                 }
                 if controller.desktopScope == .subscription && needsRetry {
@@ -479,7 +486,7 @@ struct TerminalProtectionCard: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 if inlineCountry {
-                    inlineStatusContent(now: now)
+                    inlineStatusContent(country: protectedTargetCountry)
                 } else {
                     statusContent.padding(.horizontal, 6)
                 }
@@ -493,14 +500,14 @@ struct TerminalProtectionCard: View {
         }
     }
 
-    private func inlineStatusContent(now: Date) -> some View {
+    private func inlineStatusContent(country: String?) -> some View {
         HStack(spacing: 5) {
             Image(systemName: statusIcon).font(.system(size: 11, weight: .semibold))
                 .frame(width: 14, height: 14)
-            if let country = protectedSummaryCountry(now: now) {
+            if let country {
                 (Text(statusTitle) + Text(" · " + country).foregroundColor(.sub))
                     .font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                    .lineLimit(1).minimumScaleFactor(0.72)
             }
             Spacer(minLength: 0)
         }
@@ -509,10 +516,15 @@ struct TerminalProtectionCard: View {
         .foregroundColor(statusColor)
     }
 
-    private func protectedSummaryCountry(now: Date) -> String? {
+    private var protectedTargetCountry: String? {
         guard controller.enabled, !controller.working, protectedDesktop,
               let country = controller.activeCountry?.trimmingCharacters(in: .whitespacesAndNewlines),
               !country.isEmpty else { return nil }
+        return country
+    }
+
+    private func protectedSummaryCountry(now: Date) -> String? {
+        guard protectedTargetCountry != nil else { return nil }
         return networkSummary(now: now)
     }
 
@@ -705,7 +717,7 @@ struct TerminalProtectionCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 0) {
-                TerminalStrip(store: store)
+                TerminalStrip(store: store, showsSecondaryLine: $terminalShowsSecondaryLine)
                     // The divider closes off the summary side only, so the tinted column runs
                     // straight into the panel below it like a tab.
                     .overlay(alignment: .bottom) {
