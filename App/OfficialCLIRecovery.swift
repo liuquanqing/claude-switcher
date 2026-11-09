@@ -114,7 +114,7 @@ struct CLIRecoveryTimedOut: Error, LocalizedError, Sendable {
         })
     }
 
-    static func native(home: URL) -> OfficialCLIRecovery {
+    static func native(home: URL, proxy: UsageQueryProxy) -> OfficialCLIRecovery {
         OfficialCLIRecovery(root: home.appendingPathComponent("Library/Application Support/Claude Switcher/CLI-Recovery"),
             readSecret: { service in
                 try KeychainReadAccess.read(service: service, account: NSUserName(), allowInteraction: true)
@@ -123,7 +123,10 @@ struct CLIRecoveryTimedOut: Error, LocalizedError, Sendable {
                     kSecAttrService as String:service, kSecAttrAccount as String:NSUserName()]
                 let code = SecItemDelete(query as CFDictionary)
                 guard code == errSecSuccess || code == errSecItemNotFound else { throw SafetyError("CLI 恢复资料清理待完成。") }
-            }, run: { directory in try await runOfficial(home: home, directory: directory) })
+            }, run: { directory in
+                try await runOfficial(home: home, directory: directory,
+                    inherited: proxy.environment(ProcessInfo.processInfo.environment))
+            })
     }
 
     nonisolated static func childEnvironment(home: URL, directory: URL, inherited: [String:String]) -> [String:String] {

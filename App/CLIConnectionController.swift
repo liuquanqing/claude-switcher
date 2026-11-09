@@ -28,6 +28,7 @@ struct CLIConnectionContext: Equatable {
     @Published private(set) var choice: CLIBindingChoice?
     @Published private(set) var detail: String?
     @Published private(set) var defaultMatches = false
+    @Published private(set) var defaultLoginAvailable = false
     @Published private(set) var expectedProfile = ""
     @Published private(set) var checkedAt: Date?
     @Published private(set) var localRecord: CLILocalRecord = .unconfirmed
@@ -51,7 +52,8 @@ struct CLIConnectionContext: Equatable {
         guard observed != context else { return }
         generation += 1; context = observed
         legacyBackupAvailable = false
-        expectedProfile = observed?.profile ?? ""; detail = nil; defaultMatches = false; checkedAt = nil; localRecord = .unconfirmed
+        expectedProfile = observed?.profile ?? ""; detail = nil; defaultMatches = false; defaultLoginAvailable = false
+        checkedAt = nil; localRecord = .unconfirmed
         do { binding = try observed.flatMap { try operations.load($0.identity) } }
         catch { binding = nil; choice = nil; phase = .failed; detail = error.localizedDescription; return }
         choice = binding?.choice
@@ -82,6 +84,7 @@ struct CLIConnectionContext: Equatable {
         let generation = self.generation
         phase = .checking; detail = nil
         legacyBackupAvailable = false
+        defaultLoginAvailable = false
         do {
             let remembered = binding
             var loginDirectory: CLIBinding?
@@ -91,24 +94,28 @@ struct CLIConnectionContext: Equatable {
                 let status = try await operations.status(candidate)
                 // Return true when the caller should stop, including an obsolete request.
                 guard stillCurrent(context, generation: generation) else { return true }
-                if candidate.choice == .defaultLogin { defaultMatches = status == .matched }
+                if candidate.choice == .defaultLogin {
+                    defaultMatches = status == .matched
+                    defaultLoginAvailable = status == .notLoggedIn || status == .matched
+                }
                 if status == .matched {
                     try await select(candidate, status: status, context: context, generation: generation)
                     return true
                 }
                 if candidate == remembered, status == .different { rememberedMismatch = true }
-                if status == .notLoggedIn, loginDirectory == nil,
-                   candidate == remembered || localRecord == .sameAccount(candidate.choice) {
-                    loginDirectory = candidate
+                if candidate.choice == .defaultLogin, status == .notLoggedIn {
+                    let record = operations.localRecord(context.identity, candidate)
+                    if record == .sameAccount(.defaultLogin) || record == .notPrepared {
+                        loginDirectory = candidate
+                    }
                 }
                 return false
             }
-            if let remembered, try await inspect(remembered) { return }
-            if remembered?.choice != .defaultLogin {
-                let defaultBinding = try operations.make(.defaultLogin, context.identity)
-                if try await inspect(defaultBinding) { return }
-            }
-            if remembered?.choice != .isolated {
+            let defaultBinding = try operations.make(.defaultLogin, context.identity)
+            if try await inspect(defaultBinding) { return }
+            if let remembered, remembered.choice == .isolated {
+                if try await inspect(remembered) { return }
+            } else {
                 let isolated = try operations.make(.isolated, context.identity)
                 if operations.existingDirectory(isolated), try await inspect(isolated) { return }
             }
@@ -156,7 +163,8 @@ struct CLIConnectionContext: Equatable {
             refreshLocalRecord()
         } catch {
             guard stillCurrent(expected, generation: generation) else { return }
-            phase = .failed; detail = error.localizedDescription
+            detail = error.localizedDescription
+            phase = .choosing
         }
     }
     func choose(_ selected: CLIBindingChoice) async {
@@ -172,6 +180,9 @@ struct CLIConnectionContext: Equatable {
             let chosen = try operations.make(selected, context.identity)
             let status = try await operations.status(chosen)
             guard stillCurrent(context, generation: generation) else { return }
+            if selected == .defaultLogin {
+                defaultLoginAvailable = status == .matched || status == .notLoggedIn
+            }
             // An explicitly different default must never be turned into a login
             // prompt for this profile. Existing default history stays in place.
             guard status == .matched || status == .notLoggedIn else {
@@ -223,6 +234,7 @@ struct CLIConnectionContext: Equatable {
     }
     func defaultLoginDidChange() {
         refreshLocalRecord()
+        defaultLoginAvailable = false
         guard choice == .defaultLogin else { return }
         if phase == .waitingForLogin { checkedAt = nil; return }
         generation += 1; phase = .unconfirmed; checkedAt = nil; detail = nil

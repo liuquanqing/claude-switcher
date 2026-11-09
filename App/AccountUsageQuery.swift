@@ -29,10 +29,10 @@ struct UsageQueryProxy: Equatable {
         }
         throw SafetyError("未发现本机 HTTP 代理，保留原额度。")
     }
-    func environment(_ inherited: [String: String]) -> [String: String] {
+    func environment(_ inherited: [String: String], bypass: String = "") -> [String: String] {
         var env = inherited
         for key in ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"] { env[key] = url }
-        for key in ["NO_PROXY", "no_proxy"] { env[key] = "" }
+        for key in ["NO_PROXY", "no_proxy"] { env[key] = bypass }
         return env
     }
 }

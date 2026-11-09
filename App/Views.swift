@@ -498,7 +498,7 @@ struct TerminalStrip: View {
         return nil
     }
 
-    private var normalIdentityDetail: String? {
+    private var verifiedIdentityDetail: String? {
         guard subscriptionDesktop, verifiedMatch else { return nil }
         let match = t("cli.matchShort")
         guard let email = store.active?.snapshot?.email.flatMap(maskedEmail) else { return match }
@@ -506,7 +506,7 @@ struct TerminalStrip: View {
     }
 
     var showsSecondaryLine: Bool {
-        normalIdentity == nil || normalIdentityDetail != nil
+        normalIdentity == nil
     }
 
     private var mismatchedTerminalSummary: String {
@@ -543,6 +543,7 @@ struct TerminalStrip: View {
     }
 
     private var terminalDetail: String {
+        if let verifiedIdentityDetail { return verifiedIdentityDetail }
         if showsConnectionPhase { return connectionDetail ?? accountName }
         if defaultMismatch { return t("cli.recordDifferentDetail", arguments: ["account": accountName]) }
         if usageLoginRequired { return t("cli.usageLoginHelp") }
@@ -786,7 +787,6 @@ struct TerminalStrip: View {
         let displayedStatus = subscriptionDesktop ? terminalStatus : status
         let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
         let normalIdentity = subscriptionDesktop ? self.normalIdentity : nil
-        let normalIdentityDetail = subscriptionDesktop ? self.normalIdentityDetail : nil
         let showsSecondaryLine = self.showsSecondaryLine
         let summary = subscriptionDesktop ? terminalSummary : accountDetail ?? status
         let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
@@ -818,10 +818,6 @@ struct TerminalStrip: View {
                 .frame(height: 28)
                 if normalIdentity == nil {
                     identity.frame(maxWidth: .infinity, alignment: .leading)
-                } else if let normalIdentityDetail {
-                    Text(normalIdentityDetail).font(.system(size: 10.5)).foregroundColor(displayedStatusColor)
-                        .lineLimit(1).truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             if showsInlineAction {
@@ -1025,12 +1021,13 @@ struct TerminalStrip: View {
 
     private func choiceSheet(for target: ChoiceTarget) -> some View {
         let restoreAvailable = connection.phase == .choosing && connection.legacyBackupAvailable
+        let defaultAvailable = connection.defaultLoginAvailable
         return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(t("cli.choiceTitle")).font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
                 Text(t("cli.choiceFor", arguments: ["account": target.profile]))
                     .font(.system(size: 11)).foregroundColor(.sub).lineLimit(1)
-                if !restoreAvailable {
+                if !restoreAvailable && !defaultAvailable {
                     Text(t("cli.recommendedIsolated")).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
                 }
             }
@@ -1042,16 +1039,24 @@ struct TerminalStrip: View {
                 Text(generated(detail)).font(.system(size: 10.5)).foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            if defaultAvailable {
+                Button(t("cli.defaultLoginAction")) { chooseAndOpen(.defaultLogin, target: target) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.claude)
+                    .keyboardShortcut(.defaultAction)
+                    .frame(maxWidth: .infinity)
+                    .disabled(choiceActionsDisabled(for: target))
+            }
             if restoreAvailable {
                 Button(t("cli.restoreBackupAction")) {
                     restoreTarget = target
                     confirmRestore = true
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.claude)
-                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity)
                 .disabled(choiceActionsDisabled(for: target))
+            }
+            if defaultAvailable || restoreAvailable {
                 Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
                     .buttonStyle(.bordered)
                     .frame(maxWidth: .infinity)
@@ -1068,13 +1073,9 @@ struct TerminalStrip: View {
                 Button(t("common.cancel")) { choiceTarget = nil }
                     .buttonStyle(.bordered)
                 Spacer()
-                if !restoreAvailable {
-                    Button(t("cli.defaultAction")) { chooseAndOpen(.defaultLogin, target: target) }
-                        .buttonStyle(.bordered)
-                        .disabled(choiceActionsDisabled(for: target))
-                }
             }
-            Text(t("cli.choiceBoundary")).font(.system(size: 10.5)).foregroundColor(.sub)
+            Text(t(defaultAvailable ? "cli.defaultLoginBoundary" : "cli.choiceBoundary"))
+                .font(.system(size: 10.5)).foregroundColor(.sub)
                 .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
         }
         .padding(20).frame(width: 390, alignment: .leading)
@@ -1708,7 +1709,6 @@ struct Panel: View {
                 ) {
                     Task { await store.refreshAllStatuses() }
                 }
-                ApplicationUpdateButton(store: store)
                 AppSettingsMenu(store: store)
                 Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
                 Button { NSApp.terminate(nil) } label: {

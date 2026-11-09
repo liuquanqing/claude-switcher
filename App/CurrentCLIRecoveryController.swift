@@ -168,10 +168,12 @@ import SwitcherCore
                     }
                     // Explicit consent is separate from the app's permission to
                     // read a keychain item: a native subprocess may ask macOS UI.
+                    let proxy = try await self.checkedCLIProxy()
                     self.currentCLIRecoveryDidRunNative = true
                     if manual { self.lastRefreshDiagnostics?.nativeHelperRuns += 1 }
                     self.currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
-                    return try await OfficialCLICurrentRenewal.run(home: FileManager.default.homeDirectoryForCurrentUser)
+                    return try await OfficialCLICurrentRenewal.run(home: FileManager.default.homeDirectoryForCurrentUser,
+                        inherited: proxy.environment(ProcessInfo.processInfo.environment))
                 }, verify: suppliedVerify ?? { CLIIdentity.profile(try await getJSON("profile", $0)) })
             // Native success can leave the same token in place. It is positive
             // evidence worth verifying, unlike a passive metadata tick; finish

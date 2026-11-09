@@ -21,18 +21,49 @@ enum CLITerminalLaunch {
         }
         return path
     }
-    static func command(binding: CLIBinding, executable: URL, home: URL) throws -> String {
+    static func command(binding: CLIBinding, executable: URL, home: URL, proxy: UsageQueryProxy) throws -> String {
         try binding.validate(home: home)
         func quote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let unset = (authOverrides + ["CLAUDE_CONFIG_DIR"]).map { "-u " + $0 }.joined(separator: " ")
         let directory = binding.choice == .isolated ? "CLAUDE_CONFIG_DIR=" + quote(binding.directory.path) + " " : ""
-        return "/usr/bin/env " + unset + " " + directory + quote(executable.path)
+        let routing = proxy.environment([:], bypass: "localhost,127.0.0.1,::1").sorted { $0.key < $1.key }
+            .map { $0.key + "=" + quote($0.value) + " " }.joined()
+        return "/usr/bin/env " + unset + " " + directory + routing + quote(executable.path)
     }
-    static func script(binding: CLIBinding, executable: URL, home: URL) throws -> String {
+    static func script(binding: CLIBinding, executable: URL, home: URL, proxy: UsageQueryProxy) throws -> String {
         let homeQuoted = "'" + home.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        return "#!/bin/zsh\ncd " + homeQuoted + " || exit 1\nexec " + (try command(binding: binding, executable: executable, home: home)) + "\n"
+        return "#!/bin/zsh\ncd " + homeQuoted + " || exit 1\nexec " + (try command(binding: binding, executable: executable, home: home, proxy: proxy)) + "\n"
     }
-    @MainActor static func open(binding: CLIBinding, home: URL) async throws {
+    static func readSystemProxy() throws -> UsageQueryProxy {
+        let (status, proxyText) = try LocalCommand.run("/usr/sbin/scutil", ["--proxy"])
+        guard status == 0, let proxy = try? UsageQueryProxy.system(proxyText) else {
+            throw SafetyError("未发现可用的本机 HTTP 代理，未打开终端。")
+        }
+        return proxy
+    }
+    static func systemProxy() async throws -> UsageQueryProxy {
+        try await Task.detached { try readSystemProxy() }.value
+    }
+    static func verifyRoute(proxy: UsageQueryProxy, country: String,
+                            run: @escaping @Sendable ([String]) async throws -> BoundedCLICommand.Output) async throws {
+        let endpoints = NetworkProbe.traceEndpoints + ["https://platform.claude.com/cdn-cgi/trace",
+                                                        "https://console.anthropic.com/cdn-cgi/trace"]
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for endpoint in endpoints {
+                group.addTask {
+                    let result = try await run(["-q", "--silent", "--fail", "--max-time", "8", "--proto", "=https",
+                        "--proxy", proxy.url, "--noproxy", "", "--write-out", "\n%{http_code}", endpoint])
+                    let lines = result.text.split(separator: "\n")
+                    guard !result.timedOut, result.status == 0, let code = lines.last.flatMap({ Int($0) }),
+                          NetworkObservation.countryFromTrace(lines.dropLast().joined(separator: "\n"), httpStatus: code) == country else {
+                        throw SafetyError("终端代理出口未通过检查，未打开终端。")
+                    }
+                }
+            }
+            try await group.waitForAll()
+        }
+    }
+    @MainActor static func open(binding: CLIBinding, home: URL, proxy: UsageQueryProxy) async throws {
         try binding.validate(home: home)
         let executable = try executable(home: home)
         guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
@@ -46,7 +77,7 @@ enum CLITerminalLaunch {
             .appendingPathComponent("dev.claudeswitcher.candidate/CLI Launchers")
         try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let command = cache.appendingPathComponent(UUID().uuidString + ".command")
-        try script(binding: binding, executable: executable, home: home).write(to: command, atomically: true, encoding: .utf8)
+        try script(binding: binding, executable: executable, home: home, proxy: proxy).write(to: command, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: command.path)
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
@@ -60,6 +91,20 @@ enum CLITerminalLaunch {
 }
 
 @MainActor extension Store {
+    func checkedCLIProxy() async throws -> UsageQueryProxy {
+        let gate = await protection.preflight(target: .cli)
+        guard gate.allowed else { throw SafetyError(gate.message) }
+        guard let country = gate.expectedCountry else { throw SafetyError("目标国家未设置。") }
+        let proxy = try await CLITerminalLaunch.systemProxy()
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        try await CLITerminalLaunch.verifyRoute(proxy: proxy, country: country) { arguments in
+            try await BoundedCLICommand.run(home: home, executable: URL(fileURLWithPath: "/usr/bin/curl"),
+                arguments: arguments, inherited: proxy.environment([:]), timeoutSeconds: 9,
+                graceSeconds: 1, combineStderr: false)
+        }
+        return proxy
+    }
+
     func makeCLIConnection() -> CLIConnectionController {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let repository = CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"), home: home)
@@ -94,7 +139,8 @@ enum CLITerminalLaunch {
             if binding.choice == .isolated {
                 try FileManager.default.createDirectory(at: binding.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             }
-            let report = try await CLIStatusReader.read(home: home, configurationDirectory: binding.directory, timeoutSeconds: 25)
+            let proxy = try await CLITerminalLaunch.systemProxy()
+            let report = try await CLIStatusReader.read(home: home, configurationDirectory: binding.directory, proxy: proxy, timeoutSeconds: 25)
             let document = binding.choice == .defaultLogin ? home.appendingPathComponent(".claude.json") : binding.directory.appendingPathComponent(".claude.json")
             let metadata = (try? Data(contentsOf: document)).flatMap { try? CLIIdentity.metadata(CLIJSON.field($0, key: "oauthAccount")) }
             return CLIBindingPolicy.assess(report, binding: binding, metadata: metadata)
@@ -102,9 +148,15 @@ enum CLITerminalLaunch {
             guard let self else { return }
             guard !self.updating else { throw SafetyError("应用正在更新，请稍后打开 CLI。") }
             if self.isDemo { return }
-            let gate = await self.protection.preflight(target: .cli)
-            guard gate.allowed else { throw SafetyError(gate.message) }
-            try await CLITerminalLaunch.open(binding: binding, home: home)
+            let config = try self.protection.files.loadConfig()
+            let proxy = try await self.checkedCLIProxy()
+            guard !self.updating, try self.protection.files.loadConfig() == config,
+                  try confirmedCurrentProfile() == self.current,
+                  self.protection.desktopScope == .subscription,
+                  self.active?.snapshot?.identity.samePrincipal(as: binding.identity) == true else {
+                throw SafetyError("账号或保护配置已变化，未打开终端。")
+            }
+            try await CLITerminalLaunch.open(binding: binding, home: home, proxy: proxy)
         }, existingDirectory: { [weak self] binding in
             guard self?.isDemo != true else { return false }
             return FileManager.default.fileExists(atPath: binding.directory.path)
@@ -125,8 +177,10 @@ enum CLITerminalLaunch {
             }
             do {
                 if let binding {
+                    let record = try metadata(document(for: binding.directory, choice: binding.choice))
+                    if binding.choice == .defaultLogin, record == nil { return .notPrepared }
                     return CLILocalRecordPolicy.assess(binding: binding,
-                        bindingMetadata: try metadata(document(for: binding.directory, choice: binding.choice)),
+                        bindingMetadata: record,
                         defaultMetadata: nil, isolatedMetadata: nil, expected: identity)
                 }
                 var isolated: CLIIdentity?

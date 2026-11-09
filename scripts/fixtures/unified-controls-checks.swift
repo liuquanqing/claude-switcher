@@ -42,7 +42,8 @@ import SwitcherCore
     defaultStatus = .different; controller.defaultLoginDidChange()
     require(controller.phase == .unconfirmed, "external default login change invalidates a prior match")
     await controller.open()
-    require(controller.phase == .mismatched && launched.count == 2, "a different default account is not overwritten or opened as a match")
+    require(controller.phase == .mismatched && launched.count == 2 && !controller.defaultLoginAvailable,
+            "a different signed-in account is not offered as a default login option")
     await controller.choose(.isolated)
     require(controller.phase == .waitingForLogin && launched.last?.choice == .isolated,
             "opening an isolated directory does not mean official login has completed")
@@ -90,7 +91,7 @@ import SwitcherCore
             "an explicit sign-in action reopens the matching default directory without creating a new profile")
 
     var backupChecks: [String] = [], restored: [CLIConnectionContext] = [], openedForRecovery: [CLIBinding] = []
-    var backupExists = true, backupReadable = true
+    var backupExists = true, backupReadable = true, backupMatches = true
     var reportedDefault: CLIBindingStatus = .notLoggedIn
     var reportedIsolated: CLIBindingStatus = .notLoggedIn
     var recoveryBinding: CLIBinding?
@@ -102,14 +103,23 @@ import SwitcherCore
             backupChecks.append(profile)
             if !backupReadable { throw SafetyError("fictional access failure") }
             return backupExists
-        }, restoreLegacyBackup: { restored.append($0) }))
+        }, restoreLegacyBackup: {
+            guard backupMatches else { throw SafetyError("fixture backup mismatch") }
+            restored.append($0)
+        }))
     let personal = context!
     await recovery.open()
-    require(recovery.phase == .choosing && recovery.legacyBackupAvailable &&
+    require(recovery.phase == .choosing && recovery.legacyBackupAvailable && recovery.defaultLoginAvailable &&
             openedForRecovery.isEmpty && restored.isEmpty && recoveryBinding == nil,
-            "signed-out default with an old backup offers explicit restore without launching or changing a binding")
+            "signed-out default remains a sign-in option even when an old backup exists")
     await recovery.restoreLegacyBackup(for: .init(profile: personal.profile, identity: other))
     require(restored.isEmpty && recovery.legacyBackupAvailable, "confirmation for a different identity cannot restore")
+    backupMatches = false
+    await recovery.restoreLegacyBackup(for: personal)
+    require(recovery.phase == .choosing && recovery.detail == "fixture backup mismatch" && recovery.defaultLoginAvailable &&
+            restored.isEmpty && openedForRecovery.isEmpty && recoveryBinding == nil,
+            "a rejected backup returns to setup and leaves default sign-in available without changing any login")
+    backupMatches = true
     await recovery.restoreLegacyBackup(for: personal)
     require(restored == [personal] && !recovery.legacyBackupAvailable && openedForRecovery.isEmpty,
             "only a matching explicit confirmation restores; it does not launch a terminal")
@@ -118,10 +128,11 @@ import SwitcherCore
     await recovery.open()
     require(recovery.phase == .matched && recovery.choice == .isolated && backupChecks.count == 1,
             "an existing verified isolated login wins over a signed-out default and old backup")
-    reportedIsolated = .notLoggedIn; reportedDefault = .matched
+    reportedDefault = .matched
     await recovery.open()
     require(recovery.phase == .matched && recovery.choice == .defaultLogin && backupChecks.count == 1,
-            "an unusable remembered directory does not hide a matching default login")
+            "a verified default login takes priority even when the remembered isolated login also works")
+    reportedIsolated = .notLoggedIn
     reportedDefault = .notLoggedIn
     backupReadable = false
     await recovery.open()
@@ -154,10 +165,36 @@ import SwitcherCore
                 && uncertainLaunches.last?.choice == .isolated,
             "separate official login remains available when the default cannot be reused")
 
+    var freshLaunch: CLIBinding?
+    var defaultRecord: CLILocalRecord = .notPrepared
+    let signedOut = CLIConnectionController(operations: .init(context: { context }, load: { _ in nil },
+        save: { _ in }, make: operations.make, status: { _ in .notLoggedIn }, launch: { freshLaunch = $0 },
+        localRecord: { _, _ in defaultRecord }))
+    await signedOut.open()
+    require(signedOut.phase == .waitingForLogin && freshLaunch?.choice == .defaultLogin,
+            "an empty default directory is preferred for a new sign-in")
+    freshLaunch = nil; defaultRecord = .differentAccount
+    await signedOut.open()
+    require(signedOut.phase == .choosing && freshLaunch == nil,
+            "a signed-out default with another account's local record is not automatically reused")
+
     let env = CLITerminalLaunch.environment(home: fakeHome, directory: fakeHome.appendingPathComponent(".claude"), inherited: ["CLAUDE_CONFIG_DIR": "/other", "ANTHROPIC_API_KEY": "fictional", "CLAUDE_ENV_FILE": "/fixture/previous-session-env", "HTTPS_PROXY": "http://fixture.invalid:1234"])
     require(env["CLAUDE_CONFIG_DIR"] == nil && env["ANTHROPIC_API_KEY"] == nil && env["CLAUDE_ENV_FILE"] == nil && env["HTTPS_PROXY"] != nil,
             "the explicit subscription launcher selects the probed directory and retains proxy routing")
-    let command = try CLITerminalLaunch.script(binding: first, executable: URL(fileURLWithPath: "/fixture/bin/claude"), home: fakeHome)
+    let proxy = try UsageQueryProxy(host: "127.0.0.1", port: 9876)
+    try await CLITerminalLaunch.verifyRoute(proxy: proxy, country: "SG") { arguments in
+        precondition(arguments.contains(proxy.url) && arguments.contains("--noproxy"))
+        return .init(status: 0, text: "loc=SG\n200", timedOut: false)
+    }
+    for response in ["loc=US\n200", "loc=SG\n302"] {
+        do {
+            try await CLITerminalLaunch.verifyRoute(proxy: proxy, country: "SG") { _ in
+                .init(status: 0, text: response, timedOut: false)
+            }
+            preconditionFailure("a mismatched or redirected trace cannot authorize CLI launch")
+        } catch is SafetyError { checks += 1 }
+    }
+    let command = try CLITerminalLaunch.script(binding: first, executable: URL(fileURLWithPath: "/fixture/bin/claude"), home: fakeHome, proxy: proxy)
     require(!command.contains("/login") && !command.contains("/logout") && command.contains("exec /usr/bin/env") && command.contains("-u CLAUDE_ENV_FILE"),
             "launching never forces a login overwrite or logout")
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-launch-fixture-" + UUID().uuidString)
@@ -178,15 +215,23 @@ import SwitcherCore
     require(loadCache("Fixture", directory: sharedCache, legacy: sharedCache)?.identity.isComplete == false,
             "preview writes do not modify the original version's cache")
     let fakeCLI = quotedHome.appendingPathComponent("fictional-cli")
-    try "#!/bin/sh\n[ -z \"$ANTHROPIC_API_KEY$CLAUDE_ENV_FILE$CLAUDE_CONFIG_DIR\" ] || exit 7\n[ \"$HTTPS_PROXY\" = 'http://fixture.invalid:1234' ] || exit 8\nprintf fixture-ok\n".write(to: fakeCLI, atomically: true, encoding: .utf8)
+    try "#!/bin/sh\n[ -z \"$ANTHROPIC_API_KEY$CLAUDE_ENV_FILE\" ] || exit 7\n[ \"$CLAUDE_CONFIG_DIR\" = \"$EXPECTED_CLI_DIR\" ] || exit 8\n[ \"$HTTPS_PROXY:$https_proxy:$NO_PROXY:$no_proxy\" = 'http://127.0.0.1:9876:http://127.0.0.1:9876:localhost,127.0.0.1,::1:localhost,127.0.0.1,::1' ] || exit 9\nprintf fixture-ok\n".write(to: fakeCLI, atomically: true, encoding: .utf8)
     try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeCLI.path)
     let quotedBinding = CLIBinding(identity: identity, choice: .defaultLogin, directory: quotedHome.appendingPathComponent(".claude"))
     let launcher = root.appendingPathComponent("launch.command")
-    try CLITerminalLaunch.script(binding: quotedBinding, executable: fakeCLI, home: quotedHome).write(to: launcher, atomically: true, encoding: .utf8)
-    let launchedFixture = try await BoundedCLICommand.run(home: quotedHome, executable: URL(fileURLWithPath: "/bin/zsh"),
-        arguments: [launcher.path], inherited: ["HOME": quotedHome.path, "ANTHROPIC_API_KEY": "fictional", "CLAUDE_ENV_FILE": "/fictional", "CLAUDE_CONFIG_DIR": "/fictional", "HTTPS_PROXY": "http://fixture.invalid:1234"], timeoutSeconds: 5, graceSeconds: 1)
-    require(launchedFixture.status == 0 && launchedFixture.text == "fixture-ok",
-            "generated launcher handles quoted paths and clears inherited authentication while retaining proxy routing")
+    let separate = CLIBinding(identity: identity, choice: .isolated,
+        directory: try CLIBinding.directory(for: .isolated, identity: identity, home: quotedHome))
+    for launchBinding in [quotedBinding, separate] {
+        try CLITerminalLaunch.script(binding: launchBinding, executable: fakeCLI, home: quotedHome, proxy: proxy)
+            .write(to: launcher, atomically: true, encoding: .utf8)
+        let launchedFixture = try await BoundedCLICommand.run(home: quotedHome, executable: URL(fileURLWithPath: "/bin/zsh"),
+            arguments: [launcher.path], inherited: ["HOME": quotedHome.path, "ANTHROPIC_API_KEY": "fictional",
+                "CLAUDE_ENV_FILE": "/fictional", "CLAUDE_CONFIG_DIR": "/fictional", "HTTPS_PROXY": "http://fixture.invalid:1234",
+                "NO_PROXY": "*", "EXPECTED_CLI_DIR": launchBinding.choice == .isolated ? launchBinding.directory.path : ""],
+            timeoutSeconds: 5, graceSeconds: 1)
+        require(launchedFixture.status == 0 && launchedFixture.text == "fixture-ok",
+                "both launch modes use the checked proxy, keep loopback callbacks local, and ignore stale auth overrides")
+    }
     let cacheTime = Date().addingTimeInterval(-60)
     func usageDocument(for owner: CLIIdentity, used: Double) throws -> Data {
         try CLIJSON.encode(["oauthAccount": ["accountUuid": owner.accountID!, "organizationUuid": owner.organizationID!],

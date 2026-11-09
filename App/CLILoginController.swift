@@ -143,11 +143,10 @@ import SwitcherCore
     }
 
     private func prepareTargetCLIRecovery(target: CLIProfileIdentity, io: NativeCLIStorage) async throws {
-        let native = OfficialCLIRecovery.native(home: FileManager.default.homeDirectoryForCurrentUser)
         do {
             _ = try await CLIBackupRecovery.prepare(target: target, io: io, renew: { login, identity in
-                let decision = await self.protection.preflight(target: .cli)
-                guard decision.allowed else { throw SafetyError(decision.message) }
+                let proxy = try await self.checkedCLIProxy()
+                let native = OfficialCLIRecovery.native(home: FileManager.default.homeDirectoryForCurrentUser, proxy: proxy)
                 self.busy = "正在恢复 CLI 登录…"
                 return try await native.recover(login, expected: identity)
             }, remote: { token in try await self.checkedCLIIdentity(token) })

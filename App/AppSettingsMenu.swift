@@ -5,6 +5,7 @@ import AppKit
 struct AppSettingsMenu: View {
     @ObservedObject var store: Store
     @ObservedObject private var updater = ApplicationUpdater.shared
+    @ObservedObject private var updatePresentation = ApplicationUpdatePresentation.shared
     @Environment(\.appLanguage) private var language
     @State private var hover = false
 
@@ -24,6 +25,17 @@ struct AppSettingsMenu: View {
     }
 
     private var installationInProgress: Bool { store.updating || updater.phase == .installing }
+    private var hasPendingUpdate: Bool {
+        [.available, .downloading, .ready].contains(updater.phase) && updater.release != nil
+    }
+
+    private var checkTitle: String {
+        if updatePresentation.isChecking { return t("settings.checkingForUpdates") }
+        if hasPendingUpdate, let release = updater.release {
+            return appText("settings.updateAvailable", language: language, arguments: ["version": release.version])
+        }
+        return t("settings.checkForUpdates")
+    }
 
     private var prereleaseBinding: Binding<Bool> {
         Binding(
@@ -44,18 +56,30 @@ struct AppSettingsMenu: View {
 
     var body: some View {
         Menu {
-            Toggle(t("settings.includePrereleases"), isOn: prereleaseBinding)
+            Button {
+                store.checkApplicationUpdates()
+            } label: {
+                Label(checkTitle, systemImage: "arrow.down.app")
+            }
+            .disabled(updatePresentation.isChecking)
+            Toggle(isOn: prereleaseBinding) {
+                Label(t("settings.includePrereleases"), systemImage: "testtube.2")
+            }
                 .toggleStyle(.checkbox)
                 .disabled(installationInProgress)
                 .help(t(installationInProgress ? "settings.updateChannelLockedHelp" : "settings.includePrereleasesHelp"))
             Divider()
-            Toggle(t("settings.openAtLogin"), isOn: openAtLoginBinding)
+            Toggle(isOn: openAtLoginBinding) {
+                Label(t("settings.openAtLogin"), systemImage: "power")
+            }
                 .toggleStyle(.checkbox)
                 .help(t("settings.openAtLoginHelp"))
-            Picker(t("settings.language"), selection: languageBinding) {
+            Picker(selection: languageBinding) {
                 ForEach(AppLocalization.supportedLanguages) { option in
                     Text(option.selfName).tag(option.code)
                 }
+            } label: {
+                Label(t("settings.language"), systemImage: "globe")
             }
         } label: {
             FooterIcon(icon: "gearshape", hover: hover, preservesMenuColor: true)
@@ -63,63 +87,20 @@ struct AppSettingsMenu: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: 28, height: 28)
-        .help(t("settings.help"))
+        .overlay(alignment: .topTrailing) {
+            if hasPendingUpdate {
+                Circle()
+                    .fill(Color.claude)
+                    .overlay(Circle().stroke(Color.card, lineWidth: 1.5))
+                    .frame(width: 7, height: 7)
+                    .offset(x: -4, y: 4)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .help(t(hasPendingUpdate ? "settings.helpUpdateAvailable" : "settings.help"))
         .accessibilityLabel(t("settings.title"))
-        .onHover { hover = $0 }
-    }
-}
-
-@MainActor
-struct ApplicationUpdateButton: View {
-    @ObservedObject var store: Store
-    @ObservedObject private var updater = ApplicationUpdater.shared
-    @ObservedObject private var updatePresentation = ApplicationUpdatePresentation.shared
-    @Environment(\.appLanguage) private var language
-    @State private var hover = false
-
-    private func t(_ key: String) -> String {
-        appText(key, language: language)
-    }
-
-    private var hasPendingUpdate: Bool {
-        [.available, .downloading, .ready].contains(updater.phase) && updater.release != nil
-    }
-
-    private var help: String {
-        if updatePresentation.isChecking { return t("settings.checkingForUpdates") }
-        if hasPendingUpdate, let release = updater.release {
-            return appText("settings.updateAvailableHelp", language: language, arguments: ["version": release.version])
-        }
-        return t(updater.phase == .current ? "settings.checkAgainHelp" : "settings.checkForUpdates")
-    }
-
-    var body: some View {
-        Button {
-            store.checkApplicationUpdates()
-        } label: {
-            FooterIcon(icon: "arrow.down.circle", hover: hover)
-                .opacity(updatePresentation.isChecking ? 0 : 1)
-                .overlay {
-                    if updatePresentation.isChecking {
-                        ProgressView().controlSize(.mini)
-                    }
-                }
-                .overlay(alignment: .topTrailing) {
-                    if hasPendingUpdate {
-                        Circle()
-                            .fill(Color.claude)
-                            .overlay(Circle().stroke(Color.card, lineWidth: 1.5))
-                            .frame(width: 7, height: 7)
-                            .offset(x: -4, y: 4)
-                            .allowsHitTesting(false)
-                    }
-                }
-        }
-        .buttonStyle(.plain)
-        .disabled(updatePresentation.isChecking)
-        .help(help)
-        .accessibilityLabel(t(updatePresentation.isChecking ? "settings.checkingForUpdates" : "settings.checkForUpdates"))
-        .accessibilityHint(help)
+        .accessibilityHint(hasPendingUpdate ? t("settings.helpUpdateAvailable") : "")
         .onHover { hover = $0 }
     }
 }
