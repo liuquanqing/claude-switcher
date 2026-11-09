@@ -552,7 +552,10 @@ struct TerminalProtectionCard: View {
         Button(action: runProtectionAction) {
             HStack(spacing: 5) {
                 if controller.working { ProgressView().controlSize(.mini) }
-                Text(primaryProtectionTitle).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                Text(primaryProtectionTitle)
+                    .font(.system(size: protectionActionIsSecondary ? 10 : 10.5,
+                                   weight: protectionActionIsSecondary ? .medium : .semibold))
+                    .lineLimit(1)
             }
             .padding(.horizontal, protectionActionIsSecondary ? 8 : 12)
             .frame(maxWidth: protectionActionIsSecondary ? nil : .infinity)
@@ -811,7 +814,8 @@ struct TerminalProtectionCard: View {
             .help(t("protection.checkHelpSummary"))
             .accessibilityLabel(t("protection.checkHelpButton"))
             .popover(isPresented: $showCheckHelp, arrowEdge: .bottom) { checkHelpContent }
-            Spacer(minLength: 0)
+            Spacer(minLength: 8)
+            protectionAction()
         }
     }
 
@@ -858,16 +862,8 @@ struct TerminalProtectionCard: View {
             if hasNotices {
                 VStack(alignment: .leading, spacing: 8) { notices }
             }
-            HStack(spacing: 8) {
-                Text(t("protection.settingsSection"))
-                    .font(.system(size: 11, weight: .semibold)).foregroundColor(.txt)
-                    .lineLimit(1).fixedSize()
-                    .help(scopeHelp)
-                    .accessibilityHint(scopeHelp)
-                Spacer(minLength: 8)
-                if !controller.enabled || needsRetry { protectionAction() }
-            }
             diagnosticRow
+                .help(scopeHelp)
             diagnosticDetails
             Divider().opacity(0.45)
             HStack(alignment: .center, spacing: 10) {
@@ -928,15 +924,11 @@ struct TerminalProtectionCard: View {
                         .opacity(operationLocked || controller.working ? 0.55 : 1)
                         .help(t("protection.saveHelp"))
                     } else {
-                        Button(action: runProtectionAction) {
-                            Text(primaryProtectionTitle)
-                                .font(.system(size: 10)).foregroundColor(.sub)
-                                .frame(height: 28).contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(operationLocked || controller.working)
-                        .help(t("protection.primaryHelp"))
-                        .accessibilityLabel(primaryProtectionTitle)
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold)).foregroundColor(.sub)
+                            .frame(width: 24, height: 28)
+                            .help(t("protection.savedHelp"))
+                            .accessibilityHint(t("protection.savedHelp"))
                     }
                 }
             }
