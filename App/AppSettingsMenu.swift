@@ -84,6 +84,7 @@ struct AppSettingsMenu: View {
         } label: {
             FooterIcon(icon: "gearshape", hover: hover, preservesMenuColor: true)
         }
+        .labelStyle(.titleAndIcon)
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: 28, height: 28)
