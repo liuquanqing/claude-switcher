@@ -288,6 +288,14 @@ actor FixtureGuardWorker: GuardWorking {
   require(demo.operationError != nil && demo.lastDecision == original && demo.guardOnline, "invalid input cannot replace runtime health")
   demo.clearOperationError(); demo.disable(); demo.country = "SG"; await demo.checkNow()
   require(!demo.enabled && !demo.guardOnline && demo.lastCheckReport?.passed == true, "readonly result cannot enable protection")
+  await demo.enable()
+  await demo.protectCurrentDesktop()
+  let protectedDecision = demo.lastDecision
+  let protectedGuardTime = demo.guardCheckedAt
+  await demo.checkNow()
+  require(demo.enabled && demo.guardOnline && demo.desktopManaged && demo.lastDecision == protectedDecision
+          && demo.guardCheckedAt == protectedGuardTime,
+          "diagnosing while protected preserves the switch, desktop binding and guard decision")
   let recordedGuardTime = demo.guardCheckedAt
   demo.country = "JP"; await demo.checkNow()
   require(demo.activeCountry == "SG" && demo.lastCheckReport?.passed == false, "draft target is not saved target")

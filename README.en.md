@@ -14,9 +14,9 @@ Accounts, usage, sessions and network checks meet in one place.
 [![License](https://img.shields.io/github/license/liuquanqing/claude-switcher)](LICENSE)
 [![macOS checks](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml/badge.svg)](https://github.com/liuquanqing/claude-switcher/actions/workflows/ci.yml)
 
-[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/ClaudeSwitcher-1.3.6-rc.11-arm64-developer-id-preview.dmg)
+[![Download macOS DMG](https://img.shields.io/badge/macOS-Download_DMG-C66B4E?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.12/ClaudeSwitcher-1.3.6-rc.12-arm64-developer-id-preview.dmg)
 
-**1.3.6 RC11 · Preview** · Apple Silicon · macOS 13+
+**1.3.6 RC12 · Preview** · Apple Silicon · macOS 13+
 
 [Download](#download) · [Features](#features) · [Quick start](#quick-start) · [Scope](#scope) · [中文](README.md)
 
@@ -80,13 +80,13 @@ All account details in these screenshots are fictional. See [bilingual protectio
 
 ## Download
 
-Version 1.3.6 RC11 refreshes subscription usage from Desktop without requiring CLI sign-in, improves CLI reuse and backup recovery, and simplifies terminal status, session import and protection settings. See [release notes](docs/releases/1.3.6-rc.11.md).
+Version 1.3.6 RC12 refreshes subscription usage from Desktop without requiring CLI sign-in, improves CLI reuse and backup recovery, and simplifies terminal status, session import and protection settings. See [release notes](docs/releases/1.3.6-rc.12.md).
 
-**[Download Claude Switcher 1.3.6 RC11 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/ClaudeSwitcher-1.3.6-rc.11-arm64-developer-id-preview.dmg)**
+**[Download Claude Switcher 1.3.6 RC12 · macOS DMG](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.12/ClaudeSwitcher-1.3.6-rc.12-arm64-developer-id-preview.dmg)**
 
 For **Apple Silicon (M1 or newer) · macOS 13+**. Open the DMG and drag `Claude Switcher.app` to Applications.
 
-[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.11) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.11/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
+[Release notes](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.6-rc.12) · [SHA256 checksums](https://github.com/liuquanqing/claude-switcher/releases/download/v1.3.6-rc.12/SHA256SUMS) · [All releases](https://github.com/liuquanqing/claude-switcher/releases)
 
 This prerelease is Developer ID signed and notarized by Apple. Normal first-open and Keychain prompts may still apply. [Stable 1.3.5](https://github.com/liuquanqing/claude-switcher/releases/tag/v1.3.5) remains available; see each release for signing status and [the installation guide](docs/INSTALL.md).
 
