@@ -95,6 +95,8 @@ struct TerminalProtectionCard: View {
                 // Auto mode has no separate proxy probe; it is the TUN result, so don't count it twice.
                 proxy = NetworkItem(title: t("protection.proxy"), value: t("protection.autoProxy"), status: .notRun,
                                     help: t("protection.autoProxyHelp"))
+            } else if observation.proxyStatusUnconfirmed == true {
+                proxy = NetworkItem(title: t("protection.proxy"), value: t("protection.unconfirmed"), status: .unknown)
             } else {
                 proxy = NetworkItem(title: t("protection.proxy"),
                                     value: t(observation.proxyConnected ? "protection.connected" : "protection.disconnected"),
@@ -104,8 +106,11 @@ struct TerminalProtectionCard: View {
             proxy = NetworkItem(title: t("protection.proxy"), value: t("protection.notRun"), status: .notRun)
         }
         let tun = observation.map {
-            NetworkItem(title: "TUN", value: t($0.tunOnline ? "protection.online" : "protection.notDetected"),
-                        status: $0.tunOnline ? .passed : .failed, help: t("protection.tunHelp"))
+            let unconfirmed = $0.tunStatusUnconfirmed == true
+            return NetworkItem(title: "TUN",
+                               value: t(unconfirmed ? "protection.unconfirmed" : $0.tunOnline ? "protection.online" : "protection.notDetected"),
+                               status: unconfirmed ? .unknown : $0.tunOnline ? .passed : .failed,
+                               help: t("protection.tunHelp"))
         } ?? NetworkItem(title: "TUN", value: t("protection.notRun"), status: .notRun)
         return [proxy, tun, countryItem]
     }
@@ -118,7 +123,8 @@ struct TerminalProtectionCard: View {
             return NetworkItem(title: t("protection.exitCountry"), value: t("protection.routesDisagree"), status: .failed,
                                help: t("protection.routesHelp"))
         }
-        guard let country = observation.country, !country.isEmpty else {
+        let measuredMismatch = report.decision.reason == .countryMismatch ? report.decision.observedCountry : nil
+        guard let country = observation.country ?? measuredMismatch, !country.isEmpty else {
             // A missing country can't tell whether the request was skipped or ran and was then discarded,
             // so it is "unconfirmed", never "not run".
             let help = observation.proxyConnected && observation.tunOnline
@@ -137,6 +143,7 @@ struct TerminalProtectionCard: View {
         switch decision.reason {
         case .proxyDisconnected: return t("protection.failedProxy")
         case .tunMissing: return t("protection.failedTUN")
+        case .linkUnknown: return t("protection.failedLinkUnknown")
         case .routesDisagree: return t("protection.failedRoutes")
         case .countryUnknown: return t("protection.failedCountry")
         case .countryMismatch:

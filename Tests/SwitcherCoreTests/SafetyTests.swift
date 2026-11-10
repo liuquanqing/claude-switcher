@@ -24,7 +24,7 @@ final class SafetyTests: XCTestCase {
     }
     func testTraceCannotUseErrorPagesDuplicatesOrInvalidValues() {
         XCTAssertEqual(NetworkObservation.countryFromTrace("ip=203.0.113.1\nloc=SG\n", httpStatus: 200), "SG")
-        for (text, code) in [("loc=SG", 403), ("loc=SG\nloc=JP", 200), ("loc=", 200), ("loc=sg", 200), ("<html>error</html>", 200)] {
+        for (text, code) in [("loc=SG", 403), ("loc=SG\nloc=JP", 200), ("loc=", 200), ("loc=sg", 200), ("loc=XX", 200), ("<html>error</html>", 200)] {
             XCTAssertNil(NetworkObservation.countryFromTrace(text, httpStatus: code))
         }
     }
@@ -94,16 +94,35 @@ final class SafetyTests: XCTestCase {
             XCTFail("launch error must propagate")
         } catch { XCTAssertTrue(error.localizedDescription.contains("application missing")) }
     }
-    func testGuardStopsOnMismatchAndUnknownButNeverWhenDisabled() async {
+    func testGuardStopsOnConfirmedFailuresButKeepsDesktopOnUnknown() async {
         var stops = 0
         let action: () async -> String = { stops += 1; return "closed" }
         _ = await GuardEngine.tick(config: config, network: good, stop: action)
         XCTAssertEqual(stops, 0)
-        _ = await GuardEngine.tick(config: config, network: NetworkObservation(proxyConnected: true, tunOnline: true, country: nil), stop: action)
-        _ = await GuardEngine.tick(config: config, network: NetworkObservation(proxyConnected: true, tunOnline: true, country: "JP"), stop: action)
-        XCTAssertEqual(stops, 2)
+        for observation in [
+            NetworkObservation(proxyConnected: true, tunOnline: true, country: nil),
+            NetworkObservation(proxyConnected: true, tunOnline: true, country: nil, partialCountry: "SG"),
+            NetworkObservation(proxyConnected: false, tunOnline: true, country: nil, proxyStatusUnconfirmed: true)
+        ] {
+            let receipt = await GuardEngine.tick(config: config, network: observation, stop: action)
+            XCTAssertFalse(receipt.decision.allowed)
+            XCTAssertEqual(receipt.termination, "not_needed")
+            XCTAssertFalse(LaunchGate.evaluate(config: config, registered: true, receipt: receipt, network: observation).allowed)
+        }
+        XCTAssertEqual(stops, 0)
+        for observation in [
+            NetworkObservation(proxyConnected: true, tunOnline: true, country: "JP"),
+            NetworkObservation(proxyConnected: true, tunOnline: true, country: nil, partialCountry: "JP"),
+            NetworkObservation(proxyConnected: true, tunOnline: true, country: nil, routesDisagree: true),
+            NetworkObservation(proxyConnected: false, tunOnline: true, country: nil),
+            NetworkObservation(proxyConnected: false, tunOnline: false, country: nil, proxyStatusUnconfirmed: true)
+        ] {
+            let receipt = await GuardEngine.tick(config: config, network: observation, stop: action)
+            XCTAssertEqual(receipt.termination, "closed")
+        }
+        XCTAssertEqual(stops, 5)
         _ = await GuardEngine.tick(config: SafetyConfig(), network: good, stop: action)
-        XCTAssertEqual(stops, 2)
+        XCTAssertEqual(stops, 5)
     }
     func testReceiptStoresDecisionAndFailedStopWithoutAddressOrSecrets() async throws {
         let receipt = await GuardEngine.tick(config: config,

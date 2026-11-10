@@ -1,9 +1,12 @@
 import Foundation
 import AppKit
+import OSLog
 import SwitcherCore
 
 @main
 struct ClaudeGuard {
+    private static let lifecycleLog = Logger(subsystem: "dev.claudeswitcher", category: "desktop-lifecycle")
+
     static func main() async {
         guard CommandLine.arguments.count == 3,
               ["--config", "--check"].contains(CommandLine.arguments[1]) else { exit(2) }
@@ -22,11 +25,13 @@ struct ClaudeGuard {
             // Invalid configuration cannot silently disable an installed guard.
             let fallback = SafetyConfig(enabled: true)
             let action = await stopClaude(session: session, support: support)
+            recordStopResult(action, reason: .invalidConfig)
             try? files.save(GuardReceipt(config: fallback, decision: SafetyDecision(.invalidConfig), termination: action,
                                         desktopScope: scope, desktopManaged: isManaged(session, support: support)), to: files.receiptURL)
             exit(1)
         }
-        let network = config.enabled ? await NetworkProbe().observe(mode: config.proxyMode)
+        let retryCountry = config.enabled && !readOnly && isManaged(session, support: support) ? config.expectedCountry : nil
+        let network = config.enabled ? await NetworkProbe().observe(mode: config.proxyMode, retrySingleTimeoutFor: retryCountry)
             : NetworkObservation(proxyConnected: false, tunOnline: false, country: nil)
         if readOnly {
             let decision = SafetyPolicy.evaluate(config, network)
@@ -48,6 +53,7 @@ struct ClaudeGuard {
         var receipt = await GuardEngine.tick(config: config, network: network,
             stop: { await stopClaude(session: authorized, support: support) }, desktopScope: currentScope,
             desktopManaged: isManaged(authorized, support: support))
+        recordStopResult(receipt.termination, reason: receipt.decision.reason)
         receipt.supportsUnchangedModeMarker = true
         do { try files.save(receipt, to: files.receiptURL) }
         catch { exit(1) }
@@ -75,14 +81,24 @@ struct ClaudeGuard {
         return application
     }
     @MainActor static func isManaged(_ session: ManagedDesktopSession?, support: URL) -> Bool { application(session, support: support) != nil }
+
+    private static func recordStopResult(_ action: String, reason: SafetyReason) {
+        guard action == "closed" || action == "failed" else { return }
+        lifecycleLog.notice("Network guard close result: \(action, privacy: .public); reason: \(reason.rawValue, privacy: .public)")
+    }
+
     @MainActor static func stopClaude(session: ManagedDesktopSession?, support: URL) async -> String {
         guard let owned = application(session, support: support) else { return "not_managed" }
+        lifecycleLog.notice("Network guard requested managed Claude Desktop to quit")
         owned.terminate()
         for _ in 0..<8 {
             if application(session, support: support) == nil { return "closed" }
             try? await Task.sleep(nanoseconds: 250_000_000)
         }
-        application(session, support: support)?.forceTerminate()
+        if let remaining = application(session, support: support) {
+            lifecycleLog.notice("Network guard requested forced termination of managed Claude Desktop")
+            remaining.forceTerminate()
+        }
         for _ in 0..<4 {
             if application(session, support: support) == nil { return "closed" }
             try? await Task.sleep(nanoseconds: 250_000_000)

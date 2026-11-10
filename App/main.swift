@@ -4,6 +4,7 @@ import CryptoKit
 import ServiceManagement
 import Security
 import Combine
+import OSLog
 import SwitcherCore
 
 // Claude Switcher — menu bar app that swaps Claude Desktop's data folder between accounts
@@ -540,9 +541,16 @@ final class Store: ObservableObject {
 
 func quitClaude() async -> Bool {
     let running = { NSRunningApplication.runningApplications(withBundleIdentifier: bundleID) }
-    running().forEach { $0.terminate() }
+    let applications = running()
+    guard !applications.isEmpty else { return true }
+    let lifecycleLog = Logger(subsystem: "dev.claudeswitcher", category: "desktop-lifecycle")
+    lifecycleLog.notice("Account switch requested Claude Desktop to quit")
+    applications.forEach { $0.terminate() }
     for _ in 0..<60 where !running().isEmpty { try? await Task.sleep(nanoseconds: 250_000_000) }
-    return running().isEmpty
+    let closed = running().isEmpty
+    let result = closed ? "closed" : "still_running"
+    lifecycleLog.notice("Account switch close result: \(result, privacy: .public)")
+    return closed
 }
 
 @discardableResult

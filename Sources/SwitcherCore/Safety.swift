@@ -38,9 +38,16 @@ public struct NetworkObservation: Codable, Equatable {
     public var tunOnline: Bool
     public var country: String?
     public var routesDisagree: Bool
-    public init(proxyConnected: Bool, tunOnline: Bool, country: String?, routesDisagree: Bool = false) {
+    public var partialCountry: String?
+    public var proxyStatusUnconfirmed: Bool?
+    public var tunStatusUnconfirmed: Bool?
+    public init(proxyConnected: Bool, tunOnline: Bool, country: String?, routesDisagree: Bool = false,
+                partialCountry: String? = nil, proxyStatusUnconfirmed: Bool? = nil, tunStatusUnconfirmed: Bool? = nil) {
         self.proxyConnected = proxyConnected; self.tunOnline = tunOnline; self.country = country
         self.routesDisagree = routesDisagree
+        self.partialCountry = partialCountry
+        self.proxyStatusUnconfirmed = proxyStatusUnconfirmed
+        self.tunStatusUnconfirmed = tunStatusUnconfirmed
     }
 
     public static func sharedCountry(_ countries: [String?]) -> String? {
@@ -53,7 +60,7 @@ public struct NetworkObservation: Codable, Equatable {
         guard httpStatus == 200 else { return nil }
         let values = text.split(separator: "\n").filter { $0.hasPrefix("loc=") }.map { String($0.dropFirst(4)) }
         guard values.count == 1, let value = values.first, value.utf8.count == 2,
-              value.utf8.allSatisfy({ (65...90).contains($0) }) else { return nil }
+              (try? SafetyConfig(expectedCountry: value).validated().expectedCountry) == value else { return nil }
         return value
     }
 
@@ -69,7 +76,7 @@ public struct NetworkObservation: Codable, Equatable {
 
 public enum SafetyReason: String, Codable, Sendable {
     case allowed, disabled, invalidConfig, proxyDisconnected, tunMissing, countryUnknown, countryMismatch
-    case guardUnavailable, staleReceipt, terminationFailed
+    case guardUnavailable, staleReceipt, terminationFailed, linkUnknown
     case routesDisagree
     case unsupportedMode
 }
@@ -89,6 +96,7 @@ public struct SafetyDecision: Codable, Equatable, Sendable {
         case .invalidConfig: return "保护配置无效，请重新保存目标国家。"
         case .proxyDisconnected: return "代理未连接，已阻止打开 Claude。"
         case .tunMissing: return "未检测到支持的 TUN，已阻止打开 Claude。"
+        case .linkUnknown: return "无法确认代理或 TUN 状态，已阻止打开 Claude。"
         case .countryUnknown: return "无法确认出口国家，已阻止打开 Claude。"
         case .countryMismatch: return "出口国家 \(observedCountry ?? "未知") 与目标 \(expectedCountry ?? "未知") 不一致。"
         case .guardUnavailable: return "独立守卫未注册，请重新启用保护。"
@@ -104,15 +112,20 @@ public enum SafetyPolicy {
     public static func evaluate(_ config: SafetyConfig, _ network: NetworkObservation) -> SafetyDecision {
         guard let config = try? config.validated() else { return SafetyDecision(.invalidConfig) }
         guard config.enabled else { return SafetyDecision(.disabled) }
-        guard network.proxyConnected else { return SafetyDecision(.proxyDisconnected) }
-        guard network.tunOnline else { return SafetyDecision(.tunMissing) }
+        if !network.proxyConnected, network.proxyStatusUnconfirmed != true { return SafetyDecision(.proxyDisconnected) }
+        if !network.tunOnline, network.tunStatusUnconfirmed != true { return SafetyDecision(.tunMissing) }
         guard !network.routesDisagree else { return SafetyDecision(.routesDisagree) }
-        guard let country = network.country,
-              (try? SafetyConfig(expectedCountry: country).validated().expectedCountry) == country else {
-            return SafetyDecision(.countryUnknown)
+        let country = (network.country ?? network.partialCountry).flatMap { value in
+            (try? SafetyConfig(expectedCountry: value).validated().expectedCountry) == value ? value : nil
         }
-        return SafetyDecision(country == config.expectedCountry ? .allowed : .countryMismatch,
-                              expected: config.expectedCountry, observed: country)
+        if let country, country != config.expectedCountry {
+            return SafetyDecision(.countryMismatch, expected: config.expectedCountry, observed: country)
+        }
+        if network.proxyStatusUnconfirmed == true || network.tunStatusUnconfirmed == true {
+            return SafetyDecision(.linkUnknown)
+        }
+        guard network.country != nil, let country else { return SafetyDecision(.countryUnknown) }
+        return SafetyDecision(.allowed, expected: config.expectedCountry, observed: country)
     }
 }
 
@@ -169,7 +182,8 @@ public enum GuardEngine {
                             desktopScope: DesktopProtectionScope = .subscription,
                             desktopManaged: Bool = true) async -> GuardReceipt {
         let decision = SafetyPolicy.evaluate(config, network)
-        let shouldStop = config.enabled && desktopManaged && desktopScope == .subscription && !decision.allowed
+        let stopReasons: Set<SafetyReason> = [.invalidConfig, .proxyDisconnected, .tunMissing, .countryMismatch, .routesDisagree]
+        let shouldStop = config.enabled && desktopManaged && desktopScope == .subscription && stopReasons.contains(decision.reason)
         let action = shouldStop ? await stop() : "not_needed"
         return GuardReceipt(checkedAt: now, config: config, decision: decision, termination: action,
                             desktopScope: desktopScope, desktopManaged: desktopManaged)
