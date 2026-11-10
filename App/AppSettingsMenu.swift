@@ -59,11 +59,11 @@ struct AppSettingsMenu: View {
             Button {
                 store.checkApplicationUpdates()
             } label: {
-                Label(checkTitle, systemImage: "arrow.down.app")
+                Label(checkTitle, systemImage: "arrow.triangle.2.circlepath")
             }
             .disabled(updatePresentation.isChecking)
             Toggle(isOn: prereleaseBinding) {
-                Label(t("settings.includePrereleases"), systemImage: "testtube.2")
+                Label(t("settings.includePrereleases"), systemImage: "sparkles")
             }
                 .toggleStyle(.checkbox)
                 .disabled(installationInProgress)
