@@ -256,6 +256,7 @@ enum AppLocalization {
         "终端代理出口未通过检查，未打开终端。": "The terminal proxy did not pass the route check. Terminal was not opened.",
         "账号或保护配置已变化，未打开终端。": "The account or protection settings changed. Terminal was not opened.",
         "请先在切换器中打开终端，确认账号目录后再复制命令。": "Open Terminal from Switcher to establish the account directory before copying a command.",
+        "已登录，但备份尚未更新。请点击刷新重试。": "Signed in, but the backup is not up to date. Refresh to retry.",
         "CLI 账号尚未对应，保留原额度。": "The CLI account is not linked yet. Existing usage was kept.",
         "CLI 订阅登录尚未确认，保留原额度。": "The CLI subscription login could not be confirmed. Existing usage was kept.",
         "请在对应 Claude Code 中登录后再刷新，原额度已保留。": "Sign in to the matching Claude Code account, then refresh. Existing usage was kept.",

@@ -67,6 +67,16 @@ import SwitcherCore
                 lastRefreshDiagnostics?.outcome = "contextChanged"; return
             }
             await refreshLinkedAccountUsage(initialIssue: desktopIssue, desktopProfile: desktopProfile, desktopSample: desktopSample)
+            if current == name, protection.desktopScope == scope,
+               cliProfile == name, [.unverified, .reported, .matched].contains(cliStatus),
+               let identity = active?.snapshot?.identity,
+               cliObservedIdentity?.samePrincipal(as: identity) == true {
+                do {
+                    try await backupCurrentDefaultCLI(manual: true)
+                } catch {
+                    banner = "已登录，但备份尚未更新。请点击刷新重试。"
+                }
+            }
             lastRefreshDiagnostics?.outcome = usageNotice != nil ? "queryIncomplete" : linkedUsageDetails != nil ? "partial" : "completed"
             protection.refreshStatus()
             return

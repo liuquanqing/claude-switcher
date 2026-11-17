@@ -230,6 +230,7 @@ final class Store: ObservableObject {
     var currentCLIRecoveryOutcome: CLICurrentRecoveryOutcome?
     var currentCLIRecoveryMessage: String?
     var currentCLIBackupPending: CLIProfileIdentity?
+    var currentCLIBackupAttemptAt: Date?
     var currentCLIRenewalPolicy = CLIRenewalPolicy()
     var currentCLIInspectionAt: Date?
     var currentCLIObservedLogin: (name: String, identity: CLIIdentity, version: String)?

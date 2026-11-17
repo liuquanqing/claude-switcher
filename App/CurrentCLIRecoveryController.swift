@@ -6,6 +6,7 @@ import SwitcherCore
         clearCurrentCLIRecoveryNotice()
         currentCLIRecoveryOutcome=nil;currentCLIBackupPending=nil;currentCLIObservedLogin=nil
         currentCLIInspectionAt=nil;currentCLIRenewalPolicy=CLIRenewalPolicy()
+        currentCLIBackupAttemptAt = nil
     }
     func setBackgroundCLIRenewalPermission(_ allowed: Bool) {
         allowBackgroundCLIRenewal = allowed

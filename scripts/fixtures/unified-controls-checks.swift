@@ -49,6 +49,27 @@ import SwitcherCore
             "opening an isolated directory does not mean official login has completed")
     isolatedStatus = .matched; await controller.confirmLogin()
     require(controller.phase == .matched && controller.checkedAt != nil, "the official identity report completes linking")
+    var backedUp: [CLIConnectionContext] = []
+    var backupDenied = false
+    var backupOperations = operations
+    backupOperations.backupDefaultLogin = {
+        if backupDenied { throw SafetyError("fixture backup denied") }
+        backedUp.append($0)
+    }
+    let loginBackup = CLIConnectionController(operations: backupOperations)
+    defaultStatus = .matched
+    await loginBackup.choose(.defaultLogin)
+    require(backedUp == [context!] && loginBackup.phase == .matched, "opening the matching default login completes its backup")
+    backupDenied = true
+    await loginBackup.confirmLogin()
+    require(loginBackup.phase == .matched && loginBackup.detail?.contains("备份尚未更新") == true,
+            "backup failure preserves successful login while exposing that backup is pending")
+    backupDenied = false
+    await loginBackup.confirmLogin()
+    require(backedUp.count == 2 && loginBackup.detail == nil, "confirming a login retries a pending default backup")
+    let countBeforeSeparate = backedUp.count
+    await loginBackup.choose(.isolated)
+    require(backedUp.count == countBeforeSeparate, "an isolated login is never copied into the default-account backup")
     context = .init(profile: "Business", identity: other); defaultStatus = .different
     controller.contextDidChange()
     require(controller.localRecord == .notPrepared, "switching the desktop account immediately updates the CLI record")

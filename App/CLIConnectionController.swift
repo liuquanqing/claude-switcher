@@ -14,6 +14,7 @@ struct CLIConnectionContext: Equatable {
     let make: (CLIBindingChoice, CLIIdentity) throws -> CLIBinding
     let status: (CLIBinding) async throws -> CLIBindingStatus
     let launch: (CLIBinding) async throws -> Void
+    var backupDefaultLogin: (CLIConnectionContext) async throws -> Void = { _ in }
     var existingDirectory: (CLIBinding) -> Bool = { _ in false }
     var localRecord: (CLIIdentity, CLIBinding?) -> CLILocalRecord = { _, _ in .unconfirmed }
     var hasLegacyBackup: (String) throws -> Bool = { _ in false }
@@ -200,6 +201,10 @@ struct CLIConnectionContext: Equatable {
         checkedAt = Date()
         switch status {
         case .matched, .notLoggedIn:
+            if status == .matched, binding.choice == .defaultLogin {
+                await backupDefaultLogin(context, generation: generation)
+                guard stillCurrent(context, generation: generation) else { return }
+            }
             phase = .opening
             try await operations.launch(binding)
             guard stillCurrent(context, generation: generation) else { return }
@@ -207,6 +212,13 @@ struct CLIConnectionContext: Equatable {
             if status == .matched { localRecord = .sameAccount(binding.choice) }
         case .different: phase = .mismatched; localRecord = .differentAccount
         case .unconfirmed: phase = .unconfirmed
+        }
+    }
+    private func backupDefaultLogin(_ context: CLIConnectionContext, generation: Int) async {
+        do { try await operations.backupDefaultLogin(context) }
+        catch {
+            guard stillCurrent(context, generation: generation) else { return }
+            detail = "已登录，但备份尚未更新。请点击刷新重试。"
         }
     }
     func confirmLogin() async {
@@ -218,7 +230,12 @@ struct CLIConnectionContext: Equatable {
             guard stillCurrent(context, generation: generation) else { return }
             checkedAt = Date()
             switch status {
-            case .matched: phase = .matched; localRecord = .sameAccount(binding.choice)
+            case .matched:
+                if binding.choice == .defaultLogin {
+                    await backupDefaultLogin(context, generation: generation)
+                    guard stillCurrent(context, generation: generation) else { return }
+                }
+                phase = .matched; localRecord = .sameAccount(binding.choice)
             case .notLoggedIn: phase = .waitingForLogin
             case .different: phase = .mismatched; localRecord = .differentAccount
             case .unconfirmed: phase = .unconfirmed

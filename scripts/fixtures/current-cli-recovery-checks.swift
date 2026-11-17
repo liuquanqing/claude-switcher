@@ -94,6 +94,48 @@ import SwitcherCore
     require(io.liveWrites==0 && store.current=="Personal" && store.profiles.count==countBefore && store.protection.lastDecision==guardBefore,
             "Store never writes live credentials, moves accounts, changes guard policy or touches sessions")
     require(try CLIBackup(data:io.backups["Personal"]!).trustedIdentity()==identity,"only the new verified current login is saved to our backup")
+    let backupStore = Store(demo: true)
+    let backupIO = CurrentFixtureIO(home: home)
+    let beforeBackup = try Data(contentsOf: home.appendingPathComponent(".claude/.credentials.json"))
+    try await backupStore.backupCurrentDefaultCLI(manual: true, io: backupIO, gate: { true },
+        verify: { _ in identity }, context: { true })
+    require(try CLIBackup(data: backupIO.backups["Personal"]!).login
+        == CLIOwnedLogin(credentials: beforeBackup, identityDocument: Data(contentsOf: home.appendingPathComponent(".claude.json"))),
+        "the login/refresh backup entry saves a fresh already-valid credential without requesting native renewal")
+    require(backupIO.liveWrites == 0 && !backupStore.currentCLIRecoveryRunning,
+            "the production backup entry only writes its backup and releases its operation slot")
+    let watcher = Store(demo: true)
+    watcher.cliObservedIdentity = identity
+    watcher.cliProfile = watcher.current
+    watcher.cliStatus = .unverified
+    var watcherCalls = 0
+    let watcherIO = CurrentFixtureIO(home: home)
+    func snapshot() async throws {
+        watcherCalls += 1
+        try await watcher.backupCurrentDefaultCLI(manual: false, io: watcherIO, context: { true })
+    }
+    await watcher.maintainCurrentCLIBackup(now: fixtureNow, operation: snapshot)
+    require(watcherCalls == 1 && watcherIO.backups["Personal"] != nil,
+            "a cold-start local identity record can bootstrap a backup without online status verification")
+    await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(15), operation: snapshot)
+    require(watcherCalls == 1, "the passive backup watcher is bounded to once per minute")
+    try data(token: "fixture-officially-rotated", seconds: 7200).write(to: home.appendingPathComponent(".claude/.credentials.json"))
+    await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(61), operation: snapshot)
+    let watchedLogin = try CLIOwnedLogin(credentials: watcherIO.readCredentials(), identityDocument: watcherIO.readIdentityDocument())
+    let watchedBackup = try CLIBackup(data: watcherIO.backups["Personal"]!).login
+    require(watcherCalls == 2 && watchedBackup == watchedLogin && watcherIO.liveWrites == 0,
+            "an official CLI token rotation is backed up on the next eligible watcher tick without native renewal")
+    watcher.currentCLIBackupAttemptAt = nil
+    await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(122), operation: { throw CLIInteractionRequired() })
+    require(watcher.currentCLIBackupPending?.name == "Personal" && watcher.banner?.contains("备份尚未更新") == true,
+            "a background permission failure remains visibly pending without being treated as logout")
+    await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(183), operation: snapshot)
+    require(watcher.currentCLIBackupPending == nil && watcher.banner == nil,
+            "a later successful local snapshot clears the pending backup warning")
+    watcher.cliStatus = .needsLogin
+    await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(244), operation: snapshot)
+    require(watcherCalls == 3, "an explicit rejected login cannot silently replace a backup")
+    try new.write(to: home.appendingPathComponent(".claude/.credentials.json"))
     let demoRefusal=await store.recoverCurrentCLI(manual:true)
     require(demoRefusal == .unsupported,"demo mode refuses all production recovery adapters")
     let consentStore=Store(demo:true)

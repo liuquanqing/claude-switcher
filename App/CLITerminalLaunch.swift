@@ -157,6 +157,19 @@ enum CLITerminalLaunch {
                 throw SafetyError("账号或保护配置已变化，未打开终端。")
             }
             try await CLITerminalLaunch.open(binding: binding, home: home, proxy: proxy)
+        }, backupDefaultLogin: { [weak self] expected in
+            guard let self else { throw SafetyError("CLI 备份尚未完成。") }
+            if self.isDemo { return }
+            guard self.current == expected.profile,
+                  self.active?.snapshot?.identity.samePrincipal(as: expected.identity) == true else {
+                throw SafetyError("账号已变化，未更新 CLI 备份。")
+            }
+            do {
+                try await self.backupCurrentDefaultCLI(manual: true)
+            } catch {
+                self.banner = "已登录，但备份尚未更新。请点击刷新重试。"
+                throw error
+            }
         }, existingDirectory: { [weak self] binding in
             guard self?.isDemo != true else { return false }
             return FileManager.default.fileExists(atPath: binding.directory.path)

@@ -73,6 +73,7 @@ struct LocalAccountObservation: Equatable {
         // Metadata observation is cheap. Only the active subscription desktop
         // gets a bounded, silent usage request when the sample is due.
         _ = await observeAccountMetadata()
+        await maintainCurrentCLIBackup()
         guard protection.desktopScope == .subscription, claudeRunning || panelIsVisible(),
               protection.enabled, let profile = active, profile.signedIn || localAccountObservation?.desktopAccountID != nil else { return }
         let name = current, now = Date()
