@@ -279,6 +279,12 @@ actor FixtureGuardWorker: GuardWorking {
   require(apiUsageController.lastCheckReport?.origin == .operation && apiUsageController.lastCheckReport?.targetCountry == "SG"
           && apiUsageController.lastCheckReport?.observation?.country == "SG" && apiUsageController.lastCheckReport?.proxyMode == .shadowrocket,
           "operation preflight publishes its actual saved target and observation without requiring a manual check")
+  let terminalRoute = await apiUsageController.preflight(target: .cli, observe: { _ in
+   NetworkObservation(proxyConnected: true, tunOnline: true, country: "US")
+  })
+  require(terminalRoute.reason == .countryMismatch && usageProbeCount == 1
+          && apiUsageController.lastDecision.allowed && apiUsageController.lastCheckReport?.observation?.country == "SG",
+          "terminal preflight checks its own route without replacing the desktop network report")
   require((await apiUsageController.preflight(target: .desktop)).reason == .unsupportedMode && usageProbeCount == 1,
           "allowing saved usage reads never opens the API desktop through the subscription launch gate")
   let apiUsageBlocked = ProtectionController(testFiles: apiUsageFiles, worker: FixtureGuardWorker(files: apiUsageFiles), observeNetwork: { _ in

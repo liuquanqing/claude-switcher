@@ -310,6 +310,7 @@ final class ProtectionController: ObservableObject {
         var checkedConfig: SafetyConfig?
         var checkedNetwork: NetworkObservation?
         func finish(_ decision: SafetyDecision) -> SafetyDecision {
+            guard observe == nil else { return decision }
             lastDecision = decision; status = decision.message
             let date = Date()
             lastCheckedAt = date; lastCheckSummary = decision.message
