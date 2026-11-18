@@ -206,9 +206,12 @@ enum CLITerminalLaunch {
                     defaultMetadata: try metadata(home.appendingPathComponent(".claude.json")),
                     isolatedMetadata: isolated, expected: identity)
             } catch { return .unconfirmed }
-        }, hasLegacyBackup: { [weak self] profile in
-            guard let self, !self.isDemo, self.current == profile, ProfileTransaction.validName(profile) else { return false }
-            return try KeychainReadAccess.contains(service: switcherService, account: "cli-" + profile)
+        }, hasRecoverableBackup: { [weak self] expected in
+            guard let self, !self.isDemo, self.current == expected.profile,
+                  ProfileTransaction.validName(expected.profile) else { return false }
+            let data = try KeychainReadAccess.read(service: switcherService, account: "cli-" + expected.profile,
+                                                   allowInteraction: true)
+            return try CLIBackupRecovery.canAttemptRestore(data, expected: expected.identity)
         }, restoreLegacyBackup: { [weak self] expected in
             guard let self else { throw SafetyError("旧 CLI 备份无法恢复。") }
             guard await self.moveTerminal(to: expected.profile, confirmedIdentity: expected.identity) else {

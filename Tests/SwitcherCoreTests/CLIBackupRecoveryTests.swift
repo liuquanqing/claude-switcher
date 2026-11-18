@@ -80,6 +80,18 @@ import XCTest
         let outcome = try await recover(io,renew:{_,_ in XCTFail("must preserve live login"); throw SafetyError("unexpected")})
         XCTAssertEqual(outcome,.notNeeded); XCTAssertEqual(io.liveWrites,0)
     }
+    func testOnlyMatchingBackupWithUsableAccessOrRefreshIsOffered() throws {
+        XCTAssertFalse(try CLIBackupRecovery.canAttemptRestore(nil, expected: b, now: date))
+        let expiredRefreshable = try raw(login(b, token: "old-b", expired: true))
+        XCTAssertTrue(try CLIBackupRecovery.canAttemptRestore(expiredRefreshable, expected: b, now: date))
+        let different = try raw(login(a, token: "other"))
+        XCTAssertThrowsError(try CLIBackupRecovery.canAttemptRestore(different, expected: b, now: date))
+        let empty = try raw(CLIOwnedLogin(oauth: CLIJSON.encode(["accessToken": "", "refreshToken": "", "expiresAt": 0]),
+                                         metadata: login(b, token: "old-b").metadata))
+        XCTAssertThrowsError(try CLIBackupRecovery.canAttemptRestore(empty, expected: b, now: date))
+        let expiredOnly = try raw(login(b, token: "old-b", expired: true, refresh: false))
+        XCTAssertThrowsError(try CLIBackupRecovery.canAttemptRestore(expiredOnly, expected: b, now: date))
+    }
     func testExplicitRestoreRenewsExpiredBackupWhenOnlyMatchingAccountMetadataRemains() async throws {
         for previouslyVerified in [false, true] {
             let io = try fixture()

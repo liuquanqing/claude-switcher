@@ -120,8 +120,8 @@ import SwitcherCore
         save: { recoveryBinding = $0 }, make: operations.make,
         status: { $0.choice == .defaultLogin ? reportedDefault : reportedIsolated },
         launch: { openedForRecovery.append($0) }, existingDirectory: { $0.choice == .isolated },
-        localRecord: { _, _ in .sameAccount(.defaultLogin) }, hasLegacyBackup: { profile in
-            backupChecks.append(profile)
+        localRecord: { _, _ in .sameAccount(.defaultLogin) }, hasRecoverableBackup: { expected in
+            backupChecks.append(expected.profile)
             if !backupReadable { throw SafetyError("fictional access failure") }
             return backupExists
         }, restoreLegacyBackup: {
@@ -169,6 +169,12 @@ import SwitcherCore
     await recovery.open()
     require(recovery.phase == .waitingForLogin && openedForRecovery.last?.choice == .defaultLogin && restored == [personal],
             "when neither usable login nor backup exists, an explicit open uses official login")
+    backupExists = true
+    let launchedBeforeOptions = openedForRecovery
+    await recovery.open(showLoginChoices: true)
+    require(recovery.phase == .choosing && recovery.legacyBackupAvailable && recovery.defaultLoginAvailable
+            && openedForRecovery == launchedBeforeOptions && restored == [personal],
+            "sign-in options return a waiting login to backup selection without launching or restoring")
 
     var uncertainLaunches: [CLIBinding] = [], uncertainSaves: [CLIBinding] = []
     let uncertainDefault = CLIConnectionController(operations: .init(context: { context }, load: { _ in nil },

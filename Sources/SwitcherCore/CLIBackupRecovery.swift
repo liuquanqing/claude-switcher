@@ -18,6 +18,18 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
 @MainActor public enum CLIBackupRecovery {
     public enum Outcome: Equatable { case notNeeded, recovered, recoveredCleanupPending }
 
+    public static func canAttemptRestore(_ data: Data?, expected: CLIIdentity, now: Date = Date()) throws -> Bool {
+        guard let data else { return false }
+        let login = try CLIBackup(data: data).login
+        guard try login.identity?.samePrincipal(as: expected) == true else {
+            throw SafetyError("保存的终端备份属于其他账号或组织，请直接登录当前账号。")
+        }
+        guard login.usableAccessToken(now: now) != nil || login.hasRefreshToken else {
+            throw SafetyError("保存的终端备份没有可用凭据，请直接登录当前账号。")
+        }
+        return true
+    }
+
     /// Called by explicit switch/sync, after the network gate and before Desktop quits.
     /// Does not write the default CLI, its marker, or any Desktop directory.
     public static func prepare(target: CLIProfileIdentity, io: CLICredentialIO, now: () -> Date = Date.init,

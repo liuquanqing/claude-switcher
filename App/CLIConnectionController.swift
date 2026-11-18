@@ -17,7 +17,7 @@ struct CLIConnectionContext: Equatable {
     var backupDefaultLogin: (CLIConnectionContext) async throws -> Void = { _ in }
     var existingDirectory: (CLIBinding) -> Bool = { _ in false }
     var localRecord: (CLIIdentity, CLIBinding?) -> CLILocalRecord = { _, _ in .unconfirmed }
-    var hasLegacyBackup: (String) throws -> Bool = { _ in false }
+    var hasRecoverableBackup: (CLIConnectionContext) throws -> Bool = { _ in false }
     var restoreLegacyBackup: (CLIConnectionContext) async throws -> Void = { _ in
         throw SafetyError("旧 CLI 备份无法恢复。")
     }
@@ -76,7 +76,7 @@ struct CLIConnectionContext: Equatable {
         }
         return true
     }
-    func open() async {
+    func open(showLoginChoices: Bool = false) async {
         contextDidChange()
         guard !isBusy else { return }
         guard let context, context.identity.isComplete else {
@@ -86,6 +86,7 @@ struct CLIConnectionContext: Equatable {
         phase = .checking; detail = nil
         legacyBackupAvailable = false
         defaultLoginAvailable = false
+        defaultMatches = false
         do {
             let remembered = binding
             var loginDirectory: CLIBinding?
@@ -99,7 +100,7 @@ struct CLIConnectionContext: Equatable {
                     defaultMatches = status == .matched
                     defaultLoginAvailable = status == .notLoggedIn || status == .matched
                 }
-                if status == .matched {
+                if status == .matched, !showLoginChoices {
                     try await select(candidate, status: status, context: context, generation: generation)
                     return true
                 }
@@ -114,20 +115,28 @@ struct CLIConnectionContext: Equatable {
             }
             let defaultBinding = try operations.make(.defaultLogin, context.identity)
             if try await inspect(defaultBinding) { return }
-            if let remembered, remembered.choice == .isolated {
-                if try await inspect(remembered) { return }
-            } else {
-                let isolated = try operations.make(.isolated, context.identity)
-                if operations.existingDirectory(isolated), try await inspect(isolated) { return }
+            if !showLoginChoices {
+                if let remembered, remembered.choice == .isolated {
+                    if try await inspect(remembered) { return }
+                } else {
+                    let isolated = try operations.make(.isolated, context.identity)
+                    if operations.existingDirectory(isolated), try await inspect(isolated) { return }
+                }
             }
-            do { legacyBackupAvailable = try operations.hasLegacyBackup(context.profile) }
-            catch {
-                // Failure to inspect the item is not evidence of an empty backup.
-                phase = .choosing
-                detail = "旧 CLI 备份暂无法检查。"
-                return
+            if !defaultMatches {
+                do { legacyBackupAvailable = try operations.hasRecoverableBackup(context) }
+                catch is CLIInteractionRequired {
+                    phase = .choosing
+                    detail = "旧 CLI 备份暂无法检查。"
+                    return
+                }
+                catch {
+                    phase = .choosing
+                    detail = error.localizedDescription
+                    return
+                }
             }
-            if legacyBackupAvailable {
+            if showLoginChoices || legacyBackupAvailable {
                 phase = .choosing
             } else if let loginDirectory {
                 try await select(loginDirectory, status: .notLoggedIn, context: context, generation: generation)

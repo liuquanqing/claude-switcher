@@ -593,13 +593,13 @@ struct TerminalStrip: View {
             case .waitingForLogin: return t("cli.confirmLogin")
             case .failed: return t("cli.retry")
             case .unlinked, .choosing: return t("cli.prepare")
-            case .mismatched: return t("common.switch")
+            case .mismatched: return t("cli.switchTo", arguments: ["account": accountName])
             case .checking, .opening, .matched, .unconfirmed: break
             }
         }
-        if defaultMismatch { return t("common.switch") }
+        if defaultMismatch { return t("cli.switchTo", arguments: ["account": accountName]) }
         if usageLoginRequired { return t("cli.openForLogin") }
-        if case .differentAccount = connection.localRecord { return t("common.switch") }
+        if case .differentAccount = connection.localRecord { return t("cli.switchTo", arguments: ["account": accountName]) }
         return t(needsPreparation ? "cli.prepare" : "cli.confirmLogin")
     }
 
@@ -623,10 +623,10 @@ struct TerminalStrip: View {
         return t(needsPreparation ? "cli.prepareHelp" : "cli.openHelp")
     }
 
-    private func runPrimaryAction() {
+    private func runPrimaryAction(showLoginChoices: Bool = false) {
         guard subscriptionDesktop, !controlsLocked, !connection.isBusy else { return }
         showHelp = false
-        if showsConnectionPhase, connection.phase == .waitingForLogin {
+        if !showLoginChoices, showsConnectionPhase, connection.phase == .waitingForLogin {
             officialReportActive = true
             Task { await connection.confirmLogin() }
             return
@@ -640,7 +640,7 @@ struct TerminalStrip: View {
                 return
             }
             officialReportActive = true
-            await connection.open()
+            await connection.open(showLoginChoices: showLoginChoices)
         }
     }
 
@@ -925,7 +925,7 @@ struct TerminalStrip: View {
     }
 
     private var primaryAction: some View {
-        Button(action: runPrimaryAction) {
+        Button { runPrimaryAction() } label: {
             HStack(spacing: 5) {
                 if connection.isBusy { ProgressView().controlSize(.mini) }
                 Text(primaryTitle).font(.system(size: 10.5, weight: .medium)).lineLimit(1)
@@ -957,6 +957,10 @@ struct TerminalStrip: View {
                 .help(terminalBoundary ?? t("cli.statusHelp"))
                 if showsPrimaryAction {
                     primaryAction
+                }
+                if connection.phase == .waitingForLogin {
+                    Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
+                        .disabled(controlsLocked || connection.isBusy)
                 }
                 Divider().opacity(0.5)
                 DisclosureGroup(t("cli.advanced")) {
@@ -1039,7 +1043,17 @@ struct TerminalStrip: View {
                 Text(generated(detail)).font(.system(size: 10.5)).foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if defaultAvailable {
+            if restoreAvailable {
+                Button(t("cli.switchToBackup", arguments: ["account": target.profile])) {
+                    restoreTarget = target
+                    confirmRestore = true
+                }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.claude)
+                    .keyboardShortcut(.defaultAction)
+                    .frame(maxWidth: .infinity)
+                    .disabled(choiceActionsDisabled(for: target))
+            } else if defaultAvailable {
                 Button(t("cli.defaultLoginAction")) { chooseAndOpen(.defaultLogin, target: target) }
                     .buttonStyle(.borderedProminent)
                     .tint(.claude)
@@ -1047,14 +1061,11 @@ struct TerminalStrip: View {
                     .frame(maxWidth: .infinity)
                     .disabled(choiceActionsDisabled(for: target))
             }
-            if restoreAvailable {
-                Button(t("cli.restoreBackupAction")) {
-                    restoreTarget = target
-                    confirmRestore = true
-                }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-                .disabled(choiceActionsDisabled(for: target))
+            if defaultAvailable && restoreAvailable {
+                Button(t("cli.defaultLoginAction")) { chooseAndOpen(.defaultLogin, target: target) }
+                    .buttonStyle(.bordered)
+                    .frame(maxWidth: .infinity)
+                    .disabled(choiceActionsDisabled(for: target))
             }
             if defaultAvailable || restoreAvailable {
                 Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
