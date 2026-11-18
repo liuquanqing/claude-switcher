@@ -21,10 +21,12 @@ enum CLIStatusReader {
                 arguments: ["auth", "status"], inherited: environment, timeoutSeconds: timeoutSeconds,
                 graceSeconds: graceSeconds, combineStderr: false)
             guard !result.timedOut, [0, 1].contains(result.status) else {
+                if configurationDirectory != nil {
+                    throw result.timedOut ? CLITerminalFailure.statusTimedOut : CLITerminalFailure.statusUnconfirmed
+                }
                 throw SafetyError("CLI 状态读取超时或未完成，未修改登录。")
             }
-            let data = Data(result.text.utf8)
-            let report = try CLIReportedStatus(data: data)
+            let report = try CLIReportedStatus(data: Data(result.text.utf8))
             guard (result.status == 0) == report.loggedIn else { throw SafetyError("CLI 退出状态与登录报告不一致。") }
             return report
         }.value

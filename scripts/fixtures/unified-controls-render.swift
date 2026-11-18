@@ -61,7 +61,7 @@ actor FictionalRenderGuard: GuardWorking {
   window.alphaValue = 0; window.contentView = host; window.orderFront(nil)
   defer { window.orderOut(nil) }
   try await Task.sleep(nanoseconds: 150_000_000)
-  await connection.open()
+  await connection.open(showLoginChoices: true)
   try await Task.sleep(nanoseconds: 300_000_000)
   guard let sheet = window.sheets.first, let content = sheet.contentView,
         let bitmap = content.bitmapImageRepForCachingDisplay(in:content.bounds) else {
@@ -163,10 +163,10 @@ actor FictionalRenderGuard: GuardWorking {
     var binding:CLIBinding?
     let connection=CLIConnectionController(operations:.init(context:{context},load:{_ in binding},save:{binding=$0},make:{mode,identity in
      CLIBinding(identity:identity,choice:mode,directory:try CLIBinding.directory(for:mode,identity:identity,home:URL(fileURLWithPath:"/fictional-home")))
-    },status:{_ in
+    },access:{ CLIConnectionAccess(status:{_ in
      if state == "failed" { throw SafetyError("CLI 状态读取超时或未完成，未修改登录。") }
      return state == "default" ? .matched : state == "different" ? .different : .notLoggedIn
-    },launch:{_ in}, localRecord:{_,_ in
+    },launch:{_, _ in}) }, localRecord:{_,_ in
      switch state {
      case "local-default", "default": return .sameAccount(.defaultLogin)
      case "local-isolated": return .sameAccount(.isolated)

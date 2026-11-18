@@ -425,7 +425,7 @@ struct TerminalStrip: View {
             return verifiedMatch ? t("cli.matchShort") : t("cli.unconfirmedIdentity")
         case .mismatched: return t("cli.accountMismatch")
         case .unconfirmed: return t("cli.unconfirmedIdentity")
-        case .failed: return t("cli.openFailed")
+        case .failed: return t(connection.failureTitle ?? "cli.openFailed")
         }
     }
 
@@ -444,6 +444,7 @@ struct TerminalStrip: View {
             }
             return t("cli.unconfirmedDetail")
         }
+        if let route = connection.routeDecision { return AppLocalization.decision(route, language: language) }
         if [.failed, .mismatched, .unconfirmed].contains(connection.phase),
            let reason = connection.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
             return generated(reason)
@@ -456,7 +457,7 @@ struct TerminalStrip: View {
         case .matched:
             return verifiedMatch ? t("cli.verifiedDetail", arguments: ["account": accountName]) : t("cli.unconfirmedDetail")
         case .waitingForLogin:
-            return t("cli.waitingDetail", arguments: ["account": accountName])
+            return connection.detail.map(generated) ?? t("cli.waitingDetail")
         case .mismatched:
             return t("cli.mismatchDetail", arguments: ["account": accountName])
         case .unconfirmed: return t("cli.unconfirmedDetail")
@@ -465,8 +466,7 @@ struct TerminalStrip: View {
     }
 
     private var isolatedBinding: Bool {
-        if case .sameAccount(.isolated) = connection.localRecord { return true }
-        return connection.choice == .isolated
+        connection.preferredChoice == .isolated
     }
 
     private var defaultMismatch: Bool {
@@ -576,51 +576,45 @@ struct TerminalStrip: View {
         }
     }
 
-    private var needsPreparation: Bool {
-        if showsConnectionPhase {
-            return connection.phase == .unlinked || connection.phase == .choosing || connection.phase == .mismatched
-        }
-        if defaultMismatch { return true }
-        switch connection.localRecord {
-        case .differentAccount, .notPrepared: return true
-        case .sameAccount, .unconfirmed: return false
-        }
+    private var opensTerminalOptions: Bool {
+        if showsConnectionPhase, connection.phase == .mismatched { return true }
+        return connection.preferredChoice == nil && defaultMismatch
+    }
+
+    private func openTerminalTitle(_ choice: CLIBindingChoice, account: String) -> String {
+        t(choice == .isolated ? "cli.openNamedIsolated" : "cli.openNamedDefault", arguments: ["account": account])
+    }
+
+    private var namesSignIn: Bool {
+        usageLoginRequired || (connection.currentBinding == nil && connection.localRecord == .differentAccount)
+    }
+
+    private var primaryDirectory: CLIBindingChoice? {
+        if showsConnectionPhase, [.waitingForLogin, .failed].contains(connection.phase) { return nil }
+        if opensTerminalOptions || namesSignIn { return nil }
+        return connection.preferredChoice
     }
 
     private var primaryTitle: String {
         if showsConnectionPhase {
-            switch connection.phase {
-            case .waitingForLogin: return t("cli.confirmLogin")
-            case .failed: return t("cli.retry")
-            case .unlinked, .choosing: return t("cli.prepare")
-            case .mismatched: return t("cli.switchTo", arguments: ["account": accountName])
-            case .checking, .opening, .matched, .unconfirmed: break
-            }
+            if connection.phase == .waitingForLogin { return t("cli.confirmLogin") }
+            if connection.phase == .failed { return t("cli.retry") }
         }
-        if defaultMismatch { return t("cli.switchTo", arguments: ["account": accountName]) }
-        if usageLoginRequired { return t("cli.openForLogin") }
-        if case .differentAccount = connection.localRecord { return t("cli.switchTo", arguments: ["account": accountName]) }
-        return t(needsPreparation ? "cli.prepare" : "cli.confirmLogin")
+        if opensTerminalOptions { return t("cli.terminalOptions") }
+        if namesSignIn { return t("cli.signInNamed", arguments: ["account": accountName]) }
+        if let choice = primaryDirectory { return openTerminalTitle(choice, account: accountName) }
+        return t("cli.openTerminal")
     }
 
     private var showsPrimaryAction: Bool {
-        guard subscriptionDesktop, !connection.isBusy, !verifiedMatch else { return false }
-        if showsConnectionPhase {
-            switch connection.phase {
-            case .checking, .opening: return false
-            case .unlinked, .choosing, .waitingForLogin, .matched, .mismatched, .unconfirmed, .failed: return true
-            }
-        }
-        return true
-    }
-
-    private var showsInlineAction: Bool {
-        showsPrimaryAction && normalIdentity == nil
+        subscriptionDesktop && !connection.isBusy
     }
 
     private var primaryActionHelp: String {
         if showsConnectionPhase, connection.phase == .waitingForLogin { return t("cli.confirmLoginHelp") }
-        return t(needsPreparation ? "cli.prepareHelp" : "cli.openHelp")
+        if opensTerminalOptions { return t("cli.terminalOptionsHelp") }
+        if let choice = connection.preferredChoice { return openTerminalTitle(choice, account: accountName) }
+        return t("cli.openTerminalHelp")
     }
 
     private func runPrimaryAction(showLoginChoices: Bool = false) {
@@ -631,6 +625,7 @@ struct TerminalStrip: View {
             Task { await connection.confirmLogin() }
             return
         }
+        let showOptions = showLoginChoices || opensTerminalOptions
         officialReportActive = false
         let target = store.current
         Task {
@@ -640,7 +635,7 @@ struct TerminalStrip: View {
                 return
             }
             officialReportActive = true
-            await connection.open(showLoginChoices: showLoginChoices)
+            await connection.open(showLoginChoices: showOptions)
         }
     }
 
@@ -811,17 +806,16 @@ struct TerminalStrip: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     title
-                    if normalIdentity != nil { identity }
+                    if normalIdentity != nil && !showsPrimaryAction { identity }
                     statusInfo
-                    Spacer(minLength: 4)
                 }
                 .frame(height: 28)
                 if normalIdentity == nil {
                     identity.frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            if showsInlineAction {
-                Spacer(minLength: 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if showsPrimaryAction {
                 primaryAction.padding(.top, 5)
             }
         }
@@ -901,11 +895,7 @@ struct TerminalStrip: View {
                 choiceTarget = (store.active?.snapshot?.identity).map {
                     ChoiceTarget(profile: connection.expectedProfile, identity: $0)
                 }
-            case .mismatched:
-                choiceTarget = (store.active?.snapshot?.identity).map {
-                    ChoiceTarget(profile: connection.expectedProfile, identity: $0)
-                }
-            case .opening, .waitingForLogin, .matched:
+            case .mismatched, .opening, .waitingForLogin, .matched:
                 choiceTarget = nil
             case .unlinked:
                 officialReportActive = false
@@ -926,13 +916,21 @@ struct TerminalStrip: View {
 
     private var primaryAction: some View {
         Button { runPrimaryAction() } label: {
-            HStack(spacing: 5) {
-                if connection.isBusy { ProgressView().controlSize(.mini) }
-                Text(primaryTitle).font(.system(size: 10.5, weight: .medium)).lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+            VStack(spacing: 2) {
+                if let choice = primaryDirectory {
+                    ViewThatFits(in: .horizontal) {
+                        Text(t("cli.openNamed", arguments: ["account": accountName]))
+                        Text(accountName).truncationMode(.tail)
+                    }
+                    Text(t(choice == .isolated ? "cli.isolatedDirectory" : "cli.defaultDirectory"))
+                        .font(.system(size: 9)).foregroundColor(.sub)
+                } else {
+                    Text(primaryTitle).truncationMode(.tail)
+                }
             }
-            .padding(.horizontal, 10)
-            .frame(minWidth: 48).frame(height: 28)
+            .font(.system(size: 10.5, weight: .medium)).lineLimit(1)
+            .padding(.horizontal, 7)
+            .frame(minWidth: 48).frame(height: primaryDirectory == nil ? 28 : 34)
             .foregroundColor(.claude)
             .background(RoundedRectangle(cornerRadius: 7)
                 .fill(Color.claude.opacity(openHover ? 0.16 : 0.08)))
@@ -958,8 +956,8 @@ struct TerminalStrip: View {
                 if showsPrimaryAction {
                     primaryAction
                 }
-                if connection.phase == .waitingForLogin {
-                    Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
+                if !opensTerminalOptions {
+                    Button(t("cli.terminalOptions")) { runPrimaryAction(showLoginChoices: true) }
                         .disabled(controlsLocked || connection.isBusy)
                 }
                 Divider().opacity(0.5)
@@ -1026,68 +1024,38 @@ struct TerminalStrip: View {
     private func choiceSheet(for target: ChoiceTarget) -> some View {
         let restoreAvailable = connection.phase == .choosing && connection.legacyBackupAvailable
         let defaultAvailable = connection.defaultLoginAvailable
+        let preferDefault = defaultAvailable && connection.preferredChoice != .isolated
         return VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(t("cli.choiceTitle")).font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
-                Text(t("cli.choiceFor", arguments: ["account": target.profile]))
-                    .font(.system(size: 11)).foregroundColor(.sub).lineLimit(1)
-                if !restoreAvailable && !defaultAvailable {
-                    Text(t("cli.recommendedIsolated")).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
-                }
-            }
-            if connection.phase == .mismatched {
-                Text(t("cli.choiceMismatch")).font(.system(size: 11)).foregroundColor(.warn)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let detail = connection.detail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty {
+            Text(t("cli.terminalOptionsFor", arguments: ["account": target.profile]))
+                .font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
+            if let route = connection.routeDecision {
+                Text(AppLocalization.decision(route, language: language))
+                    .font(.system(size: 10.5)).foregroundColor(.warn)
+            } else if let detail = connection.detail, !detail.isEmpty {
                 Text(generated(detail)).font(.system(size: 10.5)).foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if restoreAvailable {
-                Button(t("cli.switchToBackup", arguments: ["account": target.profile])) {
-                    restoreTarget = target
-                    confirmRestore = true
-                }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.claude)
-                    .keyboardShortcut(.defaultAction)
-                    .frame(maxWidth: .infinity)
-                    .disabled(choiceActionsDisabled(for: target))
-            } else if defaultAvailable {
-                Button(t("cli.defaultLoginAction")) { chooseAndOpen(.defaultLogin, target: target) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.claude)
-                    .keyboardShortcut(.defaultAction)
-                    .frame(maxWidth: .infinity)
-                    .disabled(choiceActionsDisabled(for: target))
+            if defaultAvailable {
+                terminalOption(connection.defaultMatches ? openTerminalTitle(.defaultLogin, account: target.profile)
+                               : t("cli.defaultLoginAction"), choice: .defaultLogin, target: target, prominent: preferDefault)
+            } else if connection.detail == nil {
+                Text(t("cli.defaultUnavailable")).font(.system(size: 11)).foregroundColor(.sub)
             }
-            if defaultAvailable && restoreAvailable {
-                Button(t("cli.defaultLoginAction")) { chooseAndOpen(.defaultLogin, target: target) }
-                    .buttonStyle(.bordered)
-                    .frame(maxWidth: .infinity)
-                    .disabled(choiceActionsDisabled(for: target))
-            }
-            if defaultAvailable || restoreAvailable {
-                Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
-                    .buttonStyle(.bordered)
-                    .frame(maxWidth: .infinity)
-                    .disabled(choiceActionsDisabled(for: target))
-            } else {
-                Button(t("cli.isolatedAction")) { chooseAndOpen(.isolated, target: target) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.claude)
-                    .keyboardShortcut(.defaultAction)
-                    .frame(maxWidth: .infinity)
-                    .disabled(choiceActionsDisabled(for: target))
-            }
+            terminalOption(openTerminalTitle(.isolated, account: target.profile),
+                           choice: .isolated, target: target, prominent: !preferDefault)
             HStack(spacing: 10) {
+                if restoreAvailable {
+                    Button(t("cli.restoreBackupAction")) {
+                        restoreTarget = target
+                        confirmRestore = true
+                    }
+                    .buttonStyle(.link)
+                    .disabled(choiceActionsDisabled(for: target))
+                }
+                Spacer()
                 Button(t("common.cancel")) { choiceTarget = nil }
                     .buttonStyle(.bordered)
-                Spacer()
             }
-            Text(t(defaultAvailable ? "cli.defaultLoginBoundary" : "cli.choiceBoundary"))
-                .font(.system(size: 10.5)).foregroundColor(.sub)
-                .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
         }
         .padding(20).frame(width: 390, alignment: .leading)
         .background(Color.bg)
@@ -1104,6 +1072,18 @@ struct TerminalStrip: View {
         }
         .onChange(of: confirmRestore) { presented in
             if !presented { restoreTarget = nil }
+        }
+    }
+
+    @ViewBuilder private func terminalOption(_ title: String, choice: CLIBindingChoice,
+                                             target: ChoiceTarget, prominent: Bool) -> some View {
+        let action = Button(title) { chooseAndOpen(choice, target: target) }
+            .frame(maxWidth: .infinity)
+            .disabled(choiceActionsDisabled(for: target))
+        if prominent {
+            action.buttonStyle(.borderedProminent).tint(.claude).keyboardShortcut(.defaultAction)
+        } else {
+            action.buttonStyle(.bordered)
         }
     }
 

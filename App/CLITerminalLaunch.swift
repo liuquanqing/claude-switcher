@@ -1,6 +1,39 @@
 import AppKit
 import SwitcherCore
 
+enum CLITerminalFailure: LocalizedError {
+    case proxyUnavailable
+    case proxyChanged
+    case route(SafetyDecision)
+    case statusTimedOut
+    case statusUnconfirmed
+    case wrongDirectory
+    case otherAuthentication
+    case terminalUnavailable
+
+    var title: String {
+        switch self {
+        case .proxyUnavailable, .proxyChanged, .route: return "cli.routeNotVerified"
+        case .statusTimedOut, .statusUnconfirmed, .wrongDirectory: return "cli.statusReadFailed"
+        case .otherAuthentication: return "cli.otherAuthentication"
+        case .terminalUnavailable: return "cli.terminalUnavailable"
+        }
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .proxyUnavailable: return "未发现可用的本机 HTTP 代理，未打开终端。"
+        case .proxyChanged: return "本机 HTTP 代理已变化，请重试。"
+        case .route(let decision): return decision.message
+        case .statusTimedOut: return "读取 Claude Code 登录状态超时。"
+        case .statusUnconfirmed: return "Claude Code 未返回可确认的登录状态。"
+        case .wrongDirectory: return "Claude Code 报告的目录与选择的终端不一致。"
+        case .otherAuthentication: return "此目录的 Claude Code 正在使用 API 或其他认证方式。"
+        case .terminalUnavailable: return "无法打开系统终端，请确认 Terminal 可用。"
+        }
+    }
+}
+
 enum CLITerminalLaunch {
     static let authOverrides = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN",
         "CLAUDE_CODE_OAUTH_REFRESH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES", "CLAUDE_ENV_FILE", "ANTHROPIC_BASE_URL", "ANTHROPIC_PROFILE",
@@ -30,14 +63,18 @@ enum CLITerminalLaunch {
             .map { $0.key + "=" + quote($0.value) + " " }.joined()
         return "/usr/bin/env " + unset + " " + directory + routing + quote(executable.path)
     }
-    static func script(binding: CLIBinding, executable: URL, home: URL, proxy: UsageQueryProxy) throws -> String {
+    static func script(binding: CLIBinding, executable: URL, home: URL, proxy: UsageQueryProxy,
+                       intent: CLITerminalIntent = .open) throws -> String {
         let homeQuoted = "'" + home.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        return "#!/bin/zsh\ncd " + homeQuoted + " || exit 1\nexec " + (try command(binding: binding, executable: executable, home: home, proxy: proxy)) + "\n"
+        let launch = try command(binding: binding, executable: executable, home: home, proxy: proxy)
+        // The official sign-in runs by itself. Account matching is checked before opening an interactive session.
+        let arguments = intent == .signIn ? " --setting-sources '' auth login --claudeai" : ""
+        return "#!/bin/zsh\ncd " + homeQuoted + " || exit 1\nexec " + launch + arguments + "\n"
     }
     static func readSystemProxy() throws -> UsageQueryProxy {
         let (status, proxyText) = try LocalCommand.run("/usr/sbin/scutil", ["--proxy"])
         guard status == 0, let proxy = try? UsageQueryProxy.system(proxyText) else {
-            throw SafetyError("未发现可用的本机 HTTP 代理，未打开终端。")
+            throw CLITerminalFailure.proxyUnavailable
         }
         return proxy
     }
@@ -57,11 +94,12 @@ enum CLITerminalLaunch {
         guard let code = lines.last.flatMap({ Int($0) }) else { return nil }
         return NetworkObservation.countryFromTrace(lines.dropLast().joined(separator: "\n"), httpStatus: code)
     }
-    @MainActor static func open(binding: CLIBinding, home: URL, proxy: UsageQueryProxy) async throws {
+    @MainActor static func open(binding: CLIBinding, home: URL, proxy: UsageQueryProxy,
+                                intent: CLITerminalIntent) async throws {
         try binding.validate(home: home)
         let executable = try executable(home: home)
         guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
-            throw SafetyError("无法打开终端，请确认 Terminal 可用。")
+            throw CLITerminalFailure.terminalUnavailable
         }
         if binding.choice == .isolated {
             try FileManager.default.createDirectory(at: binding.directory, withIntermediateDirectories: true,
@@ -71,13 +109,13 @@ enum CLITerminalLaunch {
             .appendingPathComponent("dev.claudeswitcher.candidate/CLI Launchers")
         try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let command = cache.appendingPathComponent(UUID().uuidString + ".command")
-        try script(binding: binding, executable: executable, home: home, proxy: proxy).write(to: command, atomically: true, encoding: .utf8)
+        try script(binding: binding, executable: executable, home: home, proxy: proxy, intent: intent).write(to: command, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: command.path)
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             NSWorkspace.shared.open([command], withApplicationAt: terminal, configuration: config) { _, error in
-                if let error { continuation.resume(throwing: error) }
+                if error != nil { continuation.resume(throwing: CLITerminalFailure.terminalUnavailable) }
                 else { continuation.resume() }
             }
         }
@@ -96,8 +134,46 @@ enum CLITerminalLaunch {
             }
         }
         let gate = await protection.preflight(target: .cli, observe: { mode in await probe.observe(mode: mode) })
-        guard gate.allowed else { throw SafetyError(gate.message) }
+        guard gate.allowed else { throw CLITerminalFailure.route(gate) }
         return proxy
+    }
+
+    private func prepareCLIConnection(home: URL) async throws -> CLIConnectionAccess {
+        guard !updating else { throw SafetyError("应用正在更新，请稍后打开 CLI。") }
+        if isDemo {
+            return CLIConnectionAccess(status: { $0.choice == .defaultLogin ? .different : .notLoggedIn },
+                                       launch: { _, _ in })
+        }
+        let config = try protection.files.loadConfig()
+        let proxy = try await checkedCLIProxy()
+        return CLIConnectionAccess(status: { binding in
+            try binding.validate(home: home)
+            if binding.choice == .isolated {
+                try FileManager.default.createDirectory(at: binding.directory, withIntermediateDirectories: true,
+                                                        attributes: [.posixPermissions: 0o700])
+            }
+            let report = try await CLIStatusReader.read(home: home, configurationDirectory: binding.directory,
+                                                        proxy: proxy, timeoutSeconds: 12)
+            guard report.usesConfigurationDirectory(binding.directory) else { throw CLITerminalFailure.wrongDirectory }
+            guard report.authMethod == "claude.ai" || (!report.loggedIn && report.authMethod == "none") else {
+                throw CLITerminalFailure.otherAuthentication
+            }
+            let document = AccountUsageQuery.document(for: binding, home: home)
+            let metadata = (try? Data(contentsOf: document)).flatMap { try? CLIIdentity.metadata(CLIJSON.field($0, key: "oauthAccount")) }
+            return CLIBindingPolicy.assess(report, binding: binding, metadata: metadata)
+        }, launch: { [weak self] binding, intent in
+            // Check the listener selection without repeating the remote probes.
+            guard try await CLITerminalLaunch.systemProxy() == proxy else {
+                throw CLITerminalFailure.proxyChanged
+            }
+            guard let self, !self.updating, try self.protection.files.loadConfig() == config,
+                  try confirmedCurrentProfile() == self.current,
+                  self.protection.desktopScope == .subscription,
+                  self.active?.snapshot?.identity.samePrincipal(as: binding.identity) == true else {
+                throw SafetyError("账号或保护配置已变化，未打开终端。")
+            }
+            try await CLITerminalLaunch.open(binding: binding, home: home, proxy: proxy, intent: intent)
+        })
     }
 
     func makeCLIConnection() -> CLIConnectionController {
@@ -124,32 +200,9 @@ enum CLITerminalLaunch {
             let binding = CLIBinding(identity: identity, choice: choice, directory: directory)
             if self?.isDemo != true { try binding.validate(home: home) }
             return binding
-        }, status: { [weak self] binding in
-            guard let self else { return .unconfirmed }
-            guard !self.updating else { throw SafetyError("应用正在更新，请稍后打开 CLI。") }
-            if self.isDemo { return binding.choice == .defaultLogin ? .different : .notLoggedIn }
-            try binding.validate(home: home)
-            let proxy = try await self.checkedCLIProxy()
-            if binding.choice == .isolated {
-                try FileManager.default.createDirectory(at: binding.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            }
-            let report = try await CLIStatusReader.read(home: home, configurationDirectory: binding.directory, proxy: proxy, timeoutSeconds: 25)
-            let document = binding.choice == .defaultLogin ? home.appendingPathComponent(".claude.json") : binding.directory.appendingPathComponent(".claude.json")
-            let metadata = (try? Data(contentsOf: document)).flatMap { try? CLIIdentity.metadata(CLIJSON.field($0, key: "oauthAccount")) }
-            return CLIBindingPolicy.assess(report, binding: binding, metadata: metadata)
-        }, launch: { [weak self] binding in
-            guard let self else { return }
-            guard !self.updating else { throw SafetyError("应用正在更新，请稍后打开 CLI。") }
-            if self.isDemo { return }
-            let config = try self.protection.files.loadConfig()
-            let proxy = try await self.checkedCLIProxy()
-            guard !self.updating, try self.protection.files.loadConfig() == config,
-                  try confirmedCurrentProfile() == self.current,
-                  self.protection.desktopScope == .subscription,
-                  self.active?.snapshot?.identity.samePrincipal(as: binding.identity) == true else {
-                throw SafetyError("账号或保护配置已变化，未打开终端。")
-            }
-            try await CLITerminalLaunch.open(binding: binding, home: home, proxy: proxy)
+        }, access: { [weak self] in
+            guard let self else { throw CLITerminalFailure.terminalUnavailable }
+            return try await self.prepareCLIConnection(home: home)
         }, backupDefaultLogin: { [weak self] expected in
             guard let self else { throw SafetyError("CLI 备份尚未完成。") }
             if self.isDemo { return }

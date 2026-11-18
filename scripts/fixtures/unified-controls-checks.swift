@@ -1,6 +1,21 @@
 import Foundation
 import SwitcherCore
 
+private extension CLIConnectionOperations {
+    @MainActor init(context: @escaping () -> CLIConnectionContext?, load: @escaping (CLIIdentity) throws -> CLIBinding?,
+                    save: @escaping (CLIBinding) throws -> Void, make: @escaping (CLIBindingChoice, CLIIdentity) throws -> CLIBinding,
+                    status: @escaping (CLIBinding) async throws -> CLIBindingStatus, launch: @escaping (CLIBinding) async throws -> Void,
+                    existingDirectory: @escaping (CLIBinding) -> Bool = { _ in false },
+                    localRecord: @escaping (CLIIdentity, CLIBinding?) -> CLILocalRecord = { _, _ in .unconfirmed },
+                    hasRecoverableBackup: @escaping (CLIConnectionContext) throws -> Bool = { _ in false },
+                    restoreLegacyBackup: @escaping (CLIConnectionContext) async throws -> Void = { _ in throw SafetyError("fixture backup unavailable") }) {
+        self.init(context: context, load: load, save: save, make: make,
+                  access: { CLIConnectionAccess(status: status, launch: { binding, _ in try await launch(binding) }) },
+                  existingDirectory: existingDirectory, localRecord: localRecord,
+                  hasRecoverableBackup: hasRecoverableBackup, restoreLegacyBackup: restoreLegacyBackup)
+    }
+}
+
 @MainActor func unifiedControlsChecks() async throws -> Int {
     var checks = 0
     func require(_ value: Bool, _ text: String) { precondition(value, text); checks += 1 }
@@ -22,7 +37,11 @@ import SwitcherCore
     }, launch: { launched.append($0) })
     var withRecords = operations
     var observedRecord: CLILocalRecord = .sameAccount(.defaultLogin)
-    withRecords.localRecord = { identity, _ in identity.samePrincipal(as: other) ? .notPrepared : observedRecord }
+    withRecords.localRecord = { identity, binding in
+        if identity.samePrincipal(as: other) { return .notPrepared }
+        if binding?.choice == .isolated, observedRecord == .differentAccount { return .notPrepared }
+        return observedRecord
+    }
     let controller = CLIConnectionController(operations: withRecords)
     controller.contextDidChange()
     require(controller.localRecord == .sameAccount(.defaultLogin) && controller.phase == .unlinked
@@ -129,7 +148,7 @@ import SwitcherCore
             restored.append($0)
         }))
     let personal = context!
-    await recovery.open()
+    await recovery.open(showLoginChoices: true)
     require(recovery.phase == .choosing && recovery.legacyBackupAvailable && recovery.defaultLoginAvailable &&
             openedForRecovery.isEmpty && restored.isEmpty && recoveryBinding == nil,
             "signed-out default remains a sign-in option even when an old backup exists")
@@ -151,13 +170,19 @@ import SwitcherCore
             "an existing verified isolated login wins over a signed-out default and old backup")
     reportedDefault = .matched
     await recovery.open()
-    require(recovery.phase == .matched && recovery.choice == .defaultLogin && backupChecks.count == 1,
-            "a verified default login takes priority even when the remembered isolated login also works")
+    require(recovery.phase == .matched && recovery.choice == .isolated && backupChecks.count == 1,
+            "the saved isolated choice wins when both directories match")
+    await recovery.open(showLoginChoices: true)
+    require(recovery.phase == .choosing && recovery.defaultMatches && recovery.choice == .isolated,
+            "manual terminal options offer a matching default without changing the saved choice")
+    await recovery.choose(.defaultLogin)
+    require(recovery.phase == .matched && recovery.choice == .defaultLogin,
+            "an explicit selection changes the preferred directory")
     reportedIsolated = .notLoggedIn
     reportedDefault = .notLoggedIn
     backupReadable = false
-    await recovery.open()
-    require(recovery.phase == .choosing && !recovery.legacyBackupAvailable && recovery.detail != nil && openedForRecovery.count == 2,
+    await recovery.open(showLoginChoices: true)
+    require(recovery.phase == .choosing && !recovery.legacyBackupAvailable && recovery.detail != nil && openedForRecovery.count == 3,
             "unknown backup status does not silently start a fresh login")
     backupReadable = true
     await recovery.open()
@@ -202,9 +227,66 @@ import SwitcherCore
             "an empty default directory is preferred for a new sign-in")
     freshLaunch = nil; defaultRecord = .differentAccount
     await signedOut.open()
-    require(signedOut.phase == .choosing && freshLaunch == nil,
+    require(signedOut.phase == .mismatched && freshLaunch == nil,
             "a signed-out default with another account's local record is not automatically reused")
 
+    let arbitraryProfile = CLIConnectionContext(profile: "Research Team", identity: other)
+    let separateBinding = try operations.make(.isolated, other)
+    var heldBinding: CLIBinding? = separateBinding
+    var preparations = 0
+    var inspections: [CLIBindingChoice] = []
+    var terminalIntents: [CLITerminalIntent] = []
+    var routeBlocked = false
+    var routeStatus: CLIBindingStatus = .notLoggedIn
+    let multiAccountOperations = CLIConnectionOperations(context: { arbitraryProfile }, load: { _ in heldBinding },
+        save: { heldBinding = $0 }, make: operations.make, access: {
+            preparations += 1
+            if routeBlocked { throw CLITerminalFailure.route(SafetyDecision(.countryUnknown)) }
+            return CLIConnectionAccess(status: { candidate in
+                inspections.append(candidate.choice)
+                return candidate.choice == .isolated ? routeStatus : .different
+            }, launch: { candidate, intent in
+                require(candidate == separateBinding, "only the selected account directory can be opened")
+                terminalIntents.append(intent)
+            })
+        }, backupDefaultLogin: { _ in preconditionFailure("separate terminal must not write the default backup") },
+        localRecord: { _, candidate in candidate?.choice == .isolated ? .notPrepared : .differentAccount },
+        restoreLegacyBackup: { _ in preconditionFailure("opening and changing directories never restore a backup") })
+    let multiAccount = CLIConnectionController(operations: multiAccountOperations)
+    await multiAccount.open()
+    require(multiAccount.expectedProfile == arbitraryProfile.profile && multiAccount.preferredChoice == .isolated
+            && multiAccount.phase == .waitingForLogin && preparations == 1 && inspections == [.isolated]
+            && terminalIntents == [.signIn],
+            "a remembered separate account uses one gate, no default login check, and official sign-in when signed out")
+    await multiAccount.confirmLogin()
+    require(multiAccount.phase == .waitingForLogin && terminalIntents == [.signIn],
+            "a local signed-out report cannot confirm the browser flow or launch a second process")
+    routeStatus = .matched
+    await multiAccount.confirmLogin()
+    await multiAccount.open()
+    require(multiAccount.phase == .matched && terminalIntents == [.signIn, .open],
+            "a completed match opens a session without restarting sign-in")
+    routeBlocked = true
+    await multiAccount.open()
+    require(multiAccount.phase == .failed && multiAccount.routeDecision?.reason == .countryUnknown
+            && terminalIntents == [.signIn, .open] && inspections.allSatisfy { $0 == .isolated },
+            "an indeterminate route fails closed before touching either login or opening a terminal")
+    routeBlocked = false
+    await multiAccount.open(showLoginChoices: true)
+    require(multiAccount.phase == .choosing && !multiAccount.defaultLoginAvailable && heldBinding == separateBinding,
+            "manual options keep another account's default login unavailable")
+    await multiAccount.choose(.defaultLogin)
+    require(multiAccount.phase == .mismatched && heldBinding == separateBinding && terminalIntents == [.signIn, .open],
+            "manual choice rechecks identity and refuses another account's default directory")
+    heldBinding = nil
+    inspections.removeAll()
+    routeStatus = .notLoggedIn
+    let newAccount = CLIConnectionController(operations: multiAccountOperations)
+    await newAccount.open()
+    require(newAccount.phase == .waitingForLogin && inspections == [.isolated] && heldBinding == separateBinding,
+            "a new account with a different default owner starts in its own directory")
+    require(AppLocalization.text("cli.openNamedIsolated", language: "zh", arguments: ["account": arbitraryProfile.profile])
+            .contains(arbitraryProfile.profile), "terminal action labels use the current account name")
     let env = CLITerminalLaunch.environment(home: fakeHome, directory: fakeHome.appendingPathComponent(".claude"), inherited: ["CLAUDE_CONFIG_DIR": "/other", "ANTHROPIC_API_KEY": "fictional", "CLAUDE_ENV_FILE": "/fixture/previous-session-env", "HTTPS_PROXY": "http://fixture.invalid:1234"])
     require(env["CLAUDE_CONFIG_DIR"] == nil && env["ANTHROPIC_API_KEY"] == nil && env["CLAUDE_ENV_FILE"] == nil && env["HTTPS_PROXY"] != nil,
             "the explicit subscription launcher selects the probed directory and retains proxy routing")
@@ -261,6 +343,23 @@ import SwitcherCore
         require(launchedFixture.status == 0 && launchedFixture.text == "fixture-ok",
                 "both launch modes use the checked proxy, keep loopback callbacks local, and ignore stale auth overrides")
     }
+    try """
+    #!/bin/sh
+    [ "$CLAUDE_CONFIG_DIR" = "$EXPECTED_CLI_DIR" ] || exit 11
+    [ "$HTTPS_PROXY" = 'http://127.0.0.1:9876' ] || exit 12
+    [ "$NO_PROXY" = 'localhost,127.0.0.1,::1' ] || exit 13
+    [ "$#" = 5 ] && [ "$1" = '--setting-sources' ] && [ -z "$2" ] &&
+        [ "$3 $4 $5" = 'auth login --claudeai' ] || exit 14
+    printf official-login-fixture
+    """.write(to: fakeCLI, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: fakeCLI.path)
+    try CLITerminalLaunch.script(binding: separate, executable: fakeCLI, home: quotedHome, proxy: proxy, intent: .signIn)
+        .write(to: launcher, atomically: true, encoding: .utf8)
+    let signInFixture = try await BoundedCLICommand.run(home: quotedHome, executable: URL(fileURLWithPath: "/bin/zsh"),
+        arguments: [launcher.path], inherited: ["HOME": quotedHome.path, "EXPECTED_CLI_DIR": separate.directory.path],
+        timeoutSeconds: 5, graceSeconds: 1)
+    require(signInFixture.status == 0 && signInFixture.text == "official-login-fixture",
+            "the separate sign-in launcher runs only native auth in the selected directory through the checked proxy")
     let cacheTime = Date().addingTimeInterval(-60)
     func usageDocument(for owner: CLIIdentity, used: Double) throws -> Data {
         try CLIJSON.encode(["oauthAccount": ["accountUuid": owner.accountID!, "organizationUuid": owner.organizationID!],

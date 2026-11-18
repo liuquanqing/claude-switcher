@@ -7,13 +7,19 @@ struct CLIConnectionContext: Equatable {
     let identity: CLIIdentity
 }
 
+enum CLITerminalIntent: Equatable { case open, signIn }
+
+@MainActor struct CLIConnectionAccess {
+    let status: (CLIBinding) async throws -> CLIBindingStatus
+    let launch: (CLIBinding, CLITerminalIntent) async throws -> Void
+}
+
 @MainActor struct CLIConnectionOperations {
     let context: () -> CLIConnectionContext?
     let load: (CLIIdentity) throws -> CLIBinding?
     let save: (CLIBinding) throws -> Void
     let make: (CLIBindingChoice, CLIIdentity) throws -> CLIBinding
-    let status: (CLIBinding) async throws -> CLIBindingStatus
-    let launch: (CLIBinding) async throws -> Void
+    let access: () async throws -> CLIConnectionAccess
     var backupDefaultLogin: (CLIConnectionContext) async throws -> Void = { _ in }
     var existingDirectory: (CLIBinding) -> Bool = { _ in false }
     var localRecord: (CLIIdentity, CLIBinding?) -> CLILocalRecord = { _, _ in .unconfirmed }
@@ -28,6 +34,8 @@ struct CLIConnectionContext: Equatable {
     @Published private(set) var phase: Phase = .unlinked
     @Published private(set) var choice: CLIBindingChoice?
     @Published private(set) var detail: String?
+    @Published private(set) var routeDecision: SafetyDecision?
+    @Published private(set) var failureTitle: String?
     @Published private(set) var defaultMatches = false
     @Published private(set) var defaultLoginAvailable = false
     @Published private(set) var expectedProfile = ""
@@ -38,6 +46,14 @@ struct CLIConnectionContext: Equatable {
     private let operations: CLIConnectionOperations
     private var binding: CLIBinding?
     var currentBinding: CLIBinding? { binding }
+    var preferredChoice: CLIBindingChoice? {
+        if let binding { return binding.choice }
+        switch localRecord {
+        case .sameAccount(let choice): return choice
+        case .differentAccount: return .isolated
+        case .notPrepared, .unconfirmed: return nil
+        }
+    }
     func bindingForCachedUsage() -> CLIBinding? {
         guard let context else { return nil }
         if let binding { return binding }
@@ -53,7 +69,7 @@ struct CLIConnectionContext: Equatable {
         guard observed != context else { return }
         generation += 1; context = observed
         legacyBackupAvailable = false
-        expectedProfile = observed?.profile ?? ""; detail = nil; defaultMatches = false; defaultLoginAvailable = false
+        expectedProfile = observed?.profile ?? ""; clearFeedback(); defaultMatches = false; defaultLoginAvailable = false
         checkedAt = nil; localRecord = .unconfirmed
         do { binding = try observed.flatMap { try operations.load($0.identity) } }
         catch { binding = nil; choice = nil; phase = .failed; detail = error.localizedDescription; return }
@@ -76,6 +92,19 @@ struct CLIConnectionContext: Equatable {
         }
         return true
     }
+    private func clearFeedback() {
+        detail = nil; routeDecision = nil; failureTitle = nil
+    }
+
+    private func recordFailure(_ error: Error) {
+        if let failure = error as? CLITerminalFailure {
+            failureTitle = failure.title
+            if case .route(let decision) = failure { routeDecision = decision }
+        }
+        phase = .failed
+        detail = error.localizedDescription
+    }
+
     func open(showLoginChoices: Bool = false) async {
         contextDidChange()
         guard !isBusy else { return }
@@ -83,80 +112,97 @@ struct CLIConnectionContext: Equatable {
             phase = .unconfirmed; detail = "桌面账号身份尚未确认，暂不能关联 CLI。"; return
         }
         let generation = self.generation
-        phase = .checking; detail = nil
+        phase = .checking; clearFeedback()
         legacyBackupAvailable = false
         defaultLoginAvailable = false
         defaultMatches = false
         do {
-            let remembered = binding
-            var loginDirectory: CLIBinding?
-            var rememberedMismatch = false
+            let access = try await operations.access()
+            guard stillCurrent(context, generation: generation) else { return }
+            if !showLoginChoices {
+                if let binding {
+                    try await inspectAndOpen(binding, access: access, context: context, generation: generation)
+                    return
+                }
+                if preferredChoice == .isolated {
+                    let candidate = try operations.make(.isolated, context.identity)
+                    try await inspectAndOpen(candidate, access: access, context: context, generation: generation)
+                    return
+                }
+            }
 
-            func inspect(_ candidate: CLIBinding) async throws -> Bool {
-                let status = try await operations.status(candidate)
-                // Return true when the caller should stop, including an obsolete request.
-                guard stillCurrent(context, generation: generation) else { return true }
-                if candidate.choice == .defaultLogin {
-                    defaultMatches = status == .matched
-                    defaultLoginAvailable = status == .notLoggedIn || status == .matched
+            let defaultBinding = try operations.make(.defaultLogin, context.identity)
+            let defaultStatus = try await access.status(defaultBinding)
+            guard stillCurrent(context, generation: generation) else { return }
+            let defaultRecord = operations.localRecord(context.identity, defaultBinding)
+            defaultMatches = defaultStatus == .matched
+            defaultLoginAvailable = defaultMatches || (defaultStatus == .notLoggedIn && defaultRecord != .differentAccount)
+            if !showLoginChoices {
+                if defaultMatches {
+                    try await select(defaultBinding, status: defaultStatus, access: access,
+                                     context: context, generation: generation)
+                    return
                 }
-                if status == .matched, !showLoginChoices {
-                    try await select(candidate, status: status, context: context, generation: generation)
-                    return true
-                }
-                if candidate == remembered, status == .different { rememberedMismatch = true }
-                if candidate.choice == .defaultLogin, status == .notLoggedIn {
-                    let record = operations.localRecord(context.identity, candidate)
-                    if record == .sameAccount(.defaultLogin) || record == .notPrepared {
-                        loginDirectory = candidate
+                let isolated = try operations.make(.isolated, context.identity)
+                if operations.existingDirectory(isolated) {
+                    let status = try await access.status(isolated)
+                    guard stillCurrent(context, generation: generation) else { return }
+                    if status == .matched {
+                        try await select(isolated, status: status, access: access, context: context, generation: generation)
+                        return
                     }
                 }
-                return false
-            }
-            let defaultBinding = try operations.make(.defaultLogin, context.identity)
-            if try await inspect(defaultBinding) { return }
-            if !showLoginChoices {
-                if let remembered, remembered.choice == .isolated {
-                    if try await inspect(remembered) { return }
-                } else {
-                    let isolated = try operations.make(.isolated, context.identity)
-                    if operations.existingDirectory(isolated), try await inspect(isolated) { return }
+                if defaultLoginAvailable,
+                   defaultRecord == .notPrepared || defaultRecord == .sameAccount(.defaultLogin) {
+                    try await select(defaultBinding, status: defaultStatus, access: access,
+                                     context: context, generation: generation)
+                    return
                 }
             }
-            if !defaultMatches {
+            if showLoginChoices, !defaultMatches {
                 do { legacyBackupAvailable = try operations.hasRecoverableBackup(context) }
-                catch is CLIInteractionRequired {
-                    phase = .choosing
-                    detail = "旧 CLI 备份暂无法检查。"
-                    return
-                }
-                catch {
-                    phase = .choosing
-                    detail = error.localizedDescription
-                    return
-                }
+                catch is CLIInteractionRequired { detail = "旧 CLI 备份暂无法检查。" }
+                catch { detail = error.localizedDescription }
             }
-            if showLoginChoices || legacyBackupAvailable {
-                phase = .choosing
-            } else if let loginDirectory {
-                try await select(loginDirectory, status: .notLoggedIn, context: context, generation: generation)
-            } else {
-                phase = rememberedMismatch ? .mismatched : .choosing
-            }
+            phase = .choosing
         } catch {
             guard stillCurrent(context, generation: generation) else { return }
-            phase = .failed; detail = error.localizedDescription
+            if showLoginChoices {
+                recordFailure(error)
+                phase = .choosing
+            } else {
+                recordFailure(error)
+            }
         }
     }
 
-    private func select(_ candidate: CLIBinding, status: CLIBindingStatus,
+    private func inspectAndOpen(_ candidate: CLIBinding, access: CLIConnectionAccess,
+                                context: CLIConnectionContext, generation: Int) async throws {
+        let status = try await access.status(candidate)
+        guard stillCurrent(context, generation: generation) else { return }
+        let differs = status == .different || (status == .notLoggedIn
+            && operations.localRecord(context.identity, candidate) == .differentAccount)
+        if candidate.choice == .defaultLogin {
+            defaultMatches = status == .matched
+            defaultLoginAvailable = !differs && (defaultMatches || status == .notLoggedIn)
+        }
+        guard !differs, status == .matched || status == .notLoggedIn else {
+            checkedAt = Date()
+            phase = differs ? .mismatched : .unconfirmed
+            if differs { localRecord = .differentAccount }
+            return
+        }
+        try await select(candidate, status: status, access: access, context: context, generation: generation)
+    }
+
+    private func select(_ candidate: CLIBinding, status: CLIBindingStatus, access: CLIConnectionAccess,
                         context: CLIConnectionContext, generation: Int) async throws {
         if binding != candidate {
             try operations.save(candidate)
             binding = candidate; choice = candidate.choice
             refreshLocalRecord()
         }
-        try await complete(status, binding: candidate, context: context, generation: generation)
+        try await complete(status, binding: candidate, access: access, context: context, generation: generation)
     }
 
     /// Invoked only by the explicit, account-scoped confirmation in the picker.
@@ -164,7 +210,7 @@ struct CLIConnectionContext: Equatable {
         contextDidChange()
         guard phase == .choosing, legacyBackupAvailable, context == expected else { return }
         let generation = self.generation
-        phase = .checking; detail = nil
+        phase = .checking; clearFeedback()
         do {
             try await operations.restoreLegacyBackup(expected)
             guard stillCurrent(expected, generation: generation) else { return }
@@ -184,44 +230,31 @@ struct CLIConnectionContext: Equatable {
             phase = .unconfirmed; detail = "桌面账号身份尚未确认，暂不能关联 CLI。"; return
         }
         let generation = self.generation
-        phase = .checking; detail = nil
+        phase = .checking; clearFeedback()
         legacyBackupAvailable = false
         do {
-            let chosen = try operations.make(selected, context.identity)
-            let status = try await operations.status(chosen)
+            let chosen = try binding.flatMap { $0.choice == selected ? $0 : nil }
+                ?? operations.make(selected, context.identity)
+            let access = try await operations.access()
             guard stillCurrent(context, generation: generation) else { return }
-            if selected == .defaultLogin {
-                defaultLoginAvailable = status == .matched || status == .notLoggedIn
-            }
-            // An explicitly different default must never be turned into a login
-            // prompt for this profile. Existing default history stays in place.
-            guard status == .matched || status == .notLoggedIn else {
-                phase = status == .different ? .mismatched : .unconfirmed; return
-            }
-            try operations.save(chosen); binding = chosen; choice = chosen.choice; refreshLocalRecord()
-            try await complete(status, binding: chosen, context: context, generation: generation)
+            try await inspectAndOpen(chosen, access: access, context: context, generation: generation)
         } catch {
             guard stillCurrent(context, generation: generation) else { return }
-            phase = .failed; detail = error.localizedDescription
+            recordFailure(error)
         }
     }
-    private func complete(_ status: CLIBindingStatus, binding: CLIBinding,
+    private func complete(_ status: CLIBindingStatus, binding: CLIBinding, access: CLIConnectionAccess,
                           context: CLIConnectionContext, generation: Int) async throws {
-        checkedAt = Date()
-        switch status {
-        case .matched, .notLoggedIn:
-            if status == .matched, binding.choice == .defaultLogin {
-                await backupDefaultLogin(context, generation: generation)
-                guard stillCurrent(context, generation: generation) else { return }
-            }
-            phase = .opening
-            try await operations.launch(binding)
+        if status == .matched, binding.choice == .defaultLogin {
+            await backupDefaultLogin(context, generation: generation)
             guard stillCurrent(context, generation: generation) else { return }
-            phase = status == .matched ? .matched : .waitingForLogin
-            if status == .matched { localRecord = .sameAccount(binding.choice) }
-        case .different: phase = .mismatched; localRecord = .differentAccount
-        case .unconfirmed: phase = .unconfirmed
         }
+        phase = .opening
+        try await access.launch(binding, status == .matched ? .open : .signIn)
+        guard stillCurrent(context, generation: generation) else { return }
+        checkedAt = Date()
+        phase = status == .matched ? .matched : .waitingForLogin
+        if status == .matched { localRecord = .sameAccount(binding.choice) }
     }
     private func backupDefaultLogin(_ context: CLIConnectionContext, generation: Int) async {
         do { try await operations.backupDefaultLogin(context) }
@@ -233,9 +266,11 @@ struct CLIConnectionContext: Equatable {
     func confirmLogin() async {
         contextDidChange()
         guard !isBusy, let context, let binding else { return }
-        let generation = self.generation; phase = .checking; detail = nil
+        let generation = self.generation; phase = .checking; clearFeedback()
         do {
-            let status = try await operations.status(binding)
+            let access = try await operations.access()
+            guard stillCurrent(context, generation: generation) else { return }
+            let status = try await access.status(binding)
             guard stillCurrent(context, generation: generation) else { return }
             checkedAt = Date()
             switch status {
@@ -245,24 +280,26 @@ struct CLIConnectionContext: Equatable {
                     guard stillCurrent(context, generation: generation) else { return }
                 }
                 phase = .matched; localRecord = .sameAccount(binding.choice)
-            case .notLoggedIn: phase = .waitingForLogin
+            case .notLoggedIn:
+                phase = .waitingForLogin
+                detail = "Claude Code 尚未确认登录完成。请在浏览器和终端完成授权后再核对。"
             case .different: phase = .mismatched; localRecord = .differentAccount
             case .unconfirmed: phase = .unconfirmed
             }
         } catch {
             guard stillCurrent(context, generation: generation) else { return }
-            phase = .failed; detail = error.localizedDescription
+            recordFailure(error)
         }
     }
     func resetChoice() {
         guard !isBusy else { return }
-        generation += 1; phase = .choosing; detail = nil
+        generation += 1; phase = .choosing; clearFeedback()
     }
     func defaultLoginDidChange() {
         refreshLocalRecord()
         defaultLoginAvailable = false
         guard choice == .defaultLogin else { return }
         if phase == .waitingForLogin { checkedAt = nil; return }
-        generation += 1; phase = .unconfirmed; checkedAt = nil; detail = nil
+        generation += 1; phase = .unconfirmed; checkedAt = nil; clearFeedback()
     }
 }
