@@ -142,9 +142,10 @@ import SwitcherCore
         }
     }
 
-    private func prepareTargetCLIRecovery(target: CLIProfileIdentity, io: NativeCLIStorage) async throws {
+    private func prepareTargetCLIRecovery(target: CLIProfileIdentity, io: NativeCLIStorage,
+                                          requireUsableLogin: Bool = false) async throws {
         do {
-            _ = try await CLIBackupRecovery.prepare(target: target, io: io, renew: { login, identity in
+            _ = try await CLIBackupRecovery.prepare(target: target, io: io, requireUsableLogin: requireUsableLogin, renew: { login, identity in
                 let proxy = try await self.checkedCLIProxy()
                 let native = OfficialCLIRecovery.native(home: FileManager.default.homeDirectoryForCurrentUser, proxy: proxy)
                 self.busy = "正在恢复 CLI 登录…"
@@ -368,7 +369,7 @@ import SwitcherCore
             guard context.0.identity?.samePrincipal(as: confirmedIdentity) == true else {
                 throw SafetyError("当前账号已变化，请重新检查旧 CLI 备份。")
             }
-            try await prepareTargetCLIRecovery(target: context.0, io: io)
+            try await prepareTargetCLIRecovery(target: context.0, io: io, requireUsableLogin: true)
             let plan = try await transaction.prepare(target: context.0, profiles: context.1, requiresTargetLogin: true,
                 remote: { try await self.checkedCLIIdentity($0) })
             try transaction.persistOutgoing(plan)
@@ -376,12 +377,11 @@ import SwitcherCore
                   active?.snapshot?.identity.samePrincipal(as: confirmedIdentity) == true else {
                 throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。")
             }
-            let restoration = try transaction.apply(plan)
+            let restoration = try transaction.apply(plan, requireUsableLogin: true)
             await refreshCLI(verify: false)
             presentCLIRestoration(restoration, target: target, identity: context.0.identity)
             usageRefreshPolicy.credentialsChanged(profile: target)
-            banner = restoration == .verifiedLogin ? "已恢复默认 CLI 登录。请在新终端使用。"
-                : "已恢复旧 CLI 登录，请在新终端确认登录状态。"
+            banner = "已恢复默认 CLI 登录。请在新终端使用。"
             return true
         } catch {
             banner = error.localizedDescription

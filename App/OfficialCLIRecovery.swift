@@ -74,9 +74,14 @@ struct CLIRecoveryTimedOut: Error, LocalizedError, Sendable {
             guard receipt.seedDigest == seed.digest || retained == seed else {
                 throw SafetyError("CLI 备份已变化，请先检查保留的恢复资料。")
             }
-            // Preserve native rotation after a failed backup write or an interrupted app.
-            if retained.usableAccessToken(now: Date()) != nil {
+            guard try retained.identity?.samePrincipal(as: expected) == true else {
+                throw SafetyError("CLI 恢复资料的账号或组织已变化，未继续恢复。")
+            }
+            if retained != seed, retained.usableAccessToken(now: Date()) != nil {
                 return result(retained, directory: directory, service: service)
+            }
+            guard retained.hasRefreshToken else {
+                throw SafetyError("恢复目录没有可用的刷新凭据，请在官方 CLI 重新登录。")
             }
         } else {
             // Initialization can stop between its private file writes and receipt.
@@ -99,7 +104,12 @@ struct CLIRecoveryTimedOut: Error, LocalizedError, Sendable {
         do { try await run(directory) }
         catch let timeout as CLIRecoveryTimedOut { throw timeout }
         catch { throw SafetyError("官方 CLI 自动恢复未完成，恢复资料已保留；请稍后重试。") }
-        return result(try readLogin(), directory: directory, service: service)
+        let renewed = try readLogin()
+        guard renewed != seed, try renewed.identity?.samePrincipal(as: expected) == true,
+              renewed.usableAccessToken(now: Date()) != nil else {
+            throw SafetyError("官方 CLI 未写入可核验的新登录，恢复资料已保留。")
+        }
+        return result(renewed, directory: directory, service: service)
     }
     private func result(_ login: CLIOwnedLogin, directory: URL, service: String) -> CLIRecoveredLogin {
         CLIRecoveredLogin(login: login, finish: { [self] in

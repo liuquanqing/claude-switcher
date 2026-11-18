@@ -126,9 +126,11 @@ actor FixtureGuardWorker: GuardWorking {
   let retainedRotation = try await interrupted.recover(recoverySeed,expected:recoveryIdentity)
   require(retainedRotation.login == recoveryNew && failedRuns == 1,"a failed native command retains its changed credential for verification on retry")
   try retainedRotation.finish()
-  let unchanged = OfficialCLIRecovery(root:root.appendingPathComponent("recovery-noop"),readSecret:{_ in nil},deleteSecret:{_ in},run:{_ in})
-  let noOpRecovery = try await unchanged.recover(recoverySeed,expected:recoveryIdentity)
-  require(noOpRecovery.login.usableAccessToken(now:Date()) == nil,"native exit zero with an unchanged expired credential is not fresh proof")
+  var noOpRuns = 0
+  let unchanged = OfficialCLIRecovery(root:root.appendingPathComponent("recovery-noop"),readSecret:{_ in nil},deleteSecret:{_ in},run:{_ in noOpRuns += 1})
+  var noOpRejected = false
+  do { _ = try await unchanged.recover(recoverySeed,expected:recoveryIdentity) } catch { noOpRejected = true }
+  require(noOpRejected && noOpRuns == 1,"native exit zero with an unchanged expired credential must fail recovery")
   let env = OfficialCLIRecovery.childEnvironment(home:root,directory:retainedRoot,inherited:["ANTHROPIC_API_KEY":"fixture", "ANTHROPIC_AUTH_TOKEN":"fixture", "CLAUDE_CONFIG_DIR":"/fixture/other", "CLAUDE_ENV_FILE":"/fixture/env", "HTTPS_PROXY":"http://fixture-proxy:8080", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC":"1"])
   require(env["ANTHROPIC_API_KEY"] == nil && env["ANTHROPIC_AUTH_TOKEN"] == nil && env["CLAUDE_ENV_FILE"] == nil && env["CLAUDE_CONFIG_DIR"] == retainedRoot.path,
           "recovery child rejects ambient API and project credentials and pins its isolated directory")
@@ -144,8 +146,15 @@ actor FixtureGuardWorker: GuardWorking {
   let partialDirectory = try FileManager.default.contentsOfDirectory(at:root.appendingPathComponent("recovery-noop"),includingPropertiesForKeys:nil).first!
   try FileManager.default.removeItem(at:partialDirectory.appendingPathComponent("switcher-recovery.json"))
   try FileManager.default.removeItem(at:partialDirectory.appendingPathComponent(".claude.json"))
-  let partialResumed = try await unchanged.recover(recoverySeed,expected:recoveryIdentity)
-  require(partialResumed.login == recoverySeed,"interrupted seed initialization completes only unchanged missing fields")
+  do { _ = try await unchanged.recover(recoverySeed,expected:recoveryIdentity) } catch {}
+  let resumedIdentityDocument = try CLIPrivateFile.read(partialDirectory.appendingPathComponent(".claude.json"))
+  require(noOpRuns == 2 && resumedIdentityDocument != nil,
+          "interrupted seed initialization completes missing fields and still requires a new login")
+  try CLIPrivateFile.write(CLIJSON.encode(["oauthAccount": ["accountUuid": "another-account", "organizationUuid": "another-org"]]),
+                           to: partialDirectory.appendingPathComponent(".claude.json"))
+  var foreignRecoveryRejected = false
+  do { _ = try await unchanged.recover(recoverySeed,expected:recoveryIdentity) } catch { foreignRecoveryRejected = true }
+  require(foreignRecoveryRejected && noOpRuns == 2,"retained workspace with a changed owner cannot invoke native renewal")
   try CLIPrivateFile.write(CLIJSON.replacing(nil,key:"claudeAiOauth",with:recoveryNew.oauth),to:partialDirectory.appendingPathComponent(".credentials.json"))
   try FileManager.default.removeItem(at:partialDirectory.appendingPathComponent("switcher-recovery.json"))
   var unknownRotationRejected = false

@@ -21,12 +21,17 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
     /// Called by explicit switch/sync, after the network gate and before Desktop quits.
     /// Does not write the default CLI, its marker, or any Desktop directory.
     public static func prepare(target: CLIProfileIdentity, io: CLICredentialIO, now: () -> Date = Date.init,
+                               requireUsableLogin: Bool = false,
                                renew: (CLIOwnedLogin, CLIIdentity) async throws -> CLIRecoveredLogin,
                                remote: (String) async throws -> CLIIdentity) async throws -> Outcome {
         let original = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
         guard let expected = target.identity, expected.isComplete else { return .notNeeded }
-        // A newer native login wins over a parked copy, even if the copy is expired.
-        if try original.identity?.samePrincipal(as: expected) == true { return .notNeeded }
+        if original.hasSecrets, try original.identity?.samePrincipal(as: expected) == true {
+            if requireUsableLogin, original.usableAccessToken(now: now()) == nil {
+                throw SafetyError("当前默认 CLI 仍保留该账号的凭据。请在官方 CLI 中更新登录，再核对状态。")
+            }
+            return .notNeeded
+        }
         guard let raw = try io.readBackup(target.name) else { return .notNeeded }
         let backup = try CLIBackup(data: raw)
         guard let identity = try backup.login.identity, identity.samePrincipal(as: expected) else {
@@ -38,7 +43,7 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
         }
         // Preserve the established stored-login path. Native CLI can renew a
         // previously verified login when it is next used; do not force rotation.
-        if try backup.trustedIdentity()?.samePrincipal(as: expected) == true { return .notNeeded }
+        if !requireUsableLogin, try backup.trustedIdentity()?.samePrincipal(as: expected) == true { return .notNeeded }
         let recovered = try await renew(backup.login, expected)
         guard let actualLocal = try recovered.login.identity, actualLocal.samePrincipal(as: expected),
               let access = recovered.login.usableAccessToken(now: now()) else {

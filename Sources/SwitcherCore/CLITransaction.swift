@@ -149,8 +149,11 @@ public struct PreparedCLISwitch {
             throw SafetyError("CLI 登录或目标备份已变化，未覆盖新登录，请重试。")
         }
     }
-    public func apply(_ plan: PreparedCLISwitch) throws -> CLIRestoration {
+    public func apply(_ plan: PreparedCLISwitch, requireUsableLogin: Bool = false) throws -> CLIRestoration {
         try revalidate(plan)
+        if requireUsableLogin, plan.restoration != .verifiedLogin || plan.desired.usableAccessToken(now: now()) == nil {
+            throw SafetyError("恢复时未能确认有效 CLI 登录，请在官方 CLI 登录后重试。")
+        }
         let oldMarker = plan.originalMarker
         var credentialsAttempted = false, identityAttempted = false, markerAttempted = false
         var credentialsWerePresent = false, identityWasPresent = false

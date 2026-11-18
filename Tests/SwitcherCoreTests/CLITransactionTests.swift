@@ -197,7 +197,11 @@ import XCTest
         let (io, transaction) = try fixture(); let oldDate = date.addingTimeInterval(-3600)
         io.backups["B"] = try CLIBackup.verifiedData(login: login(b, token: "access-b", expired: true), identity: b, now: oldDate)
         let p = try await plan(transaction); XCTAssertEqual(p.restoration, .storedLogin)
-        try transaction.persistOutgoing(p); XCTAssertEqual(try transaction.apply(p), .storedLogin)
+        try transaction.persistOutgoing(p)
+        let events = io.events
+        XCTAssertThrowsError(try transaction.apply(p, requireUsableLogin: true))
+        XCTAssertEqual(io.events, events)
+        XCTAssertEqual(try transaction.apply(p), .storedLogin)
         XCTAssertEqual(try CLIBackup(data: io.backups["B"]!).verification?.checkedAt, oldDate)
     }
     func testExpiredBackupWithoutRefreshIsNotUsableEvenWithProof() async throws {
@@ -205,6 +209,19 @@ import XCTest
         io.backups["B"] = try CLIBackup.verifiedData(login: login(b, token: "access-b", expired: true, refresh: false), identity: b, now: date.addingTimeInterval(-3600))
         do { _ = try await plan(transaction); XCTFail("no refresh") }
         catch { XCTAssertTrue(io.events.isEmpty) }
+    }
+    func testExplicitRestoreRejectsTokenThatExpiresBetweenVerificationAndApply() async throws {
+        let (io, _) = try fixture()
+        var now = date
+        let transaction = CLITransaction(io: io, now: { now })
+        let original = try transaction.readOwned()
+        let prepared = try await plan(transaction)
+        try transaction.persistOutgoing(prepared)
+        let events = io.events
+        now = date.addingTimeInterval(7200)
+        XCTAssertThrowsError(try transaction.apply(prepared, requireUsableLogin: true))
+        XCTAssertEqual(io.events, events)
+        XCTAssertEqual(try transaction.readOwned(), original)
     }
     func testCredentialChangeDuringRemoteCheckAborts() async throws {
         let (io, transaction) = try fixture()

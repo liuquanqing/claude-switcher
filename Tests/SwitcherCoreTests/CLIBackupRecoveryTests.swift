@@ -38,9 +38,11 @@ import XCTest
         return io
     }
     func recover(_ io: RecoveryMemoryIO,
+                 requireUsableLogin: Bool = false,
                  renew: (CLIOwnedLogin, CLIIdentity) async throws -> CLIRecoveredLogin,
                  remote: ((String) async throws -> CLIIdentity)? = nil) async throws -> CLIBackupRecovery.Outcome {
-        try await CLIBackupRecovery.prepare(target:.init(name:"B",identity:b), io:io, now:{self.date}, renew:renew,
+        try await CLIBackupRecovery.prepare(target:.init(name:"B",identity:b), io:io, now:{self.date},
+            requireUsableLogin:requireUsableLogin, renew:renew,
             remote:remote ?? { token in guard token == "new-b" else { throw SafetyError("fake stale") }; return self.b })
     }
     func testLegacyRenewalUpgradesBackupWithoutTouchingDefaultAndRoundTrips() async throws {
@@ -77,6 +79,55 @@ import XCTest
         io.document = try CLIJSON.replacing(nil,key:"oauthAccount",with:newer.metadata)
         let outcome = try await recover(io,renew:{_,_ in XCTFail("must preserve live login"); throw SafetyError("unexpected")})
         XCTAssertEqual(outcome,.notNeeded); XCTAssertEqual(io.liveWrites,0)
+    }
+    func testExplicitRestoreRenewsExpiredBackupWhenOnlyMatchingAccountMetadataRemains() async throws {
+        for previouslyVerified in [false, true] {
+            let io = try fixture()
+            let saved = try login(b, token: "old-b", expired: true)
+            let renewed = try login(b, token: "new-b")
+            io.credentials = try CLIJSON.encode(["claudeAiOauth": ["accessToken": "", "refreshToken": "", "expiresAt": 0]])
+            io.document = try CLIJSON.replacing(nil, key: "oauthAccount", with: saved.metadata)
+            io.backups["B"] = previouslyVerified
+                ? try CLIBackup.verifiedData(login: saved, identity: b, now: date.addingTimeInterval(-3600))
+                : try raw(saved)
+            var finished = false
+            let result = try await recover(io, requireUsableLogin: true, renew: { seed, identity in
+                XCTAssertEqual(seed, saved)
+                XCTAssertEqual(identity, self.b)
+                return CLIRecoveredLogin(login: renewed, finish: { finished = true })
+            })
+            XCTAssertEqual(result, .recovered)
+            XCTAssertTrue(finished)
+            XCTAssertEqual(io.liveWrites, 0)
+            let target = CLIProfileIdentity(name: "B", identity: b)
+            let transaction = CLITransaction(io: io, now: { self.date })
+            let plan = try await transaction.prepare(target: target, profiles: [target], requiresTargetLogin: true, remote: {
+                XCTAssertEqual($0, "new-b")
+                return self.b
+            })
+            try transaction.persistOutgoing(plan)
+            XCTAssertEqual(try transaction.apply(plan, requireUsableLogin: true), .verifiedLogin)
+            XCTAssertEqual(try transaction.readOwned(), renewed)
+        }
+    }
+
+    func testExplicitRestorePreservesExistingExpiredDefaultCredentialsForNativeRenewal() async throws {
+        let io = try fixture(), live = try login(b, token: "current-b", expired: true)
+        io.credentials = try CLIJSON.replacing(nil, key: "claudeAiOauth", with: live.oauth)
+        io.document = try CLIJSON.replacing(nil, key: "oauthAccount", with: live.metadata)
+        let previous = io.backups
+        do {
+            _ = try await recover(io, requireUsableLogin: true, renew: { _, _ in
+                XCTFail("existing refresh credential must not be duplicated into a recovery directory")
+                throw SafetyError("unexpected renewal")
+            })
+            XCTFail("an expired default must not be reported as restored")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("官方 CLI"))
+        }
+        XCTAssertEqual(try CLITransaction(io: io).readOwned(), live)
+        XCTAssertEqual(io.backups, previous)
+        XCTAssertEqual(io.liveWrites, 0)
     }
     func testMissingRefreshRequiresLoginWithoutMutation() async throws {
         let io = try fixture(); io.backups["B"] = try raw(login(b,token:"old-b",expired:true,refresh:false))
