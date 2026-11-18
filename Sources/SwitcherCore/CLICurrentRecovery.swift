@@ -66,13 +66,13 @@ public struct CLIInteractionRequired: Error, LocalizedError, Sendable {
         }
         guard try contextIsCurrent() else { return .contextChanged }
         let recovered = try live()
-        if !recovered.hasSecrets && result == .loginRequired { return .needsLogin }
         guard try recovered.identity?.samePrincipal(as: expected) == true else { return .contextChanged }
+        if !recovered.hasSecrets && result == .loginRequired { return .needsLogin }
         // A timeout/error can happen after the native CLI saved a rotated token.
         // Read it back before interpreting command output, and never roll it back.
         guard let access = recovered.usableAccessToken(now: now()) else {
             switch result {
-            case .loginRequired: return .needsLogin
+            case .loginRequired: return recovered == before ? .needsLogin : .contextChanged
             case .authorizationRequired: return .authorizationRequired
             case .unsupported: return .unsupported
             default: return .retryLater

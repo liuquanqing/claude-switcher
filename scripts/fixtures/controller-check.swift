@@ -1114,6 +1114,21 @@ actor FixtureGuardWorker: GuardWorking {
    CLIStatusPresentation(status: .unverified, email: "saved@example.test", detail: "fixture status query failed")
   }
   require(quietStore.cliStatusCheckedAt != nil && quietStore.cliStatusDetail == "fixture status query failed", "real failed check retains its result even when a saved email exists")
+  let newLoginStore = Store(demo: true)
+  newLoginStore.cliStatus = .needsLogin
+  let newLoginIdentity = newLoginStore.active!.snapshot!.identity
+  let lateLoginProbe = FixtureCLIProbe()
+  let lateLoginCheck = Task { @MainActor in
+   await newLoginStore.updateCLIStatus { await lateLoginProbe.run() }
+  }
+  await lateLoginProbe.waitUntilStarted()
+  newLoginStore.publishLinkedDefaultCLIReport(newLoginIdentity, profile: newLoginStore.current)
+  let newLoginCheckTime = newLoginStore.cliStatusCheckedAt
+  lateLoginProbe.complete(CLIStatusPresentation(status: .needsLogin))
+  await lateLoginCheck.value
+  require(newLoginStore.cliStatus == .reported && newLoginStore.cliStatusCheckedAt == newLoginCheckTime
+          && newLoginStore.cliObservedIdentity?.samePrincipal(as: newLoginIdentity) == true,
+          "a late signed-out result preserves the newer native report for the same desktop account")
   let proofStore = Store(demo: true)
   let proofIdentity = proofStore.profiles[0].snapshot!.identity
   await proofStore.updateCLIStatus {

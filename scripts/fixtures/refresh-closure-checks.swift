@@ -87,7 +87,9 @@ import SwitcherCore
     require(confirmedAgain == .renewed && rejected.cliStatus == .matched && confirmations==2,"one new native success plus an online identity check clears an old rejection even when the token bytes did not change")
     let rejectedBackground=Store(demo:true);rejectedBackground.invalidateCLIStatus()
     let backgroundRejection=await rejectedBackground.recoverCurrentCLI(io:io,context:{true},gate:{true},native:{preconditionFailure("no background system prompt")},verify:{_ in throw ProfileHTTPFailure(code:403)},now:now)
-    require(backgroundRejection == .authorizationRequired && !rejectedBackground.currentCLIRecoveryDidRunNative,"an online rejection requests user confirmation without pretending HTTP 403 permanently revokes the login")
+    require(backgroundRejection == .retryLater && !rejectedBackground.currentCLIRecoveryDidRunNative
+            && rejectedBackground.currentCLIRecoveryOutcome == nil && rejectedBackground.banner == nil,
+            "a read-only HTTP rejection leaves the login presentation and recovery decisions to newer evidence")
     var asks:[Bool]=[]
     let budget=NativeCLIStorage(identity:document,marker:home.appendingPathComponent("marker"),credentialFile:home.appendingPathComponent(".claude/no-file"),interactionReader:{_,_,allow in asks.append(allow);return credential})
     _=try budget.readCredentials();_=try budget.readCredentials();_=try budget.readBackup("Personal");_=try budget.readBackup("Personal")

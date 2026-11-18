@@ -136,6 +136,19 @@ import SwitcherCore
     await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(244), operation: snapshot)
     require(watcherCalls == 3, "an explicit rejected login cannot silently replace a backup")
     try new.write(to: home.appendingPathComponent(".claude/.credentials.json"))
+    let delayedRejectionStore = Store(demo: true)
+    delayedRejectionStore.cliStatus = .reported
+    let delayedIO = CurrentFixtureIO(home: home)
+    let reorderedCredential = try data(token: "fixture-later-login", seconds: 7200)
+    let delayed = await delayedRejectionStore.recoverCurrentCLI(io: delayedIO, context: { true }, gate: { true }, native: {
+        preconditionFailure("a rejection for old credentials must not start another native login")
+    }, verify: { _ in
+        try reorderedCredential.write(to: home.appendingPathComponent(".claude/.credentials.json"))
+        throw ProfileHTTPFailure(code: 401)
+    }, now: fixtureNow)
+    require(delayed == .contextChanged && delayedRejectionStore.cliStatus == .reported
+            && delayedRejectionStore.banner == nil && delayedIO.backups.isEmpty && delayedIO.liveWrites == 0,
+            "late HTTP rejection cannot change the current login or trigger repair after a newer login is saved")
     let demoRefusal=await store.recoverCurrentCLI(manual:true)
     require(demoRefusal == .unsupported,"demo mode refuses all production recovery adapters")
     let consentStore=Store(demo:true)

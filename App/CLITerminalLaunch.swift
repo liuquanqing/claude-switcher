@@ -64,12 +64,14 @@ enum CLITerminalLaunch {
         return "/usr/bin/env " + unset + " " + directory + routing + quote(executable.path)
     }
     static func script(binding: CLIBinding, executable: URL, home: URL, proxy: UsageQueryProxy,
-                       intent: CLITerminalIntent = .open) throws -> String {
-        let homeQuoted = "'" + home.path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+                       intent: CLITerminalIntent = .open, authorizationInstructions: String = "") throws -> String {
+        func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let launch = try command(binding: binding, executable: executable, home: home, proxy: proxy)
         // The official sign-in runs by itself. Account matching is checked before opening an interactive session.
         let arguments = intent == .signIn ? " --setting-sources '' auth login --claudeai" : ""
-        return "#!/bin/zsh\ncd " + homeQuoted + " || exit 1\nexec " + launch + arguments + "\n"
+        let instructions = intent == .signIn && !authorizationInstructions.isEmpty
+            ? "printf '%s\\n\\n' " + quote(authorizationInstructions) + "\n" : ""
+        return "#!/bin/zsh\ncd " + quote(home.path) + " || exit 1\n" + instructions + "exec " + launch + arguments + "\n"
     }
     static func readSystemProxy() throws -> UsageQueryProxy {
         let (status, proxyText) = try LocalCommand.run("/usr/sbin/scutil", ["--proxy"])
@@ -95,7 +97,7 @@ enum CLITerminalLaunch {
         return NetworkObservation.countryFromTrace(lines.dropLast().joined(separator: "\n"), httpStatus: code)
     }
     @MainActor static func open(binding: CLIBinding, home: URL, proxy: UsageQueryProxy,
-                                intent: CLITerminalIntent) async throws {
+                                intent: CLITerminalIntent, authorizationInstructions: String) async throws {
         try binding.validate(home: home)
         let executable = try executable(home: home)
         guard let terminal = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Terminal") else {
@@ -109,7 +111,8 @@ enum CLITerminalLaunch {
             .appendingPathComponent("dev.claudeswitcher.candidate/CLI Launchers")
         try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let command = cache.appendingPathComponent(UUID().uuidString + ".command")
-        try script(binding: binding, executable: executable, home: home, proxy: proxy, intent: intent).write(to: command, atomically: true, encoding: .utf8)
+        try script(binding: binding, executable: executable, home: home, proxy: proxy, intent: intent,
+                   authorizationInstructions: authorizationInstructions).write(to: command, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: command.path)
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
@@ -172,7 +175,8 @@ enum CLITerminalLaunch {
                   self.active?.snapshot?.identity.samePrincipal(as: binding.identity) == true else {
                 throw SafetyError("账号或保护配置已变化，未打开终端。")
             }
-            try await CLITerminalLaunch.open(binding: binding, home: home, proxy: proxy, intent: intent)
+            try await CLITerminalLaunch.open(binding: binding, home: home, proxy: proxy, intent: intent,
+                authorizationInstructions: appText("cli.authorizationTerminalInstructions", language: self.appLanguage))
         })
     }
 
@@ -216,9 +220,16 @@ enum CLITerminalLaunch {
                 self.banner = "已登录，但备份尚未更新。请点击刷新重试。"
                 throw error
             }
-        }, existingDirectory: { [weak self] binding in
-            guard self?.isDemo != true else { return false }
-            return FileManager.default.fileExists(atPath: binding.directory.path)
+        }, focusAuthorizationTerminal: { [weak self] in
+            if self?.isDemo == true { return true }
+            guard let terminal = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first,
+                  !terminal.isTerminated else { return false }
+            return terminal.isActive || terminal.activate(options: [])
+        }, didVerifyLogin: { [weak self] expected, binding in
+            self?.clearStaleCLIUsageLoginNotice(profile: expected.profile, identity: binding.identity)
+            if binding.choice == .defaultLogin {
+                self?.publishLinkedDefaultCLIReport(binding.identity, profile: expected.profile)
+            }
         }, localRecord: { [weak self] identity, binding in
             guard let self else { return .unconfirmed }
             if self.isDemo {

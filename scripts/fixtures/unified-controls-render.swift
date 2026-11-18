@@ -161,6 +161,11 @@ actor FictionalRenderGuard: GuardWorking {
     let context: CLIConnectionContext? = store.protection.desktopScope == .subscription
      ? CLIConnectionContext(profile:store.current,identity:store.active!.snapshot!.identity) : nil
     var binding:CLIBinding?
+    if let context, ["failed", "route-failed", "different"].contains(state) {
+     let home = URL(fileURLWithPath:"/fictional-home")
+     binding = CLIBinding(identity:context.identity,choice:.defaultLogin,
+      directory:try CLIBinding.directory(for:.defaultLogin,identity:context.identity,home:home))
+    }
     let connection=CLIConnectionController(operations:.init(context:{context},load:{_ in binding},save:{binding=$0},make:{mode,identity in
      CLIBinding(identity:identity,choice:mode,directory:try CLIBinding.directory(for:mode,identity:identity,home:URL(fileURLWithPath:"/fictional-home")))
     },access:{
@@ -180,7 +185,8 @@ actor FictionalRenderGuard: GuardWorking {
      }
     }))
     store.cliConnection=connection
-    if state == "waiting" { await connection.choose(.isolated) }
+    if state == "waiting" || state == "separate" { await connection.choose(.isolated) }
+    else if state == "default" { await connection.choose(.defaultLogin) }
     else if state != "unlinked" && !state.hasPrefix("local-") { await connection.open() }
     connection.contextDidChange()
     try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"cli-"+state+"-"+language,width:500)

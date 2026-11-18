@@ -21,7 +21,8 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     let make: (CLIBindingChoice, CLIIdentity) throws -> CLIBinding
     let access: () async throws -> CLIConnectionAccess
     var backupDefaultLogin: (CLIConnectionContext) async throws -> Void = { _ in }
-    var existingDirectory: (CLIBinding) -> Bool = { _ in false }
+    var focusAuthorizationTerminal: () -> Bool = { false }
+    var didVerifyLogin: (CLIConnectionContext, CLIBinding) -> Void = { _, _ in }
     var localRecord: (CLIIdentity, CLIBinding?) -> CLILocalRecord = { _, _ in .unconfirmed }
     var hasRecoverableBackup: (CLIConnectionContext) throws -> Bool = { _ in false }
     var restoreLegacyBackup: (CLIConnectionContext) async throws -> Void = { _ in
@@ -112,6 +113,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             phase = .unconfirmed; detail = "桌面账号身份尚未确认，暂不能关联 CLI。"; return
         }
         let generation = self.generation
+        let needsPicker = showLoginChoices || binding == nil
         phase = .checking; clearFeedback()
         legacyBackupAvailable = false
         defaultLoginAvailable = false
@@ -119,16 +121,9 @@ enum CLITerminalIntent: Equatable { case open, signIn }
         do {
             let access = try await operations.access()
             guard stillCurrent(context, generation: generation) else { return }
-            if !showLoginChoices {
-                if let binding {
-                    try await inspectAndOpen(binding, access: access, context: context, generation: generation)
-                    return
-                }
-                if preferredChoice == .isolated {
-                    let candidate = try operations.make(.isolated, context.identity)
-                    try await inspectAndOpen(candidate, access: access, context: context, generation: generation)
-                    return
-                }
+            if !needsPicker, let binding {
+                try await inspectAndOpen(binding, access: access, context: context, generation: generation)
+                return
             }
 
             let defaultBinding = try operations.make(.defaultLogin, context.identity)
@@ -137,28 +132,6 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             let defaultRecord = operations.localRecord(context.identity, defaultBinding)
             defaultMatches = defaultStatus == .matched
             defaultLoginAvailable = defaultMatches || (defaultStatus == .notLoggedIn && defaultRecord != .differentAccount)
-            if !showLoginChoices {
-                if defaultMatches {
-                    try await select(defaultBinding, status: defaultStatus, access: access,
-                                     context: context, generation: generation)
-                    return
-                }
-                let isolated = try operations.make(.isolated, context.identity)
-                if operations.existingDirectory(isolated) {
-                    let status = try await access.status(isolated)
-                    guard stillCurrent(context, generation: generation) else { return }
-                    if status == .matched {
-                        try await select(isolated, status: status, access: access, context: context, generation: generation)
-                        return
-                    }
-                }
-                if defaultLoginAvailable,
-                   defaultRecord == .notPrepared || defaultRecord == .sameAccount(.defaultLogin) {
-                    try await select(defaultBinding, status: defaultStatus, access: access,
-                                     context: context, generation: generation)
-                    return
-                }
-            }
             if showLoginChoices, !defaultMatches {
                 do { legacyBackupAvailable = try operations.hasRecoverableBackup(context) }
                 catch is CLIInteractionRequired { detail = "旧 CLI 备份暂无法检查。" }
@@ -167,12 +140,8 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             phase = .choosing
         } catch {
             guard stillCurrent(context, generation: generation) else { return }
-            if showLoginChoices {
-                recordFailure(error)
-                phase = .choosing
-            } else {
-                recordFailure(error)
-            }
+            recordFailure(error)
+            if needsPicker { phase = .choosing }
         }
     }
 
@@ -254,7 +223,10 @@ enum CLITerminalIntent: Equatable { case open, signIn }
         guard stillCurrent(context, generation: generation) else { return }
         checkedAt = Date()
         phase = status == .matched ? .matched : .waitingForLogin
-        if status == .matched { localRecord = .sameAccount(binding.choice) }
+        if status == .matched {
+            localRecord = .sameAccount(binding.choice)
+            operations.didVerifyLogin(context, binding)
+        }
     }
     private func backupDefaultLogin(_ context: CLIConnectionContext, generation: Int) async {
         do { try await operations.backupDefaultLogin(context) }
@@ -280,6 +252,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
                     guard stillCurrent(context, generation: generation) else { return }
                 }
                 phase = .matched; localRecord = .sameAccount(binding.choice)
+                operations.didVerifyLogin(context, binding)
             case .notLoggedIn:
                 phase = .waitingForLogin
                 detail = "Claude Code 尚未确认登录完成。请在浏览器和终端完成授权后再核对。"
@@ -291,6 +264,14 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             recordFailure(error)
         }
     }
+    func returnToAuthorizationTerminal() {
+        contextDidChange()
+        guard phase == .waitingForLogin, binding != nil else { return }
+        if !operations.focusAuthorizationTerminal() {
+            detail = "未能切回授权终端。如果已关闭，请从终端选项重新开始。"
+        }
+    }
+
     func resetChoice() {
         guard !isBusy else { return }
         generation += 1; phase = .choosing; clearFeedback()

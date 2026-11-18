@@ -126,18 +126,36 @@ enum AccountUsageQuery {
         guard let localIdentity = try identity(), localIdentity.samePrincipal(as: binding.identity) else {
             throw SafetyError("查询前 CLI 账号发生变化，保留原额度。")
         }
-        observe("checkingNativeLogin")
-        let status = try await child(executable.path, ["--setting-sources", "", "auth", "status"])
-        guard !status.timedOut, [0, 1].contains(status.status),
-              let report = try? CLIReportedStatus(data: Data(status.text.utf8)),
-              (status.status == 0) == report.loggedIn,
-              try identity()?.samePrincipal(as: binding.identity) == true else {
-            observe("nativeIdentityUnconfirmed")
-            throw Failure.loginUnconfirmed
+        func nativeLoginStatus() async throws -> CLIBindingStatus {
+            let status = try await child(executable.path, ["--setting-sources", "", "auth", "status"])
+            guard !status.timedOut, [0, 1].contains(status.status),
+                  let report = try? CLIReportedStatus(data: Data(status.text.utf8)),
+                  (status.status == 0) == report.loggedIn,
+                  let savedIdentity = try identity(), savedIdentity.samePrincipal(as: binding.identity) else {
+                observe("nativeIdentityUnconfirmed")
+                throw Failure.loginUnconfirmed
+            }
+            return CLIBindingPolicy.assess(report, binding: binding, metadata: savedIdentity)
         }
-        let match = CLIBindingPolicy.assess(report, binding: binding, metadata: localIdentity)
-        if match == .notLoggedIn { observe("nativeLoginRequired"); throw Failure.loginRequired }
-        guard status.status == 0, match == .matched else {
+        func confirmSignedOut() async throws -> Never {
+            // The earlier process can be using an obsolete login for this same account.
+            observe("recheckingNativeLogin")
+            switch try await nativeLoginStatus() {
+            case .notLoggedIn:
+                observe("nativeLoginRequired")
+                throw Failure.loginRequired
+            case .matched:
+                observe("nativeLoginStillPresent")
+                throw Failure.noReading
+            case .different, .unconfirmed:
+                observe("nativeIdentityUnconfirmed")
+                throw Failure.loginUnconfirmed
+            }
+        }
+        observe("checkingNativeLogin")
+        let match = try await nativeLoginStatus()
+        if match == .notLoggedIn { try await confirmSignedOut() }
+        guard match == .matched else {
             observe("nativeIdentityUnconfirmed")
             throw Failure.loginUnconfirmed
         }
@@ -158,8 +176,7 @@ enum AccountUsageQuery {
         do {
             nativeSample = try OfficialCLIUsageOutput.read(result.text, identity: binding.identity, observedAt: Date())
         } catch OfficialCLIUsageOutput.Failure.loginRequired {
-            observe("nativeLoginRequired")
-            throw Failure.loginRequired
+            try await confirmSignedOut()
         } catch OfficialCLIUsageOutput.Failure.invalidReading {
             observe("invalidNativeReading")
             throw Failure.noReading
@@ -186,6 +203,15 @@ enum AccountUsageQuery {
 }
 
 @MainActor extension Store {
+    func clearStaleCLIUsageLoginNotice(profile: String, identity: CLIIdentity) {
+        guard let index = profiles.firstIndex(where: {
+            $0.name == profile && $0.snapshot?.identity.samePrincipal(as: identity) == true && $0.usageState == .loginRequired
+        }) else { return }
+        profiles[index].usageState = .cached
+        profiles[index].error = nil
+        usageRefreshPolicy.credentialsChanged(profile: profile)
+    }
+
     private func prepareAccountUsageQuery(home: URL) async throws -> PreparedAccountUsageQuery {
         let gate = await protection.preflight(target: .subscriptionUsage)
         guard gate.allowed else { throw SafetyError(gate.message) }
@@ -276,7 +302,7 @@ enum AccountUsageQuery {
             var stages: [String] = []
             defer {
                 let runs = stages.filter { $0 == "runningOfficialCLI" }.count
-                lastRefreshDiagnostics?.nativeHelperRuns += runs + stages.filter { $0 == "checkingNativeLogin" }.count
+                lastRefreshDiagnostics?.nativeHelperRuns += runs + stages.filter { $0 == "checkingNativeLogin" || $0 == "recheckingNativeLogin" }.count
                 lastRefreshDiagnostics?.freshQuotaRequests += runs
                 lastRefreshDiagnostics?.usageQueries.append(.init(profileIndex: offset, stages: stages))
             }
@@ -288,11 +314,13 @@ enum AccountUsageQuery {
                 usageRefreshPolicy.began(profile: name, now: Date())
                 try adopt(await query.read(binding, { stages.append($0) }), for: name, binding: binding)
             } catch {
+                guard let index = profileIndex(name, binding.identity),
+                      (try? AccountUsageQuery.matchingBinding(for: binding.identity, profile: name, repository: repo)) == binding else { continue }
                 // A new login or readable output can be repaired by the user.
                 // Leave the usual one-minute request spacing, rather than
                 // applying the longer backoff for network and service errors.
                 if !(error is AccountUsageQuery.Failure) { usageRefreshPolicy.failed(profile: name, now: Date()) }
-                if let index = profileIndex(name, binding.identity) { profiles[index].finishUsageRefresh(.failure(error)) }
+                profiles[index].finishUsageRefresh(.failure(error))
                 issues.append(name + "：" + error.localizedDescription)
             }
         }

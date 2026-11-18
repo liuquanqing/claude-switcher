@@ -66,6 +66,28 @@ import SwitcherCore
         } catch { checks += 1 }
         if ["wrongCountry", "noCountry", "timeout"].contains(failure) { require(!startedCLI, "failed route never starts authenticated query") }
     }
+    let signedOutReport = String(decoding: try CLIJSON.encode(["loggedIn": false, "authMethod": "none",
+        "configDirectory": binding.directory.path]), as: UTF8.self)
+    for (stillSignedIn, expectedFailure) in [(true, AccountUsageQuery.Failure.noReading), (false, .loginRequired)] {
+        try write()
+        var nativeChecks = 0
+        do {
+            _ = try await AccountUsageQuery.query(home: root, binding: binding, proxy: proxy, country: "SG",
+                executable: executable, run: { _, args, _ in
+                    if args[2] == "/usr/bin/curl" { return .init(status: 0, text: "loc=SG", timedOut: false) }
+                    if args.contains("auth") {
+                        nativeChecks += 1
+                        if nativeChecks == 1 || stillSignedIn { return .init(status: 0, text: report, timedOut: false) }
+                        return .init(status: 1, text: signedOutReport, timedOut: false)
+                    }
+                    return .init(status: 0, text: "Login expired. Please run /login.", timedOut: false)
+                })
+            preconditionFailure("an old usage error provides no reading")
+        } catch {
+            require(error as? AccountUsageQuery.Failure == expectedFailure && nativeChecks == 2,
+                    "only fresh official confirmation adopts the old helper's login-required signal")
+        }
+    }
     let batch = Store(demo: true)
     let initial = Date().addingTimeInterval(-7200)
     func profile(_ name: String, _ identity: CLIIdentity) -> Profile {
@@ -113,6 +135,12 @@ import SwitcherCore
         preconditionFailure("no request during cooldown or for fresh local cache")
     })
     require(batch.profiles[1].snapshot?.weeklyFable?.used == 35, "repeated clicks in cooldown retain the newest sample")
+    batch.clearStaleCLIUsageLoginNotice(profile: "A", identity: c)
+    require(batch.profiles[0].usageState == .loginRequired, "a different identity cannot clear another account's notice")
+    batch.clearStaleCLIUsageLoginNotice(profile: "A", identity: a)
+    require(batch.profiles[0].usageState == .cached && batch.profiles[0].error == nil
+            && batch.profiles[0].snapshot?.fetchedAt == initial,
+            "fresh verified login clears the older login notice while retaining the actual sample")
     let blocked = Store(demo: true)
     blocked.profiles = [profile("A", a), profile("D", d)]
     await blocked.refreshLinkedAccountUsage(repository: repository, prepare: {

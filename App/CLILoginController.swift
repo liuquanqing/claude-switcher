@@ -164,7 +164,8 @@ import SwitcherCore
         cliStatusRefreshing = true
         defer { cliStatusRefreshing = false }
         let result = await operation()
-        guard current == profileAtStart, cliStatusGeneration == generationAtStart else { invalidateCLIStatus(); return }
+        guard cliStatusGeneration == generationAtStart else { return }
+        guard current == profileAtStart else { invalidateCLIStatus(); return }
         // A saved account label is weaker than an explicit official report.
         if result.metadataOnly, cliStatus == .needsLogin, cliStatusCheckedAt != nil, result.status != .different { return }
         let sameIdentity = result.identity.map { cliObservedIdentity?.samePrincipal(as: $0) == true } ?? false
@@ -183,6 +184,16 @@ import SwitcherCore
         }
         cliProfile = result.profile; cliEmail = result.email; cliStatusDetail = result.detail
         cliStatus = result.status; cliStandaloneVerified = result.standaloneVerified; cliStatusCheckedAt = result.metadataOnly ? nil : Date()
+    }
+
+    func publishLinkedDefaultCLIReport(_ identity: CLIIdentity, profile name: String) {
+        guard current == name, identity.isComplete, active?.snapshot?.identity.samePrincipal(as: identity) == true else { return }
+        // A newer native report supersedes a default-status operation that is still running.
+        cliStatusGeneration += 1
+        if cliStatus == .matched, cliProfile == name, cliObservedIdentity?.samePrincipal(as: identity) == true { return }
+        cliObservedIdentity = identity
+        cliProfile = name; cliEmail = identity.email; cliStatusDetail = nil
+        cliStatus = .reported; cliStandaloneVerified = false; cliStatusCheckedAt = Date()
     }
 
     func invalidateCLIStatus() {

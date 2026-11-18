@@ -86,6 +86,31 @@ import XCTest
         let result=try await recover(io,native:{try self.set(newer,in:io);return .timedOut})
         XCTAssertEqual(result,.renewed);XCTAssertEqual(try CLIBackup(data:io.backups["A"]!).login,newer)
     }
+    func testRejectionForPreviousCredentialDoesNotMarkNewRecordSignedOut() async throws {
+        let io = try fixture()
+        let replacement = try login(a, token: "fixture-other-version", seconds: -1)
+        let outcome = try await recover(io, native: {
+            try self.set(replacement, in: io)
+            return .loginRequired
+        }, verify: { _ in XCTFail("The changed record was never verified."); return self.a })
+        XCTAssertEqual(outcome, .contextChanged)
+        XCTAssertEqual(try CLIOwnedLogin(credentials: io.credentials, identityDocument: io.document), replacement)
+        XCTAssertTrue(io.backups.isEmpty)
+        XCTAssertEqual(io.liveWrites, 0)
+    }
+
+    func testEmptyCredentialsFromAnotherAccountDoesNotPublishLoginRequired() async throws {
+        let io = try fixture()
+        let outcome = try await recover(io, native: {
+            try self.set(self.login(self.b, token: "fixture-unrelated", seconds: -1), in: io)
+            io.credentials = nil
+            return .loginRequired
+        })
+        XCTAssertEqual(outcome, .contextChanged)
+        XCTAssertTrue(io.backups.isEmpty)
+        XCTAssertEqual(io.liveWrites, 0)
+    }
+
     func testBackupFailureDoesNotRollBackRenewedNativeCredential() async throws {
         let io=try fixture(),newer=try login(a,token:"rotated",seconds:3600);io.failWrite=true
         let result=try await recover(io,native:{try self.set(newer,in:io);return .completed})

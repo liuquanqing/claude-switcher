@@ -121,13 +121,13 @@ import SwitcherCore
                         cliStatus = scope == .subscription ? .matched : .unverified
                         cliStandaloneVerified = scope != .subscription;cliStatusCheckedAt = now;cliStatusDetail = nil
                     } catch let failure as ProfileHTTPFailure where failure.needsNativeConfirmation {
+                        guard (try? context()) == true, (try? owned()) == before else { return .contextChanged }
+                        // An HTTP rejection alone does not establish that native sign-in failed.
+                        guard manual else { return .retryLater }
                         cliStatus = .unverified;cliStandaloneVerified = false;cliStatusCheckedAt = nil
-                        if manual {forceNativeCheck = true}
-                        else {
-                            publishCurrentCLIRecovery(.authorizationRequired, profile: name, identity: identity, now: now)
-                            return .authorizationRequired
-                        }
+                        forceNativeCheck = true
                     } catch is CLIInteractionRequired {
+                        guard (try? context()) == true, (try? owned()) == before else { return .contextChanged }
                         publishCurrentCLIRecovery(.authorizationRequired, profile: name, identity: identity, now: now)
                         return .authorizationRequired
                     } catch { return currentCLIRecoveryOutcome ?? .notNeeded }
@@ -186,6 +186,7 @@ import SwitcherCore
                     verify: suppliedVerify ?? { CLIIdentity.profile(try await getJSON("profile", $0)) })
             }
             let after = try? owned()
+            if outcome == .needsLogin, let after, after.hasSecrets, after != before { outcome = .contextChanged }
             if let after, try after.identity?.samePrincipal(as: identity) == true { currentCLIObservedLogin = (name, identity, after.digest) }
             currentCLIRenewalPolicy.finish(outcome, version: after?.digest ?? before.digest, now: clock())
             if outcome == .verificationPending || outcome == .backupPending {

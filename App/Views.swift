@@ -577,22 +577,17 @@ struct TerminalStrip: View {
     }
 
     private var opensTerminalOptions: Bool {
-        if showsConnectionPhase, connection.phase == .mismatched { return true }
-        return connection.preferredChoice == nil && defaultMismatch
+        showsConnectionPhase && connection.phase == .mismatched
     }
 
     private func openTerminalTitle(_ choice: CLIBindingChoice, account: String) -> String {
         t(choice == .isolated ? "cli.openNamedIsolated" : "cli.openNamedDefault", arguments: ["account": account])
     }
 
-    private var namesSignIn: Bool {
-        usageLoginRequired || (connection.currentBinding == nil && connection.localRecord == .differentAccount)
-    }
-
     private var primaryDirectory: CLIBindingChoice? {
         if showsConnectionPhase, [.waitingForLogin, .failed].contains(connection.phase) { return nil }
-        if opensTerminalOptions || namesSignIn { return nil }
-        return connection.preferredChoice
+        if opensTerminalOptions || usageLoginRequired { return nil }
+        return connection.currentBinding?.choice
     }
 
     private var primaryTitle: String {
@@ -603,9 +598,10 @@ struct TerminalStrip: View {
             }
         }
         if opensTerminalOptions { return t("cli.terminalOptions") }
-        if namesSignIn { return t("cli.signInNamed", arguments: ["account": accountName]) }
+        if connection.currentBinding == nil { return t("cli.chooseDirectory") }
+        if usageLoginRequired { return t("cli.signInNamed", arguments: ["account": accountName]) }
         if let choice = primaryDirectory { return openTerminalTitle(choice, account: accountName) }
-        return t("cli.openTerminal")
+        return t("cli.chooseDirectory")
     }
 
     private var showsPrimaryAction: Bool {
@@ -615,8 +611,8 @@ struct TerminalStrip: View {
     private var primaryActionHelp: String {
         if showsConnectionPhase, connection.phase == .waitingForLogin { return t("cli.confirmLoginHelp") }
         if opensTerminalOptions { return t("cli.terminalOptionsHelp") }
-        if let choice = connection.preferredChoice { return openTerminalTitle(choice, account: accountName) }
-        return t("cli.openTerminalHelp")
+        if let choice = connection.currentBinding?.choice { return openTerminalTitle(choice, account: accountName) }
+        return t("cli.chooseDirectory")
     }
 
     private func runPrimaryAction(showLoginChoices: Bool = false) {
@@ -926,6 +922,11 @@ struct TerminalStrip: View {
                     }
                     Text(t(choice == .isolated ? "cli.isolatedDirectory" : "cli.defaultDirectory"))
                         .font(.system(size: 9)).foregroundColor(.sub)
+                } else if primaryTitle == t("cli.chooseDirectory") {
+                    ViewThatFits(in: .horizontal) {
+                        Text(primaryTitle)
+                        Text(t("cli.chooseDirectoryShort"))
+                    }
                 } else {
                     Text(primaryTitle).truncationMode(.tail)
                 }
@@ -969,6 +970,15 @@ struct TerminalStrip: View {
                 }
                 if showsPrimaryAction {
                     primaryAction
+                }
+                if showsConnectionPhase, connection.phase == .waitingForLogin {
+                    Button(t("cli.returnToAuthorizationTerminal")) {
+                        connection.returnToAuthorizationTerminal()
+                    }
+                    .disabled(controlsLocked || connection.isBusy)
+                    Text(t("cli.authorizationFallbackHelp"))
+                        .font(.system(size: 10)).foregroundColor(.sub)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 }
                 if !opensTerminalOptions {
                     Button(t("cli.terminalOptions")) { runPrimaryAction(showLoginChoices: true) }
