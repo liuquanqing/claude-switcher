@@ -11,7 +11,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 RELEASE = "1.3.6-rc.17"
-BUILD = "20261118.17.0"
+BUILD = "20261118.17.1"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.6-final"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
