@@ -44,24 +44,18 @@ enum CLITerminalLaunch {
     static func systemProxy() async throws -> UsageQueryProxy {
         try await Task.detached { try readSystemProxy() }.value
     }
-    static func verifyRoute(proxy: UsageQueryProxy, country: String,
-                            run: @escaping @Sendable ([String]) async throws -> BoundedCLICommand.Output) async throws {
-        let endpoints = NetworkProbe.traceEndpoints + ["https://platform.claude.com/cdn-cgi/trace",
-                                                        "https://console.anthropic.com/cdn-cgi/trace"]
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for endpoint in endpoints {
-                group.addTask {
-                    let result = try await run(["-q", "--silent", "--fail", "--max-time", "8", "--proto", "=https",
-                        "--proxy", proxy.url, "--noproxy", "", "--write-out", "\n%{http_code}", endpoint])
-                    let lines = result.text.split(separator: "\n")
-                    guard !result.timedOut, result.status == 0, let code = lines.last.flatMap({ Int($0) }),
-                          NetworkObservation.countryFromTrace(lines.dropLast().joined(separator: "\n"), httpStatus: code) == country else {
-                        throw SafetyError("终端代理出口未通过检查，未打开终端。")
-                    }
-                }
-            }
-            try await group.waitForAll()
-        }
+    static let traceEndpoints = NetworkProbe.traceEndpoints + [
+        "https://platform.claude.com/cdn-cgi/trace", "https://console.anthropic.com/cdn-cgi/trace"
+    ]
+
+    static func traceCountry(endpoint: String, proxy: UsageQueryProxy,
+                             run: @Sendable ([String]) async throws -> BoundedCLICommand.Output) async -> String? {
+        guard let result = try? await run(["-q", "--silent", "--fail", "--max-time", "8", "--proto", "=https",
+            "--proxy", proxy.url, "--noproxy", "", "--write-out", "\n%{http_code}", endpoint]),
+            !result.timedOut, result.status == 0 else { return nil }
+        let lines = result.text.split(separator: "\n")
+        guard let code = lines.last.flatMap({ Int($0) }) else { return nil }
+        return NetworkObservation.countryFromTrace(lines.dropLast().joined(separator: "\n"), httpStatus: code)
     }
     @MainActor static func open(binding: CLIBinding, home: URL, proxy: UsageQueryProxy) async throws {
         try binding.validate(home: home)
@@ -92,16 +86,17 @@ enum CLITerminalLaunch {
 
 @MainActor extension Store {
     func checkedCLIProxy() async throws -> UsageQueryProxy {
-        let gate = await protection.preflight(target: .cli)
-        guard gate.allowed else { throw SafetyError(gate.message) }
-        guard let country = gate.expectedCountry else { throw SafetyError("目标国家未设置。") }
         let proxy = try await CLITerminalLaunch.systemProxy()
         let home = FileManager.default.homeDirectoryForCurrentUser
-        try await CLITerminalLaunch.verifyRoute(proxy: proxy, country: country) { arguments in
-            try await BoundedCLICommand.run(home: home, executable: URL(fileURLWithPath: "/usr/bin/curl"),
-                arguments: arguments, inherited: proxy.environment([:]), timeoutSeconds: 9,
-                graceSeconds: 1, combineStderr: false)
+        let probe = NetworkProbe(endpoints: CLITerminalLaunch.traceEndpoints) { endpoint in
+            await CLITerminalLaunch.traceCountry(endpoint: endpoint, proxy: proxy) { arguments in
+                try await BoundedCLICommand.run(home: home, executable: URL(fileURLWithPath: "/usr/bin/curl"),
+                    arguments: arguments, inherited: proxy.environment([:]), timeoutSeconds: 9,
+                    graceSeconds: 1, combineStderr: false)
+            }
         }
+        let gate = await protection.preflight(target: .cli, observe: { mode in await probe.observe(mode: mode) })
+        guard gate.allowed else { throw SafetyError(gate.message) }
         return proxy
     }
 
@@ -134,12 +129,10 @@ enum CLITerminalLaunch {
             guard !self.updating else { throw SafetyError("应用正在更新，请稍后打开 CLI。") }
             if self.isDemo { return binding.choice == .defaultLogin ? .different : .notLoggedIn }
             try binding.validate(home: home)
-            let gate = await self.protection.preflight(target: .cli)
-            guard gate.allowed else { throw SafetyError(gate.message) }
+            let proxy = try await self.checkedCLIProxy()
             if binding.choice == .isolated {
                 try FileManager.default.createDirectory(at: binding.directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             }
-            let proxy = try await CLITerminalLaunch.systemProxy()
             let report = try await CLIStatusReader.read(home: home, configurationDirectory: binding.directory, proxy: proxy, timeoutSeconds: 25)
             let document = binding.choice == .defaultLogin ? home.appendingPathComponent(".claude.json") : binding.directory.appendingPathComponent(".claude.json")
             let metadata = (try? Data(contentsOf: document)).flatMap { try? CLIIdentity.metadata(CLIJSON.field($0, key: "oauthAccount")) }

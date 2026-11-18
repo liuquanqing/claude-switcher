@@ -209,17 +209,19 @@ import SwitcherCore
     require(env["CLAUDE_CONFIG_DIR"] == nil && env["ANTHROPIC_API_KEY"] == nil && env["CLAUDE_ENV_FILE"] == nil && env["HTTPS_PROXY"] != nil,
             "the explicit subscription launcher selects the probed directory and retains proxy routing")
     let proxy = try UsageQueryProxy(host: "127.0.0.1", port: 9876)
-    try await CLITerminalLaunch.verifyRoute(proxy: proxy, country: "SG") { arguments in
-        precondition(arguments.contains(proxy.url) && arguments.contains("--noproxy"))
-        return .init(status: 0, text: "loc=SG\n200", timedOut: false)
-    }
-    for response in ["loc=US\n200", "loc=SG\n302"] {
-        do {
-            try await CLITerminalLaunch.verifyRoute(proxy: proxy, country: "SG") { _ in
-                .init(status: 0, text: response, timedOut: false)
-            }
-            preconditionFailure("a mismatched or redirected trace cannot authorize CLI launch")
-        } catch is SafetyError { checks += 1 }
+    let endpoint = CLITerminalLaunch.traceEndpoints[0]
+    for (output, expected) in [
+        (BoundedCLICommand.Output(status: 0, text: "loc=SG\n200", timedOut: false), "SG"),
+        (.init(status: 0, text: "loc=US\n200", timedOut: false), "US"),
+        (.init(status: 0, text: "loc=SG\n302", timedOut: false), nil),
+        (.init(status: 56, text: "", timedOut: false), nil)
+    ] {
+        let country = await CLITerminalLaunch.traceCountry(endpoint: endpoint, proxy: proxy) { arguments in
+            precondition(arguments.contains(proxy.url) && arguments.suffix(1) == [endpoint])
+            precondition(arguments.contains("--noproxy") && !arguments.contains("--location"))
+            return output
+        }
+        require(country == expected, "the terminal route probe preserves actual country, including a mismatch, and rejects redirects and errors")
     }
     let command = try CLITerminalLaunch.script(binding: first, executable: URL(fileURLWithPath: "/fixture/bin/claude"), home: fakeHome, proxy: proxy)
     require(!command.contains("/login") && !command.contains("/logout") && command.contains("exec /usr/bin/env") && command.contains("-u CLAUDE_ENV_FILE"),

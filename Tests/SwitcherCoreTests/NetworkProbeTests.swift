@@ -104,4 +104,24 @@ final class NetworkProbeTests: XCTestCase {
         XCTAssertEqual(SafetyPolicy.evaluate(config, observation).reason, .linkUnknown)
         XCTAssertTrue(entries.isEmpty)
     }
+
+    func testExplicitTerminalRoutesMustAllMatchAndLinkMustRemainOnline() async {
+        let endpoints = NetworkProbe.traceEndpoints + ["https://fixture.invalid/trace"]
+        for (extra, linkAfter, expected) in [
+            (NetworkProbe.TraceResult.country("SG"), online, SafetyReason.allowed),
+            (.country("US"), online, .routesDisagree),
+            (.unavailable, online, .countryUnknown),
+            (.country("SG"), (true, false), .tunMissing)
+        ] {
+            var checks = 0
+            let probe = NetworkProbe(endpoints: endpoints, readLink: { _ in
+                defer { checks += 1 }
+                return checks == 0 ? self.online : linkAfter
+            }, trace: { endpoint, _ in
+                endpoint == endpoints.last ? extra : .country("SG")
+            })
+            let result = await probe.observe(mode: .shadowrocket)
+            XCTAssertEqual(SafetyPolicy.evaluate(config, result).reason, expected)
+        }
+    }
 }

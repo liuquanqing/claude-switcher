@@ -31,6 +31,7 @@ public struct NetworkProbe {
     typealias Link = (proxyConnected: Bool?, tunOnline: Bool?)
     typealias Trace = @Sendable (String, URLSession) async -> TraceResult
     private static let log = Logger(subsystem: "dev.claudeswitcher", category: "network-probe")
+    private let endpoints: [String]
     private let readLink: (ProxyMode) -> Link
     private let trace: Trace
 
@@ -38,7 +39,15 @@ public struct NetworkProbe {
         self.init(readLink: Self.currentLink, trace: { await Self.fetchTrace($0, session: $1) })
     }
 
-    init(readLink: @escaping (ProxyMode) -> Link, trace: @escaping Trace) {
+    public init(endpoints: [String], fetchCountry: @escaping @Sendable (String) async -> String?) {
+        self.init(endpoints: endpoints, readLink: Self.currentLink, trace: { endpoint, _ in
+            guard let country = await fetchCountry(endpoint) else { return .unavailable }
+            return .country(country)
+        })
+    }
+
+    init(endpoints: [String] = NetworkProbe.traceEndpoints, readLink: @escaping (ProxyMode) -> Link, trace: @escaping Trace) {
+        self.endpoints = endpoints
         self.readLink = readLink
         self.trace = trace
     }
@@ -95,7 +104,7 @@ public struct NetworkProbe {
         let session = Self.makeSession(requestTimeout: 6, resourceTimeout: 8)
         defer { session.invalidateAndCancel() }
         var results = await withTaskGroup(of: (String, TraceResult).self, returning: [(String, TraceResult)].self) { group in
-            for endpoint in Self.traceEndpoints {
+            for endpoint in endpoints {
                 group.addTask { [trace] in (endpoint, await trace(endpoint, session)) }
             }
             var values: [(String, TraceResult)] = []

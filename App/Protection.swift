@@ -305,7 +305,8 @@ final class ProtectionController: ObservableObject {
         lastCheckReport = ManualNetworkCheck(checkedAt: checkedAt, targetCountry: config.expectedCountry,
                                             observation: observation, decision: decision, validationMessage: nil, proxyMode: config.proxyMode)
     }
-    func preflight(target: ProtectedTarget = .desktop) async -> SafetyDecision {
+    func preflight(target: ProtectedTarget = .desktop,
+                   observe: ((ProxyMode) async -> NetworkObservation)? = nil) async -> SafetyDecision {
         var checkedConfig: SafetyConfig?
         var checkedNetwork: NetworkObservation?
         func finish(_ decision: SafetyDecision) -> SafetyDecision {
@@ -338,7 +339,7 @@ final class ProtectionController: ObservableObject {
         if target == .subscriptionUsage && desktopScope == .unknown { return finish(SafetyDecision(.unsupportedMode)) }
         guard await worker.registered() else { guardOnline = false; return finish(SafetyDecision(.guardUnavailable)) }
         guardOnline = files.loadReceipt()?.isFresh(for: config) == true
-        let network = await observeNetwork(config.proxyMode)
+        let network = await (observe ?? observeNetwork)(config.proxyMode)
         checkedNetwork = network
         guard (try? files.loadConfig()) == config else { applySaved(nil); return finish(SafetyDecision(.invalidConfig)) }
         refreshScope()
