@@ -156,20 +156,24 @@ actor FictionalRenderGuard: GuardWorking {
    try await save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-starting-"+language,width:500)
    await startGuard.value
    try await save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-retry-"+language,width:500)
-   for state in ["unlinked","local-default","local-isolated","local-different","default","waiting","different","failed"] {
+   for state in ["unlinked","local-default","local-isolated","local-different","default","separate","waiting","different","failed","route-failed"] {
     let store=Store(demo:true);store.setAppLanguage(language)
     let context: CLIConnectionContext? = store.protection.desktopScope == .subscription
      ? CLIConnectionContext(profile:store.current,identity:store.active!.snapshot!.identity) : nil
     var binding:CLIBinding?
     let connection=CLIConnectionController(operations:.init(context:{context},load:{_ in binding},save:{binding=$0},make:{mode,identity in
      CLIBinding(identity:identity,choice:mode,directory:try CLIBinding.directory(for:mode,identity:identity,home:URL(fileURLWithPath:"/fictional-home")))
-    },access:{ CLIConnectionAccess(status:{_ in
-     if state == "failed" { throw SafetyError("CLI 状态读取超时或未完成，未修改登录。") }
-     return state == "default" ? .matched : state == "different" ? .different : .notLoggedIn
-    },launch:{_, _ in}) }, localRecord:{_,_ in
+    },access:{
+     if state == "route-failed" { throw CLITerminalFailure.route(SafetyDecision(.countryUnknown)) }
+     return CLIConnectionAccess(status:{_ in
+      if state == "failed" { throw CLITerminalFailure.statusTimedOut }
+      if state == "default" || state == "separate" { return .matched }
+      return state == "different" ? .different : .notLoggedIn
+     },launch:{_, _ in})
+    }, localRecord:{_,_ in
      switch state {
      case "local-default", "default": return .sameAccount(.defaultLogin)
-     case "local-isolated": return .sameAccount(.isolated)
+     case "local-isolated", "separate": return .sameAccount(.isolated)
      case "local-different": return .differentAccount
      case "unlinked", "waiting": return .notPrepared
      default: return .unconfirmed
@@ -180,6 +184,12 @@ actor FictionalRenderGuard: GuardWorking {
     else if state != "unlinked" && !state.hasPrefix("local-") { await connection.open() }
     connection.contextDidChange()
     try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"cli-"+state+"-"+language,width:500)
+    if ["separate", "waiting", "failed", "route-failed"].contains(state) {
+     var help = TerminalStrip(store:store)
+     help.fixtureHelpOnly = true
+     help.fixtureLanguage = language
+     try await save(help.background(Color.card), name:"terminal-details-"+state+"-"+language, width:344)
+    }
     if state == "local-default" {
      try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-record-"+language,width:420)
     }

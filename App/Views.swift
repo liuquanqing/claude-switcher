@@ -598,7 +598,9 @@ struct TerminalStrip: View {
     private var primaryTitle: String {
         if showsConnectionPhase {
             if connection.phase == .waitingForLogin { return t("cli.confirmLogin") }
-            if connection.phase == .failed { return t("cli.retry") }
+            if connection.phase == .failed {
+                return t(connection.failureTitle == "cli.routeNotVerified" ? "cli.recheckProxy" : "cli.retry")
+            }
         }
         if opensTerminalOptions { return t("cli.terminalOptions") }
         if namesSignIn { return t("cli.signInNamed", arguments: ["account": accountName]) }
@@ -953,6 +955,18 @@ struct TerminalStrip: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .help(terminalBoundary ?? t("cli.statusHelp"))
+                if let binding = connection.currentBinding,
+                   let identity = store.active?.snapshot?.identity,
+                   binding.identity.samePrincipal(as: identity) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(t("cli.boundDirectory"))
+                            .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
+                        Text(binding.directory.path)
+                            .font(.system(size: 10)).foregroundColor(.sub)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if showsPrimaryAction {
                     primaryAction
                 }
