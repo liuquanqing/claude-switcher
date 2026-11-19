@@ -83,11 +83,9 @@ import Darwin
                 throw SafetyError("该档案已有其他账号或组织的 CLI 备份，未覆盖。")
             }
             if backup.login == login { return login }
-            if backup.verification != nil, backup.login.hasRefreshToken {
-                // A verified backup is only replaced by a candidate that proves itself online now
-                // and is not older than the backup by its own expiry.
+            if backup.verification != nil {
                 if login.usableAccessToken(now: now()) == nil { return login }
-                if let backupExpiry = expiry(backup.login), let candidateExpiry = expiry(login), candidateExpiry < backupExpiry { return login }
+                guard CLIBackupFreshness.mayReplace(login, verifiedBackup: backup) else { return login }
             }
         }
         guard let access = login.usableAccessToken(now: now()) else {
@@ -116,10 +114,7 @@ import Darwin
         return login
     }
 
-    public static func expiry(_ login: CLIOwnedLogin) -> Double? {
-        guard let oauth = login.oauth, let value = try? CLIJSON.object(oauth)["expiresAt"] as? NSNumber else { return nil }
-        return value.doubleValue
-    }
+    public static func expiry(_ login: CLIOwnedLogin) -> Double? { CLIBackupFreshness.expiry(login) }
 
     /// While an account is current, the official CLI may renew the default login. Copy it back into
     /// the account's own directory only when the default OAuth and identity block both belong to
@@ -133,7 +128,7 @@ import Darwin
               let own = try ownedLogin(in: store, expected: expected), own != live else { return }
         if own.usableAccessToken(now: now()) != nil, live.usableAccessToken(now: now()) == nil { return }
         // "Newer" must be provable: the default credential's own expiry is later than the directory's.
-        if let ownExpiry = expiry(own), let liveExpiry = expiry(live), liveExpiry <= ownExpiry { return }
+        guard let ownExpiry = expiry(own), let liveExpiry = expiry(live), liveExpiry > ownExpiry else { return }
         let router = store.router()
         let credentials = try router.read()
         let document = try store.document()
@@ -148,9 +143,13 @@ import Darwin
                 throw SafetyError("独立目录回读未通过，登录同步未确认。")
             }
         } catch {
-            if documentWritten, try store.document() == newDocument { try store.writeDocument(document) }
-            if try router.read() == newCredentials { try router.write(credentials) }
-            guard try CLIOwnedLogin(credentials: router.read(), identityDocument: store.document()) == own else {
+            var restored = true
+            if documentWritten {
+                do { if try store.document() == newDocument { try store.writeDocument(document) } } catch { restored = false }
+            }
+            do { if try router.read() == newCredentials { try router.write(credentials) } } catch { restored = false }
+            let confirmed = (try? CLIOwnedLogin(credentials: router.read(), identityDocument: store.document())) == own
+            guard restored, confirmed else {
                 throw SafetyError("独立目录同步失败且回滚未确认，请保留现场并停止切换。")
             }
             throw error
@@ -214,6 +213,10 @@ import Darwin
         }
         try transaction.persistOutgoing(plan)
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
+        // Last asynchronous step is done: re-read the source once more immediately before commit.
+        if let source, let expected = target.identity, try ownedLogin(in: source, expected: expected) != observed {
+            throw SafetyError("独立目录的登录在提交前变化，未修改默认登录；请再切换一次。")
+        }
         let restoration = try transaction.apply(plan)
         let alive = Set(terminalsNow())
         return Outcome(restoration: restoration, linkedTranscripts: 0, previousTerminals: before.filter { alive.contains($0) }.count)

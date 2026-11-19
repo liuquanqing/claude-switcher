@@ -231,7 +231,7 @@ final class Store: ObservableObject {
     var currentCLIRecoveryMessage: String?
     var currentCLIBackupPending: CLIProfileIdentity?
     /// Target whose terminal login did not follow the desktop; retry from the banner.
-    var cliFollowPending: String?
+    @Published var cliFollowPending: String?
     var currentCLIBackupAttemptAt: Date?
     var currentCLIRenewalPolicy = CLIRenewalPolicy()
     var currentCLIInspectionAt: Date?

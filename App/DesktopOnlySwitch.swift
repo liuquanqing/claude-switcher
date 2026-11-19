@@ -89,11 +89,13 @@ struct DesktopOnlySwitchOffer: Equatable {
             // Confirm the desktop's own on-disk login, not a cached identity: the target may have
             // been re-signed-in elsewhere. The token digest pins every later re-check.
             let confirmed = try await profileDescriptor(target, allowInteraction: true)
+            // The digest is the one profileDescriptor bound to the confirmed identity, not a second read.
             guard let identity = confirmed.identity, identity.isComplete,
-                  let access = try await token(for: profileDir(target), allowExpired: true, allowInteraction: true) else {
-                throw SafetyError("目标桌面的登录尚未确认，终端登录保持原样。")
+                  let digest = active?.snapshot?.identityTokenDigest,
+                  let access = try await token(for: profileDir(target), allowExpired: true, allowInteraction: false),
+                  desktopTokenDigest(access) == digest else {
+                throw SafetyError("目标桌面的登录尚未确认或已变化，终端登录保持原样。")
             }
-            let digest = desktopTokenDigest(access)
             guard try confirmedCurrentProfile() == target, current == target,
                   active?.snapshot?.identity.samePrincipal(as: identity) == true,
                   DesktopModeInspector.read(support: support) == .subscription else {
@@ -124,8 +126,14 @@ struct DesktopOnlySwitchOffer: Equatable {
             return DefaultCLIFollow(restoration: outcome.restoration, notice: notice)
         } catch {
             cliConnection.defaultLoginDidChange()
+            let message = error.localizedDescription
+            // A transaction whose rollback could not be confirmed must not offer an automatic retry.
+            if message.contains("还原未确认") || message.contains("回滚未确认") || message.contains("停止切换") {
+                cliFollowPending = nil
+                return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认终端登录未跟随：\(message)")
+            }
             cliFollowPending = target
-            return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认终端登录未跟随：\(error.localizedDescription)")
+            return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认终端登录未跟随：\(message)")
         }
     }
 

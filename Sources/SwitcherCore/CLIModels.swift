@@ -134,6 +134,21 @@ public struct CLIOwnedLogin: Equatable, Sendable {
     }
 }
 
+/// One freshness rule for every backup writer: a login may replace a verified backup only when its
+/// own access-token expiry is strictly later. Equal or unreadable expiries keep the verified backup.
+public enum CLIBackupFreshness {
+    public static func expiry(_ login: CLIOwnedLogin) -> Double? {
+        guard let oauth = login.oauth, let value = try? CLIJSON.object(oauth)["expiresAt"] as? NSNumber,
+              !(CFGetTypeID(value) == CFBooleanGetTypeID()), value.doubleValue.isFinite else { return nil }
+        return value.doubleValue
+    }
+    public static func mayReplace(_ candidate: CLIOwnedLogin, verifiedBackup: CLIBackup) -> Bool {
+        guard verifiedBackup.verification != nil else { return true }
+        guard let old = expiry(verifiedBackup.login), let new = expiry(candidate) else { return false }
+        return new > old
+    }
+}
+
 public struct CLIVerification: Codable, Sendable {
     public let version: Int
     public let identity: CLIIdentity

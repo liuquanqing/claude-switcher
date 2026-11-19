@@ -95,12 +95,28 @@ public struct PreparedCLISwitch {
             }
             sourceName = source.name; sourceIdentity = checked.0; sourceRemote = checked.1
             let checkedAt = checked.1 ? now() : (prior?.verification?.checkedAt ?? now())
-            sourceData = try CLIBackup.verifiedData(login: original, identity: checked.0, now: checkedAt)
+            // The outgoing default may be older than a renewal already saved from the account's own
+            // directory; a newer verified backup is never written back to an older login.
+            if let prior, prior.login.hasSecrets, !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
+                sourceData = try io.readBackup(source.name)
+            } else {
+                sourceData = try CLIBackup.verifiedData(login: original, identity: checked.0, now: checkedAt)
+            }
         }
         let desired: CLIOwnedLogin, restoration: CLIRestoration
         var targetUpgrade: Data?
         if sourceName == target.name, sourceIdentity != nil {
-            desired = original; restoration = sourceRemote ? .verifiedLogin : .storedLogin
+            // Same account: a newer verified backup (renewed in the account's own directory) wins
+            // over an older default login, and must itself pass this round's online check.
+            if let targetRaw, let backup = try? CLIBackup(data: targetRaw), backup.login.hasSecrets,
+               try backup.login.identity?.samePrincipal(as: sourceIdentity!) == true,
+               !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
+                let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: sourceIdentity, remote: remote)
+                desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
+                targetUpgrade = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
+            } else {
+                desired = original; restoration = sourceRemote ? .verifiedLogin : .storedLogin
+            }
         } else if let targetRaw {
             let backup = try CLIBackup(data: targetRaw)
             guard let expected = target.identity, expected.isComplete else {
@@ -109,7 +125,8 @@ public struct PreparedCLISwitch {
             let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: expected, remote: remote)
             desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
             let checkedAt = checked.1 ? now() : (backup.verification?.checkedAt ?? now())
-            targetUpgrade = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
+            let upgraded = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
+            targetUpgrade = CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) ? upgraded : targetRaw
         } else {
             guard !requiresTargetLogin else {
                 throw SafetyError("桌面目标还没有保存的 CLI 登录；本次未同步、未清空原登录。请先在官方 CLI 登录该账号，再检查关联。")

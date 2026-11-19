@@ -306,15 +306,18 @@ import XCTest
         try writeIsolated(f.isolatedB, login(b, token: "access-b", expired: true))
         try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: remote)
         XCTAssertEqual(f.io.backups["Design"], verified)
-        // A usable candidate that verifies online may upgrade the backup; one that fails verification may not.
+        // Same expiry: kept even if it would verify. A later-expiry candidate that fails verification is not saved.
         try writeIsolated(f.isolatedB, login(b, token: "access-b"))
+        try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: { _ in throw SafetyError("offline") })
+        XCTAssertEqual(f.io.backups["Design"], verified)
+        try writeIsolated(f.isolatedB, login(b, token: "access-b", lifetime: 9000))
         do {
             try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: { _ in throw SafetyError("offline") })
             XCTFail("verify must fail")
         } catch {}
         XCTAssertEqual(f.io.backups["Design"], verified)
         try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: remote)
-        XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b"))
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b", lifetime: 9000))
     }
 
     func testSourceRenewalDuringVerificationIsSavedAndSwitchStopsBeforeCommit() async throws {
@@ -328,14 +331,14 @@ import XCTest
                     calls += 1
                     // The source is renewed after the backup sync verified it, while the transaction
                     // verifies the outgoing default login.
-                    if calls == 2 { try self.writeIsolated(f.isolatedB, self.login(self.b, token: "access-b2")) }
+                    if calls == 2 { try self.writeIsolated(f.isolatedB, self.login(self.b, token: "access-b2", lifetime: 9000)) }
                     return try await self.remote(token)
                 }, now: { self.date })
             XCTFail("must stop")
         } catch {}
         XCTAssertEqual(f.io.credentials, credentials, "default untouched")
         XCTAssertGreaterThanOrEqual(calls, 3)
-        XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b2"), "newest source saved")
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b2", lifetime: 9000), "newest source saved")
         XCTAssertFalse(f.io.events.contains("marker"))
     }
     func testContextChangeBeforeCommitStopsWithoutWritingDefault() async throws {
@@ -408,5 +411,46 @@ import XCTest
 
     func testTerminalPathWithSpacesIsCounted() {
         XCTAssertEqual(CLIDefaultMirror.terminalProcesses(psOutput: "  101 /Users/test/Local Tools/claude\n", own: []), [101])
+    }
+
+    func testSameAccountSwitchUsesNewerVerifiedBackupAndNeverWritesItBackOlder() async throws {
+        let f = try fixture()
+        // Default holds A; A's own directory was renewed and saved as a newer verified backup.
+        let newer = try login(a, token: "access-a2", lifetime: 9000)
+        f.io.backups["Personal"] = try CLIBackup.verifiedData(login: newer, identity: a, now: date)
+        let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[0], profiles: profiles,
+            home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: { self.date })
+        XCTAssertEqual(outcome.restoration, .verifiedLogin)
+        XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), newer)
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, newer, "the older default never overwrites the newer backup")
+    }
+
+    func testPassiveBackupWithoutVerifyKeepsNewerVerifiedBackupAndReverifiesIdenticalUnverifiedOne() async throws {
+        let io = MirrorIO()
+        let newer = try login(a, token: "access-a2", lifetime: 9000)
+        io.credentials = try CLIJSON.replacing(nil, key: "claudeAiOauth", with: newer.oauth)
+        io.document = try CLIJSON.replacing(nil, key: "oauthAccount", with: newer.metadata)
+        io.backups["Personal"] = try CLIBackup.verifiedData(login: login(a, token: "access-a", lifetime: 12000), identity: a, now: date)
+        let kept = io.backups["Personal"]
+        let result = try await CLICurrentBackup.save(target: profiles[0], io: io, now: { self.date }, contextIsCurrent: { true })
+        XCTAssertEqual(result, .upToDate); XCTAssertEqual(io.backups["Personal"], kept)
+        // Identical login saved without proof earlier: a later gated verification adds the proof.
+        io.backups["Personal"] = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(newer.oauth!), "oauthAccount": CLIJSON.object(newer.metadata!)])
+        let verified = try await CLICurrentBackup.save(target: profiles[0], io: io, now: { self.date }, contextIsCurrent: { true }, gate: { true }, verify: { _ in self.a })
+        XCTAssertEqual(verified, .saved)
+        XCTAssertEqual(try CLIBackup(data: io.backups["Personal"]!).trustedIdentity(), a)
+    }
+
+    func testSourceChangeAfterLastAsyncCheckStopsBeforeApply() async throws {
+        let f = try fixture()
+        let credentials = f.io.credentials
+        var checks = 0
+        do {
+            _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
+                home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: { self.date },
+                contextIsCurrent: { checks += 1; if checks == 3 { try self.writeIsolated(f.isolatedB, self.login(self.b, token: "access-b2", lifetime: 9000)) }; return true })
+            XCTFail("must stop")
+        } catch {}
+        XCTAssertEqual(f.io.credentials, credentials)
     }
 }

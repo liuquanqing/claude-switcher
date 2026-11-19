@@ -51,6 +51,7 @@ import SwitcherCore
                                                      expected: identity, verified: verified, now: { now })
         } catch {
             if manual { banner = "独立目录尚未同步最新登录：\(error.localizedDescription)" }
+            else if banner == nil { banner = "独立目录尚未同步最新登录：\(error.localizedDescription)" }
         }
     }
 
