@@ -7,6 +7,7 @@ import XCTest
     var events: [String] = []
     var denyBackupWrite = false
     var credentialWriter: ((Data?) throws -> Void)?
+    var backupWriter: ((String, Data) throws -> Void)?
     func readCredentials() throws -> Data? { credentials }
     func writeCredentials(_ data: Data?) throws {
         events.append("credentials")
@@ -18,7 +19,7 @@ import XCTest
     func writeBackup(_ profile: String, data: Data) throws {
         events.append("backup:" + profile)
         if denyBackupWrite { throw SafetyError("fixture backup denied") }
-        backups[profile] = data
+        if let backupWriter { try backupWriter(profile, data) } else { backups[profile] = data }
     }
     func readMarker() throws -> String? { marker }
     func writeMarker(_ value: String?) throws { events.append("marker"); marker = value }
@@ -619,5 +620,70 @@ import XCTest
         let before = f.io.events.filter { $0 == "backup:Design" }.count
         _ = try await follow(f)
         XCTAssertEqual(f.io.events.filter { $0 == "backup:Design" }.count - before, 1)
+    }
+
+    func testTargetExpiringDuringLastAsyncCheckIsNotCommitted() async throws {
+        let f = try fixture()
+        var clock = date
+        let credentials = f.io.credentials
+        // B's login expires while the final desktop re-check runs.
+        let expiring = CLIOwnedLogin(oauth: try CLIJSON.encode(["accessToken": "access-b", "refreshToken": "r", "expiresAt": date.addingTimeInterval(30).timeIntervalSince1970 * 1000]),
+                                     metadata: try login(b, token: "access-b").metadata)
+        try writeIsolated(f.isolatedB, expiring)
+        var checks = 0
+        do {
+            _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { clock }), target: profiles[1], profiles: profiles,
+                home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: { clock },
+                contextIsCurrent: { checks += 1; if checks == 3 { clock = self.date.addingTimeInterval(60) }; return true })
+            XCTFail("expired at commit")
+        } catch {}
+        XCTAssertEqual(f.io.credentials, credentials)
+        XCTAssertEqual(f.io.marker, "Personal")
+    }
+
+    func testTargetSlotChangedWhileWritingOutgoingIsNotOverwritten() async throws {
+        let f = try fixture()
+        // B backup is an older unverified record; the transaction would upgrade it.
+        f.io.backups["Design"] = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login(b, token: "access-b", expired: true).oauth!), "oauthAccount": CLIJSON.object(login(b, token: "access-b").metadata!)])
+        try writeIsolated(f.isolatedB, login(b, token: "access-b", lifetime: 9000))
+        let newerByOther = try CLIBackup.verifiedData(login: login(b, token: "access-b2", lifetime: 99999), identity: b, now: date)
+        f.io.backupWriter = { profile, data in
+            f.io.backups[profile] = data
+            if profile == "Personal" { f.io.backups["Design"] = newerByOther }
+        }
+        defer { f.io.backupWriter = nil }
+        let credentials = f.io.credentials
+        do { _ = try await follow(f); XCTFail("must stop") } catch {}
+        XCTAssertEqual(f.io.credentials, credentials)
+        XCTAssertEqual(f.io.backups["Design"], newerByOther)
+    }
+
+    func testCrossAccountTargetVerifiedOnceAndWrittenOnce() async throws {
+        let f = try fixture()
+        var tokens: [String] = []
+        let before = f.io.events.filter { $0 == "backup:Design" }.count
+        _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
+            home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home),
+            remote: { t in tokens.append(t); return try await self.remote(t) }, now: { self.date })
+        XCTAssertEqual(tokens.filter { $0 == "access-b" }.count, 1)
+        XCTAssertEqual(f.io.events.filter { $0 == "backup:Design" }.count - before, 1)
+    }
+
+    func testIdentityDocumentCreationDoesNotClobberConcurrentFile() throws {
+        let home = try directory("home2/.claude")
+        let document = home.appendingPathComponent(".claude.json")
+        // expected nil (absent); a concurrent writer creates it before commit -> abort.
+        let data = try CLIJSON.encode(["oauthAccount": ["accountUuid": "x"]])
+        try CLIPrivateFile.writeDocument(data, to: document, ifUnchangedSince: nil)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: document.path))
+        // 0644 owner file is accepted for identity documents.
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: document.path)
+        let existing = try CLIPrivateFile.readDocument(document)
+        let updated = try CLIJSON.encode(["oauthAccount": ["accountUuid": "y"]])
+        try CLIPrivateFile.writeDocument(updated, to: document, ifUnchangedSince: existing)
+        XCTAssertEqual(try CLIPrivateFile.readDocument(document), updated)
+        // Stale expectation aborts.
+        do { try CLIPrivateFile.writeDocument(data, to: document, ifUnchangedSince: existing); XCTFail("stale") } catch {}
+        XCTAssertEqual(try CLIPrivateFile.readDocument(document), updated)
     }
 }

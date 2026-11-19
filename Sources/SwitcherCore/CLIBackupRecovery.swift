@@ -82,6 +82,9 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
             throw SafetyError("登录或备份在恢复期间变化，恢复资料已保留；请重新检查。")
         }
         let verified = try CLIBackup.verifiedData(login: recovered.login, identity: actual, now: now())
+        guard CLIBackupFreshness.mayReplace(recovered.login, verifiedBackup: backup) else {
+            throw SafetyError("恢复的登录不比现有已核验备份更新，保留原备份与恢复资料。")
+        }
         do {
             try io.writeBackup(target.name, data: verified)
             guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == verified else {

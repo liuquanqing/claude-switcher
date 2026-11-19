@@ -38,8 +38,8 @@ import SwitcherCore
             guard current == name, active?.snapshot?.identity.samePrincipal(as: identity) == true else { return }
             currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
             let message = "已登录，但备份尚未更新。请点击刷新重试。"
-            if banner == nil || banner == message { banner = message }
-            else { banner = banner! + "\n" + message }
+            let lines = (banner ?? "").split(separator: "\n").map(String.init).filter { $0 != message }
+            banner = (lines + [message]).joined(separator: "\n")
         }
     }
 
@@ -90,6 +90,9 @@ import SwitcherCore
                     && self.cliConfiguration().allowsSubscriptionMutation
             }, gate: suppliedGate ?? { true }, verify: suppliedVerify)
         currentCLIBackupPending = nil
-        if banner == "已登录，但备份尚未更新。请点击刷新重试。" { banner = nil }
+        if let current = banner {
+            let lines = current.split(separator: "\n").map(String.init).filter { $0 != "已登录，但备份尚未更新。请点击刷新重试。" }
+            banner = lines.isEmpty ? nil : lines.joined(separator: "\n")
+        }
     }
 }

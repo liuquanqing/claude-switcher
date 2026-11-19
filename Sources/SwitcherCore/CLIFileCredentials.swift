@@ -32,25 +32,53 @@ public enum CLIPrivateFile {
         try check(info)
         return try handle.readToEnd() ?? Data()
     }
+    /// Identity documents (~/.claude.json) are owner-owned regular files that the CLI may keep at
+    /// 0644; credentials stay strict. Reads never follow symlinks.
+    public static func readDocument(_ url: URL) throws -> Data? {
+        var parent = stat()
+        if lstat(url.deletingLastPathComponent().path, &parent) == 0 { try check(parent, directory: true) }
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else {
+            if errno == ENOENT { return nil }
+            throw SafetyError("无法读取 CLI 身份文件；未将读取失败当作空文件。")
+        }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        defer { try? handle.close() }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG, info.st_uid == getuid() else {
+            throw SafetyError("CLI 身份文件的类型或归属不符合要求，未修改。")
+        }
+        return try handle.readToEnd() ?? Data()
+    }
+    public static func writeDocument(_ data: Data?, to url: URL, ifUnchangedSince expected: Data?) throws {
+        try checkParent(url)
+        guard try readDocument(url) == expected else { throw SafetyError("CLI 身份文件在写入前已被其他程序更新，未覆盖。") }
+        guard let data else {
+            if unlink(url.path) != 0 && errno != ENOENT { throw SafetyError("CLI 身份文件无法更新。") }
+            return
+        }
+        try stage(data, to: url, expecting: expected, expectAbsent: expected == nil, document: true)
+    }
     /// Replace only when the file still equals `expected`; a concurrent writer aborts this write.
     public static func write(_ data: Data?, to url: URL, ifUnchangedSince expected: Data?) throws {
         try checkParent(url)
         guard try read(url) == expected else { throw SafetyError("CLI 登录文件在写入前已被其他程序更新，未覆盖。") }
-        try write(data, to: url, expecting: expected)
-    }
-    public static func write(_ data: Data?, to url: URL) throws {
-        try checkParent(url)
-        _ = try read(url)
-        try write(data, to: url, expecting: nil)
-    }
-    private static func write(_ data: Data?, to url: URL, expecting expected: Data?) throws {
         guard let data else {
             if unlink(url.path) != 0 && errno != ENOENT { throw SafetyError("CLI 登录文件无法更新。") }
             return
         }
-        try stage(data, to: url, expecting: expected)
+        try stage(data, to: url, expecting: expected, expectAbsent: expected == nil, document: false)
     }
-    private static func stage(_ data: Data, to url: URL, expecting expected: Data?) throws {
+    public static func write(_ data: Data?, to url: URL) throws {
+        try checkParent(url)
+        _ = try read(url)
+        guard let data else {
+            if unlink(url.path) != 0 && errno != ENOENT { throw SafetyError("CLI 登录文件无法更新。") }
+            return
+        }
+        try stage(data, to: url, expecting: nil, expectAbsent: false, document: false)
+    }
+    private static func stage(_ data: Data, to url: URL, expecting expected: Data?, expectAbsent: Bool, document: Bool) throws {
         let temporary = url.deletingLastPathComponent().appendingPathComponent(".cli-login-" + UUID().uuidString + ".tmp")
         let fd = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw SafetyError("无法创建私有 CLI 登录临时文件。") }
@@ -60,8 +88,12 @@ public enum CLIPrivateFile {
             try handle.write(contentsOf: data)
             try handle.synchronize()
             try handle.close()
-            if let expected {
-                guard (try? read(url)) == expected else { throw SafetyError("CLI 登录文件在提交前已被其他程序更新，未覆盖。") }
+            if expectAbsent {
+                var info = stat()
+                guard lstat(url.path, &info) != 0, errno == ENOENT else { throw SafetyError("CLI 文件在提交前已被其他程序创建，未覆盖。") }
+            } else if let expected {
+                let current = document ? try readDocument(url) : try read(url)
+                guard current == expected else { throw SafetyError("CLI 文件在提交前已被其他程序更新，未覆盖。") }
             }
             guard rename(temporary.path, url.path) == 0 else { throw SafetyError("CLI 登录文件提交失败。") }
         } catch { throw SafetyError("CLI 登录文件写入失败，未确认同步完成。") }

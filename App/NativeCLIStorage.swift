@@ -76,7 +76,7 @@ import SwitcherCore
     func readIdentityDocument() throws -> Data? { try readFile(identityURL) }
     func writeIdentityDocument(_ data: Data?) throws { try writeFile(data, path: identityURL) }
     func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws {
-        try CLIPrivateFile.write(data, to: identityURL, ifUnchangedSince: expected)
+        try CLIPrivateFile.writeDocument(data, to: identityURL, ifUnchangedSince: expected)
     }
     func readBackup(_ profile: String) throws -> Data? { try keychain(switcherService, "cli-" + profile) }
     func containsBackup(_ profile: String) throws -> Bool { try backupPresence(switcherService, "cli-" + profile) }

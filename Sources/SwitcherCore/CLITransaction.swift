@@ -157,12 +157,17 @@ public struct PreparedCLISwitch {
             guard let expected = target.identity, expected.isComplete else {
                 throw SafetyError("目标桌面身份未确认，未恢复 CLI 登录；请先刷新目标档案。")
             }
-            let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: expected, remote: remote)
-            desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
-            let checkedAt = checked.1 ? now() : (backup.verification?.checkedAt ?? now())
-            let upgraded = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
-            // Unchanged record: keep the read-back data as the commit expectation, write nothing.
-            targetUpgrade = CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) && upgraded != targetRaw ? upgraded : nil
+            if let already = preverified[target.name], let parsed = try? CLIBackup(data: already), parsed.login == backup.login,
+               let proof = parsed.verification, proof.digest == backup.login.digest, already == targetRaw {
+                desired = backup.login; restoration = .verifiedLogin; targetUpgrade = nil
+            } else {
+                let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: expected, remote: remote)
+                desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
+                let checkedAt = checked.1 ? now() : (backup.verification?.checkedAt ?? now())
+                let upgraded = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
+                // Unchanged record: keep the read-back data as the commit expectation, write nothing.
+                targetUpgrade = CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) && upgraded != targetRaw ? upgraded : nil
+            }
         } else {
             guard !requiresTargetLogin else {
                 throw SafetyError("桌面目标还没有保存的 CLI 登录；本次未同步、未清空原登录。请先在官方 CLI 登录该账号，再检查关联。")
@@ -199,6 +204,9 @@ public struct PreparedCLISwitch {
             }
         }
         if let data = plan.targetUpgrade, plan.sourceName != plan.targetName {
+            guard try normalized(io.readBackup(plan.targetName)) == plan.targetBackupBefore else {
+                throw SafetyError("目标 CLI 备份在核验期间变化，未覆盖，请重试。")
+            }
             try io.writeBackup(plan.targetName, data: data)
             guard try normalized(io.readBackup(plan.targetName)) == data else { throw SafetyError("目标 CLI 备份回读未通过，桌面目录未移动。") }
         }

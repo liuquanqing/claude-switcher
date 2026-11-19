@@ -254,7 +254,7 @@ import Darwin
         if let source, let expected = target.identity, try ownedLogin(in: source, expected: expected) != observed {
             throw SafetyError("独立目录的登录在提交前变化，未修改默认登录；请再切换一次。")
         }
-        let restoration = try transaction.apply(plan)
+        let restoration = try transaction.apply(plan, requireUsableLogin: true)
         let alive = Set(terminalsNow())
         return Outcome(restoration: restoration, linkedTranscripts: 0, previousTerminals: before.filter { alive.contains($0) }.count)
     }

@@ -254,7 +254,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             checkedAt = Date()
             switch status {
             case .matched:
-                restoreBlockedFor = nil
+                if binding.choice == .defaultLogin, restoreBlockedFor == context.profile { restoreBlockedFor = nil }
                 if binding.choice == .defaultLogin {
                     await backupDefaultLogin(context, generation: generation)
                     guard stillCurrent(context, generation: generation) else { return }
