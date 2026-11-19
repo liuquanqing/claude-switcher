@@ -48,6 +48,14 @@ import Foundation
             guard let oauth = original.oauth, let metadata = original.metadata else {
                 throw SafetyError("当前 CLI 登录不完整，未更新备份。")
             }
+            // Without an online check, a previously verified backup is kept rather than downgraded
+            // to an unverified copy; the next gated verification upgrades it.
+            if let previous, let backup = try? CLIBackup(data: previous), backup.verification != nil,
+               let oldExpiry = backup.login.oauth.flatMap({ try? CLIJSON.object($0)["expiresAt"] as? NSNumber })?.doubleValue,
+               let newExpiry = original.oauth.flatMap({ try? CLIJSON.object($0)["expiresAt"] as? NSNumber })?.doubleValue,
+               newExpiry <= oldExpiry {
+                return .upToDate
+            }
             data = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(oauth), "oauthAccount": CLIJSON.object(metadata)])
         }
         guard try contextIsCurrent(), try live() == original, try io.readBackup(target.name) == previous else {

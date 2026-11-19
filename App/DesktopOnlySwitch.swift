@@ -77,7 +77,6 @@ struct DesktopOnlySwitchOffer: Equatable {
     }
 
     private func followDefaultCLI(to target: String, terminalsBefore: [Int32]) async -> DefaultCLIFollow? {
-        guard let identity = active?.snapshot?.identity, identity.isComplete else { return nil }
         guard cliConfiguration().allowsSubscriptionMutation else {
             return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认 CLI 使用其他认证配置，登录保持原样。")
         }
@@ -87,13 +86,27 @@ struct DesktopOnlySwitchOffer: Equatable {
         let io = NativeCLIStorage(allowInteraction: true)
         let repository = CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"), home: home)
         do {
-            // The cached profile identity can be stale if the target was re-signed-in elsewhere.
-            // Confirm the desktop's own identity before any terminal credential is written.
+            // Confirm the desktop's own on-disk login, not a cached identity: the target may have
+            // been re-signed-in elsewhere. The token digest pins every later re-check.
             let confirmed = try await profileDescriptor(target, allowInteraction: true)
-            guard let confirmedIdentity = confirmed.identity, confirmedIdentity.isComplete,
-                  confirmedIdentity.samePrincipal(as: identity), try confirmedCurrentProfile() == target,
+            guard let identity = confirmed.identity, identity.isComplete,
+                  let access = try await token(for: profileDir(target), allowExpired: true, allowInteraction: true) else {
+                throw SafetyError("目标桌面的登录尚未确认，终端登录保持原样。")
+            }
+            let digest = desktopTokenDigest(access)
+            guard try confirmedCurrentProfile() == target, current == target,
+                  active?.snapshot?.identity.samePrincipal(as: identity) == true,
                   DesktopModeInspector.read(support: support) == .subscription else {
                 throw SafetyError("目标桌面的实际账号与档案记录不一致，终端登录保持原样。")
+            }
+            let stillSameDesktop = { [weak self] () async throws -> Bool in
+                guard let self else { return false }
+                guard try confirmedCurrentProfile() == target, self.current == target,
+                      self.active?.snapshot?.identity.samePrincipal(as: identity) == true,
+                      DesktopModeInspector.read(support: support) == .subscription,
+                      self.cliConfiguration().allowsSubscriptionMutation else { return false }
+                let now = try await token(for: profileDir(target), allowExpired: true, allowInteraction: false)
+                return now.map(desktopTokenDigest) == digest
             }
             let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
             let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: io),
@@ -101,9 +114,7 @@ struct DesktopOnlySwitchOffer: Equatable {
                 storeFor: { Self.isolatedStore($0, allowInteraction: true) },
                 journalURL: protection.files.directory.appendingPathComponent("cli-transcript-links.json"),
                 remote: { try await self.checkedCLIIdentity($0) },
-                contextIsCurrent: { try confirmedCurrentProfile() == target && self.current == target
-                    && self.active?.snapshot?.identity.samePrincipal(as: identity) == true
-                    && DesktopModeInspector.read(support: support) == .subscription },
+                contextIsCurrent: { try await stillSameDesktop() },
                 terminalsBefore: { terminalsBefore }, terminalsNow: { [weak self] in self?.runningCLITerminals() ?? [] })
             cliConnection.defaultLoginDidChange()
             resetCurrentCLIRecoveryObservation()

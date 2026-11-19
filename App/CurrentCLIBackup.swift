@@ -16,7 +16,12 @@ import SwitcherCore
         currentCLIBackupAttemptAt = now
         do {
             if let operation { try await operation() }
-            else { try await backupCurrentDefaultCLI(manual: false) }
+            else {
+                // The passive path verifies under the existing CLI network gate so the backup keeps
+                // a proof bound to this credential; a gate/verification failure leaves the old backup.
+                try await backupCurrentDefaultCLI(manual: false, gate: { await self.protection.preflight(target: .cli).allowed },
+                    verify: { token in try await self.checkedCLIIdentity(token) })
+            }
             // Only a login whose identity was verified online for this exact credential digest is
             // copied back into the account's own directory; the backup holds that proof.
             if !isDemo, operation == nil,

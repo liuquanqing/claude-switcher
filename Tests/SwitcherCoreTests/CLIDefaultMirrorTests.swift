@@ -44,9 +44,9 @@ import XCTest
     private var a: CLIIdentity { CLIIdentity(accountID: "account-a", organizationID: "org-a", email: "a@example.test") }
     private var b: CLIIdentity { CLIIdentity(accountID: "account-b", organizationID: "org-b", email: "b@example.test") }
     private var profiles: [CLIProfileIdentity] { [.init(name: "Personal", identity: a), .init(name: "Design", identity: b)] }
-    private func login(_ identity: CLIIdentity, token: String, expired: Bool = false) throws -> CLIOwnedLogin {
+    private func login(_ identity: CLIIdentity, token: String, expired: Bool = false, lifetime: TimeInterval = 3600) throws -> CLIOwnedLogin {
         CLIOwnedLogin(oauth: try CLIJSON.encode(["accessToken": token, "refreshToken": "refresh-" + token,
-                                                 "expiresAt": date.addingTimeInterval(expired ? -60 : 3600).timeIntervalSince1970 * 1000]),
+                                                 "expiresAt": date.addingTimeInterval(expired ? -60 : lifetime).timeIntervalSince1970 * 1000]),
                       metadata: try CLIJSON.encode(["accountUuid": identity.accountID!, "organizationUuid": identity.organizationID!, "emailAddress": identity.email!]))
     }
     private func remote(_ token: String) async throws -> CLIIdentity {
@@ -216,7 +216,7 @@ import XCTest
         let f = try fixture()
         _ = try await follow(f)
         // The default store renewed B while B was current; its own directory still has the seed.
-        let renewed = try login(b, token: "access-b2")
+        let renewed = try login(b, token: "access-b2", lifetime: 7200)
         f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: renewed.oauth)
         f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: renewed.metadata)
         try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
@@ -265,24 +265,29 @@ import XCTest
 
     func testReverseSyncRollsBackCredentialWhenIdentityWriteFails() async throws {
         let f = try fixture()
-        let renewed = try login(b, token: "access-b2")
+        let renewed = try login(b, token: "access-b2", lifetime: 7200)
         f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: renewed.oauth)
         f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: renewed.metadata)
-        let document = f.isolatedB.appendingPathComponent(".claude.json")
-        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: document.path)
-        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: document.path) }
         let own = try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b)
+        // A store whose identity document cannot be written: the credential write must be rolled back.
+        let document = f.isolatedB.appendingPathComponent(".claude.json")
+        let saved = try CLIPrivateFile.read(document)
+        try FileManager.default.removeItem(at: document)
+        try FileManager.default.createDirectory(at: document, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: document); try? CLIPrivateFile.write(saved, to: document) }
         do {
             try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
                 verified: CLIVerification(login: renewed, identity: b, checkedAt: date), now: { self.date })
             XCTFail("document write must fail")
         } catch {}
+        try FileManager.default.removeItem(at: document)
+        try CLIPrivateFile.write(saved, to: document)
         XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), own, "credential rolled back, no mixed state")
     }
 
     func testScopedKeychainLoginIsReadAndUpdatedNotTheStaleFile() async throws {
         let f = try fixture()
-        let renewed = try login(b, token: "access-b2")
+        let renewed = try login(b, token: "access-b2", lifetime: 7200)
         try FileManager.default.removeItem(at: f.isolatedB.appendingPathComponent(".credentials.json"))
         secrets.items[f.isolatedB.path] = try CLIJSON.replacing(nil, key: "claudeAiOauth", with: renewed.oauth)
         XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), renewed)
@@ -359,5 +364,49 @@ import XCTest
     func testTerminalParsingHandlesTabsAndDoesNotSignal() {
         let output = "  101\t/Users/x/.local/bin/claude\n  102  claude\n  103 /Applications/Claude.app/Contents/MacOS/Claude\n"
         XCTAssertEqual(CLIDefaultMirror.terminalProcesses(psOutput: output, own: []), [101, 102])
+    }
+
+    func testExpiredSourceWithValidBackupDoesNotTriggerFalseRenewalLoop() async throws {
+        let f = try fixture()
+        f.io.backups["Design"] = try CLIBackup.verifiedData(login: login(b, token: "access-b2", lifetime: 7200), identity: b, now: date)
+        try writeIsolated(f.isolatedB, login(b, token: "access-b", expired: true))
+        let outcome = try await follow(f)
+        XCTAssertEqual(outcome.restoration, .verifiedLogin, "a valid backup switches even when the source is expired")
+        XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document).usableAccessToken(now: date), "access-b2")
+    }
+
+    func testOlderExpiryCandidateNeverReplacesNewerVerifiedBackup() async throws {
+        let f = try fixture()
+        let newer = try CLIBackup.verifiedData(login: login(b, token: "access-b2", lifetime: 7200), identity: b, now: date)
+        f.io.backups["Design"] = newer
+        try writeIsolated(f.isolatedB, login(b, token: "access-b", lifetime: 3600))
+        try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: remote)
+        XCTAssertEqual(f.io.backups["Design"], newer)
+    }
+
+    func testReverseSyncSkipsDefaultWithEarlierExpiryEvenWhenVerified() async throws {
+        let f = try fixture()
+        _ = try await follow(f)
+        let older = try login(b, token: "access-b2", lifetime: 1800)
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: older.oauth)
+        f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: older.metadata)
+        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
+            verified: CLIVerification(login: older, identity: b, checkedAt: date), now: { self.date })
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), try login(b, token: "access-b"))
+    }
+
+    func testStoredOnlyBackupIsNotCommittedWithoutFreshOnlineVerification() async throws {
+        let f = try fixture()
+        try FileManager.default.removeItem(at: f.isolatedB)
+        // A backup whose access token expired but has a refresh token and a historic proof.
+        f.io.backups["Design"] = try CLIBackup.verifiedData(login: login(b, token: "access-b", expired: true), identity: b, now: date.addingTimeInterval(-7200))
+        let credentials = f.io.credentials
+        do { _ = try await follow(f); XCTFail("must require fresh verification") } catch {}
+        XCTAssertEqual(f.io.credentials, credentials)
+        XCTAssertNotNil(f.io.backups["Personal"], "outgoing still backed up")
+    }
+
+    func testTerminalPathWithSpacesIsCounted() {
+        XCTAssertEqual(CLIDefaultMirror.terminalProcesses(psOutput: "  101 /Users/test/Local Tools/claude\n", own: []), [101])
     }
 }

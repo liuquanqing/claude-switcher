@@ -67,23 +67,28 @@ import Darwin
     /// Refresh the per-profile backup from the account's own directory before it becomes the default.
     /// The directory reading is a candidate: it replaces a verified backup only after its own online
     /// verification, and never replaces a usable or refreshable verified backup with an expired one.
+    /// Returns the source login observed at the start, so the caller can detect a later renewal.
+    @discardableResult
     public static func syncBackup(target: CLIProfileIdentity, store: DirectoryStore?, io: CLICredentialIO,
                                   now: () -> Date = Date.init,
-                                  verify: (String) async throws -> CLIIdentity) async throws {
+                                  verify: (String) async throws -> CLIIdentity) async throws -> CLIOwnedLogin? {
         guard let expected = target.identity, expected.isComplete, ProfileTransaction.validName(target.name),
-              let store, let login = try ownedLogin(in: store, expected: expected) else { return }
+              let store else { return nil }
+        let login = try ownedLogin(in: store, expected: expected)
+        guard let login else { return nil }
         let previous = try io.readBackup(target.name)
         if let previous {
             let backup = try CLIBackup(data: previous)
             guard try backup.login.identity?.samePrincipal(as: expected) == true else {
                 throw SafetyError("该档案已有其他账号或组织的 CLI 备份，未覆盖。")
             }
-            if backup.login == login { return }
-            // A verified backup is only replaced by a candidate that proves itself online now.
-            if backup.verification != nil, backup.login.hasRefreshToken,
-               backup.login.usableAccessToken(now: now()) != nil, login.usableAccessToken(now: now()) == nil { return }
-            if backup.verification != nil, backup.login.hasRefreshToken,
-               login.usableAccessToken(now: now()) == nil { return }
+            if backup.login == login { return login }
+            if backup.verification != nil, backup.login.hasRefreshToken {
+                // A verified backup is only replaced by a candidate that proves itself online now
+                // and is not older than the backup by its own expiry.
+                if login.usableAccessToken(now: now()) == nil { return login }
+                if let backupExpiry = expiry(backup.login), let candidateExpiry = expiry(login), candidateExpiry < backupExpiry { return login }
+            }
         }
         guard let access = login.usableAccessToken(now: now()) else {
             if previous == nil {
@@ -93,7 +98,7 @@ import Darwin
                     throw SafetyError("CLI 备份回读未通过，默认登录保持原样。")
                 }
             }
-            return
+            return login
         }
         let actual = try await verify(access)
         guard actual.isComplete, actual.samePrincipal(as: expected) else {
@@ -108,6 +113,12 @@ import Darwin
         guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == data else {
             throw SafetyError("CLI 备份回读未通过，默认登录保持原样。")
         }
+        return login
+    }
+
+    public static func expiry(_ login: CLIOwnedLogin) -> Double? {
+        guard let oauth = login.oauth, let value = try? CLIJSON.object(oauth)["expiresAt"] as? NSNumber else { return nil }
+        return value.doubleValue
     }
 
     /// While an account is current, the official CLI may renew the default login. Copy it back into
@@ -121,6 +132,8 @@ import Darwin
         guard live.hasSecrets, live.digest == verified.digest, try live.identity?.samePrincipal(as: expected) == true,
               let own = try ownedLogin(in: store, expected: expected), own != live else { return }
         if own.usableAccessToken(now: now()) != nil, live.usableAccessToken(now: now()) == nil { return }
+        // "Newer" must be provable: the default credential's own expiry is later than the directory's.
+        if let ownExpiry = expiry(own), let liveExpiry = expiry(live), liveExpiry <= ownExpiry { return }
         let router = store.router()
         let credentials = try router.read()
         let document = try store.document()
@@ -128,13 +141,19 @@ import Darwin
         let newCredentials = try CLIJSON.replacing(credentials, key: "claudeAiOauth", with: live.oauth)
         let newDocument = try CLIJSON.replacing(document, key: "oauthAccount", with: live.metadata)
         try router.write(newCredentials)
-        do { try store.writeDocument(newDocument) }
-        catch {
+        var documentWritten = false
+        do {
+            try store.writeDocument(newDocument); documentWritten = true
+            guard try CLIOwnedLogin(credentials: router.read(), identityDocument: store.document()) == live else {
+                throw SafetyError("独立目录回读未通过，登录同步未确认。")
+            }
+        } catch {
+            if documentWritten, try store.document() == newDocument { try store.writeDocument(document) }
             if try router.read() == newCredentials { try router.write(credentials) }
+            guard try CLIOwnedLogin(credentials: router.read(), identityDocument: store.document()) == own else {
+                throw SafetyError("独立目录同步失败且回滚未确认，请保留现场并停止切换。")
+            }
             throw error
-        }
-        guard try CLIOwnedLogin(credentials: router.read(), identityDocument: store.document()) == live else {
-            throw SafetyError("独立目录回读未通过，登录同步未确认。")
         }
     }
 
@@ -148,9 +167,10 @@ import Darwin
     /// spawned for status or renewal; they are not user terminals. This never signals a process.
     public static func terminalProcesses(psOutput: String, own: Set<Int32>) -> [Int32] {
         psOutput.split(separator: "\n").compactMap { line in
-            let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).filter { !$0.isEmpty }
-            guard fields.count == 2, let pid = Int32(fields[0]), !own.contains(pid) else { return nil }
-            let command = String(fields[1])
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard let split = trimmed.firstIndex(where: { $0 == " " || $0 == "\t" }),
+                  let pid = Int32(trimmed[..<split]), !own.contains(pid) else { return nil }
+            let command = trimmed[split...].trimmingCharacters(in: .whitespaces)
             return command == "claude" || command.hasSuffix("/claude") ? pid : nil
         }
     }
@@ -164,27 +184,36 @@ import Darwin
                               journalURL: URL,
                               remote: @escaping (String) async throws -> CLIIdentity,
                               now: () -> Date = Date.init,
-                              contextIsCurrent: () throws -> Bool = { true },
+                              contextIsCurrent: () async throws -> Bool = { true },
                               terminalsBefore: () -> [Int32] = { [] },
                               terminalsNow: () -> [Int32] = { [] }) async throws -> Outcome {
         let before = terminalsBefore()
-        guard try contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
+        guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         let source = try isolatedDirectory(identity: target.identity!, profile: target.name, home: home, repository: repository).map(storeFor)
-        try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
-        guard try contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
+        let observed = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
+        guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         let plan = try await transaction.prepare(target: target, profiles: profiles, remote: remote)
+        // Compare against what was observed at sync time, not against the backup (which may
+        // legitimately be newer than an expired source).
+        if let source, let expected = target.identity, try ownedLogin(in: source, expected: expected) != observed {
+            let saved = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
+            let persisted = try transaction.io.readBackup(target.name).map { try CLIBackup(data: $0).login }
+            throw SafetyError(saved != nil && persisted == saved
+                ? "独立目录的登录在核验期间更新，已保存最新版本；请再切换一次以使用它。"
+                : "独立目录的登录在核验期间变化，未修改默认登录；请再切换一次。")
+        }
+        guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         if plan.restoration == .needsLogin {
             try transaction.persistOutgoing(plan)
             return Outcome(restoration: .needsLogin, previousTerminals: before.filter { Set(terminalsNow()).contains($0) }.count)
         }
-        try transaction.persistOutgoing(plan)
-        // The source may have been renewed while the online checks ran; re-read before commit.
-        if let source, let expected = target.identity, let current = try ownedLogin(in: source, expected: expected),
-           let backup = try transaction.io.readBackup(target.name).map({ try CLIBackup(data: $0).login }), current != backup {
-            try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
-            throw SafetyError("独立目录的登录在核验期间更新，已保存最新版本；请再切换一次以使用它。")
+        // The follow path promises an online-verified login; a merely stored backup is not enough.
+        guard plan.restoration == .verifiedLogin else {
+            try transaction.persistOutgoing(plan)
+            throw SafetyError("目标终端登录本次未能在线核验，默认登录保持原样；请在终端里确认登录后重试。")
         }
-        guard try contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
+        try transaction.persistOutgoing(plan)
+        guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         let restoration = try transaction.apply(plan)
         let alive = Set(terminalsNow())
         return Outcome(restoration: restoration, linkedTranscripts: 0, previousTerminals: before.filter { alive.contains($0) }.count)
