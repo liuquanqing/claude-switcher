@@ -78,25 +78,30 @@ import Darwin
     /// Refresh the per-profile backup from the account's own directory before it becomes the default.
     /// The directory reading is a candidate: it replaces a verified backup only after its own online
     /// verification, and never replaces a usable or refreshable verified backup with an expired one.
-    /// Returns the source login observed at the start, so the caller can detect a later renewal.
+    public struct SyncResult {
+        /// Source login observed at the start (nil when no source login), for later change detection.
+        public let observed: CLIOwnedLogin?
+        /// Backup data written, read back and online-verified in THIS round; only this may be reused.
+        public let verifiedRecord: Data?
+    }
     @discardableResult
     public static func syncBackup(target: CLIProfileIdentity, store: DirectoryStore?, io: CLICredentialIO,
                                   now: () -> Date = Date.init,
-                                  verify: (String) async throws -> CLIIdentity) async throws -> CLIOwnedLogin? {
+                                  verify: (String) async throws -> CLIIdentity) async throws -> SyncResult {
         guard let expected = target.identity, expected.isComplete, ProfileTransaction.validName(target.name),
-              let store else { return nil }
+              let store else { return SyncResult(observed: nil, verifiedRecord: nil) }
         let login = try ownedLogin(in: store, expected: expected)
-        guard let login else { return nil }
+        guard let login else { return SyncResult(observed: nil, verifiedRecord: nil) }
         let previous = try io.readBackup(target.name)
         if let previous {
             let backup = try CLIBackup(data: previous)
             guard try backup.login.identity?.samePrincipal(as: expected) == true else {
                 throw SafetyError("该档案已有其他账号或组织的 CLI 备份，未覆盖。")
             }
-            if backup.login == login { return login }
+            if backup.login == login { return SyncResult(observed: login, verifiedRecord: nil) }
             if backup.verification != nil {
-                if login.usableAccessToken(now: now()) == nil { return login }
-                guard CLIBackupFreshness.mayReplace(login, verifiedBackup: backup) else { return login }
+                if login.usableAccessToken(now: now()) == nil { return SyncResult(observed: login, verifiedRecord: nil) }
+                guard CLIBackupFreshness.mayReplace(login, verifiedBackup: backup) else { return SyncResult(observed: login, verifiedRecord: nil) }
             }
         }
         guard let access = login.usableAccessToken(now: now()) else {
@@ -107,7 +112,7 @@ import Darwin
                     throw SafetyError("CLI 备份回读未通过，默认登录保持原样。")
                 }
             }
-            return login
+            return SyncResult(observed: login, verifiedRecord: nil)
         }
         let actual = try await verify(access)
         guard actual.isComplete, actual.samePrincipal(as: expected) else {
@@ -122,7 +127,7 @@ import Darwin
         guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == data else {
             throw SafetyError("CLI 备份回读未通过，默认登录保持原样。")
         }
-        return login
+        return SyncResult(observed: login, verifiedRecord: data)
     }
 
     public static func expiry(_ login: CLIOwnedLogin) -> Double? { CLIBackupFreshness.expiry(login) }
@@ -219,19 +224,17 @@ import Darwin
         let before = terminalsBefore()
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         let source = try isolatedDirectory(identity: target.identity!, profile: target.name, home: home, repository: repository).map(storeFor)
-        let observed = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
+        let sync = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
+        let observed = sync.observed
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
-        if let raw = try transaction.io.readBackup(target.name), let parsed = try? CLIBackup(data: raw),
-           parsed.verification != nil, parsed.login == observed || (observed == nil && parsed.login.hasSecrets) {
-            transaction.preverified[target.name] = raw
-        }
+        if let record = sync.verifiedRecord { transaction.preverified[target.name] = record }
         let plan = try await transaction.prepare(target: target, profiles: profiles, remote: remote)
         // Compare against what was observed at sync time, not against the backup (which may
         // legitimately be newer than an expired source).
         if let source, let expected = target.identity, try ownedLogin(in: source, expected: expected) != observed {
             let saved = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
             let persisted = try transaction.io.readBackup(target.name).map { try CLIBackup(data: $0).login }
-            throw SafetyError(saved != nil && persisted == saved
+            throw SafetyError(saved.verifiedRecord != nil && persisted == saved.observed
                 ? "独立目录的登录在核验期间更新，已保存最新版本；请再切换一次以使用它。"
                 : "独立目录的登录在核验期间变化，未修改默认登录；请再切换一次。")
         }
@@ -241,7 +244,7 @@ import Darwin
             return Outcome(restoration: .needsLogin, previousTerminals: before.filter { Set(terminalsNow()).contains($0) }.count)
         }
         // The follow path promises an online-verified login; a merely stored backup is not enough.
-        guard plan.restoration == .verifiedLogin else {
+        guard plan.restoration == .verifiedLogin, plan.desired.usableAccessToken(now: now()) != nil else {
             try transaction.persistOutgoing(plan)
             throw SafetyError("目标终端登录本次未能在线核验，默认登录保持原样；请在终端里确认登录后重试。")
         }

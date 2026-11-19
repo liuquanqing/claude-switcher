@@ -43,6 +43,8 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     @Published private(set) var checkedAt: Date?
     @Published private(set) var localRecord: CLILocalRecord = .unconfirmed
     @Published private(set) var legacyBackupAvailable = false
+    /// A restore whose rollback could not be confirmed stays unavailable until a fresh login check.
+    private var restoreBlockedFor: String?
     var isBusy: Bool { phase == .checking || phase == .opening }
     private let operations: CLIConnectionOperations
     private var binding: CLIBinding?
@@ -132,7 +134,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             let defaultRecord = operations.localRecord(context.identity, defaultBinding)
             defaultMatches = defaultStatus == .matched
             defaultLoginAvailable = defaultMatches || (defaultStatus == .notLoggedIn && defaultRecord != .differentAccount)
-            if showLoginChoices, !defaultMatches {
+            if showLoginChoices, !defaultMatches, restoreBlockedFor != context.profile {
                 do { legacyBackupAvailable = try operations.hasRecoverableBackup(context) }
                 catch is CLIInteractionRequired { detail = "旧 CLI 备份暂无法检查。" }
                 catch { detail = error.localizedDescription }
@@ -192,6 +194,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             let message = error.localizedDescription
             if message.contains("还原未确认") || message.contains("回滚未确认") || message.contains("停止切换") {
                 legacyBackupAvailable = false
+                restoreBlockedFor = expected.profile
                 phase = .unconfirmed
             } else { phase = .choosing }
         }
@@ -251,6 +254,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             checkedAt = Date()
             switch status {
             case .matched:
+                restoreBlockedFor = nil
                 if binding.choice == .defaultLogin {
                     await backupDefaultLogin(context, generation: generation)
                     guard stillCurrent(context, generation: generation) else { return }

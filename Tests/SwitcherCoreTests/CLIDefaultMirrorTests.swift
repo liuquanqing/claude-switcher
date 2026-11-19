@@ -465,7 +465,9 @@ import XCTest
         let expiredDefault = try live(a, "access-a", -60)
         f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: expiredDefault.oauth)
         let newer = try live(a, "access-a2", 9000)
-        f.io.backups["Personal"] = try CLIBackup.verifiedData(login: newer, identity: a, now: now.addingTimeInterval(-60))
+        // A's own directory holds the renewal; this round verifies it and writes the slot once.
+        let isolatedA = try CLIBinding.directory(for: .isolated, identity: a, home: f.home)
+        try writeIsolated(isolatedA, newer)
         var verifiedTokens: [String] = []
         let trackingRemote: (String) async throws -> CLIIdentity = { token in verifiedTokens.append(token); return try await self.remote(token) }
         let writesBefore = f.io.events.filter { $0 == "backup:Personal" }.count
@@ -476,7 +478,8 @@ import XCTest
         XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), newer)
         XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, newer)
         XCTAssertFalse(verifiedTokens.contains("access-a"), "the expired old default is never sent for verification")
-        XCTAssertEqual(f.io.events.filter { $0 == "backup:Personal" }.count - writesBefore, 0, "the already written slot is not written again")
+        XCTAssertEqual(verifiedTokens.filter { $0 == "access-a2" }.count, 1, "the winning login is verified exactly once this round")
+        XCTAssertEqual(f.io.events.filter { $0 == "backup:Personal" }.count - writesBefore, 1, "the slot is written once")
     }
 
     func testManualRecoveryPreparationAllowsNewerSameAccountBackupOverExpiredDefault() async throws {
@@ -570,5 +573,51 @@ import XCTest
         let after = try CLIJSON.object(CLIPrivateFile.read(document)!)
         XCTAssertEqual(after["projects"] as? [String: Bool], ["changed": true], "concurrent settings kept")
         XCTAssertEqual(try CLIIdentity.metadata(CLIJSON.field(CLIPrivateFile.read(document), key: "oauthAccount"))?.accountID, a.accountID, "foreign identity kept, not overwritten")
+    }
+
+    func testHistoricProofWithoutSourceIsNotReusedAsThisRoundsVerification() async throws {
+        let f = try fixture()
+        // Default A expired, no isolated directory, only a historic verified backup with later expiry.
+        let now = Date()
+        let expired = CLIOwnedLogin(oauth: try CLIJSON.encode(["accessToken": "access-a", "refreshToken": "r", "expiresAt": now.addingTimeInterval(-60).timeIntervalSince1970 * 1000]),
+                                    metadata: try login(a, token: "access-a").metadata)
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: expired.oauth)
+        let newer = CLIOwnedLogin(oauth: try CLIJSON.encode(["accessToken": "access-a2", "refreshToken": "r", "expiresAt": now.addingTimeInterval(9000).timeIntervalSince1970 * 1000]),
+                                  metadata: try login(a, token: "access-a2").metadata)
+        f.io.backups["Personal"] = try CLIBackup.verifiedData(login: newer, identity: a, now: now.addingTimeInterval(-3600))
+        var tokens: [String] = []
+        let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io), target: profiles[0], profiles: profiles,
+            home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home),
+            remote: { t in tokens.append(t); return try await self.remote(t) })
+        XCTAssertEqual(outcome.restoration, .verifiedLogin)
+        XCTAssertEqual(tokens, ["access-a2"], "the backup is verified online this round, not trusted from history")
+    }
+
+    func testOutgoingSlotChangedByAnotherWriterStopsCommit() async throws {
+        let f = try fixture()
+        let credentials = f.io.credentials
+        var checks = 0
+        do {
+            _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
+                home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home),
+                remote: { token in
+                    checks += 1
+                    // The other writer lands while the target login is being verified online.
+                    if checks == 2 {
+                        f.io.backups["Personal"] = try CLIBackup.verifiedData(login: self.login(self.a, token: "access-a2", lifetime: 99999), identity: self.a, now: self.date)
+                    }
+                    return try await self.remote(token)
+                }, now: { self.date })
+            XCTFail("must stop")
+        } catch {}
+        XCTAssertEqual(f.io.credentials, credentials)
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, try login(a, token: "access-a2", lifetime: 99999))
+    }
+
+    func testCrossAccountTargetSlotWrittenOnce() async throws {
+        let f = try fixture()
+        let before = f.io.events.filter { $0 == "backup:Design" }.count
+        _ = try await follow(f)
+        XCTAssertEqual(f.io.events.filter { $0 == "backup:Design" }.count - before, 1)
     }
 }

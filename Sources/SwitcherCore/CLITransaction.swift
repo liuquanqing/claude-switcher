@@ -5,10 +5,19 @@ import Foundation
     func writeCredentials(_ data: Data?) throws
     func readIdentityDocument() throws -> Data?
     func writeIdentityDocument(_ data: Data?) throws
+    /// Replace the identity document only if it still equals the snapshot read this round.
+    func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws
     func readBackup(_ profile: String) throws -> Data?
     func writeBackup(_ profile: String, data: Data) throws
     func readMarker() throws -> String?
     func writeMarker(_ value: String?) throws
+}
+
+@MainActor public extension CLICredentialIO {
+    func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws {
+        guard try readIdentityDocument() == expected else { throw SafetyError("CLI 身份文件在写入前已被其他程序更新，未覆盖。") }
+        try writeIdentityDocument(data)
+    }
 }
 
 public enum CLIRestoration: Equatable, Sendable { case needsLogin, storedLogin, verifiedLogin }
@@ -24,6 +33,7 @@ public struct CLIPreparationFailure: Error, LocalizedError, Sendable {
 public struct PreparedCLISwitch {
     let original: CLIOwnedLogin
     let originalMarker: String?
+    let sourceBackupBefore: Data?
     let targetName: String
     let targetBackupBefore: Data?
     let targetBackupAfter: Data?
@@ -79,7 +89,7 @@ public struct PreparedCLISwitch {
         let original = try readOwned()
         let originalMarker = try io.readMarker()
         let targetRaw = try normalized(io.readBackup(target.name))
-        var sourceName: String?, sourceData: Data?
+        var sourceName: String?, sourceData: Data?, sourceRaw: Data?
         var sourceIdentity: CLIIdentity?, sourceRemote = false
         if original.hasSecrets {
             guard let metadata = try original.identity, metadata.isComplete else {
@@ -89,6 +99,7 @@ public struct PreparedCLISwitch {
             guard candidates.count == 1, let source = candidates.first else {
                 throw SafetyError("当前 CLI 登录不能唯一关联到桌面档案，未修改账号；请先刷新档案身份。")
             }
+            sourceRaw = try normalized(io.readBackup(source.name))
             let prior = try io.readBackup(source.name).map(CLIBackup.init(data:))
             // An expired outgoing default need not be verified online when a newer verified backup
             // of the same account already exists; that backup is kept and becomes the candidate.
@@ -150,7 +161,8 @@ public struct PreparedCLISwitch {
             desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
             let checkedAt = checked.1 ? now() : (backup.verification?.checkedAt ?? now())
             let upgraded = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
-            targetUpgrade = CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) ? upgraded : targetRaw
+            // Unchanged record: keep the read-back data as the commit expectation, write nothing.
+            targetUpgrade = CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) && upgraded != targetRaw ? upgraded : nil
         } else {
             guard !requiresTargetLogin else {
                 throw SafetyError("桌面目标还没有保存的 CLI 登录；本次未同步、未清空原登录。请先在官方 CLI 登录该账号，再检查关联。")
@@ -161,7 +173,8 @@ public struct PreparedCLISwitch {
               try io.readMarker() == originalMarker else {
             throw SafetyError("CLI 登录或备份在核验期间变化，未修改账号，请重试。")
         }
-        return PreparedCLISwitch(original: original, originalMarker: originalMarker, targetName: target.name, targetBackupBefore: targetRaw,
+        return PreparedCLISwitch(original: original, originalMarker: originalMarker, sourceBackupBefore: sourceRaw,
+                                 targetName: target.name, targetBackupBefore: targetRaw,
                                  targetBackupAfter: sourceName == target.name ? (sameAccountWinningBackup ?? sourceData) : (targetUpgrade ?? targetRaw),
                                  sourceName: sourceName, sourceBackup: sourceData, targetUpgrade: targetUpgrade,
                                  desired: desired, restoration: restoration)
@@ -177,6 +190,10 @@ public struct PreparedCLISwitch {
         if let name = plan.sourceName, let data = plan.sourceBackup {
             if preverified[name] == data, try normalized(io.readBackup(name)) == data { /* already written and read back this round */ }
             else {
+                // Another writer may have saved a newer renewal into the outgoing slot meanwhile.
+                guard try normalized(io.readBackup(name)) == plan.sourceBackupBefore else {
+                    throw SafetyError("切出账号的 CLI 备份在核验期间变化，未覆盖，请重试。")
+                }
                 try io.writeBackup(name, data: data)
                 guard try normalized(io.readBackup(name)) == data else { throw SafetyError("CLI 备份回读未通过，未移动桌面目录。") }
             }
@@ -218,7 +235,7 @@ public struct PreparedCLISwitch {
             }
             let newDocument = try CLIJSON.replacing(document, key: "oauthAccount", with: plan.desired.metadata)
             if try normalized(document) != newDocument {
-                identityAttempted = true; try io.writeIdentityDocument(newDocument)
+                identityAttempted = true; try io.writeIdentityDocument(newDocument, ifUnchangedSince: document)
             }
             markerAttempted = true; try io.writeMarker(plan.targetName)
             guard try readOwned() == plan.desired, try io.readMarker() == plan.targetName else {
@@ -256,7 +273,7 @@ public struct PreparedCLISwitch {
                     if field != plan.original.metadata {
                         guard field == plan.desired.metadata else { throw SafetyError("CLI 身份已被外部修改。") }
                         let restoredValue = try CLIJSON.replacing(current, key: "oauthAccount", with: plan.original.metadata)
-                        try io.writeIdentityDocument(restoredValue ?? (identityWasPresent ? Data("{}".utf8) : nil))
+                        try io.writeIdentityDocument(restoredValue ?? (identityWasPresent ? Data("{}".utf8) : nil), ifUnchangedSince: current)
                     }
                 } catch { restored = false }
             }

@@ -37,7 +37,9 @@ import SwitcherCore
         } catch {
             guard current == name, active?.snapshot?.identity.samePrincipal(as: identity) == true else { return }
             currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
-            if banner == nil { banner = "已登录，但备份尚未更新。请点击刷新重试。" }
+            let message = "已登录，但备份尚未更新。请点击刷新重试。"
+            if banner == nil || banner == message { banner = message }
+            else { banner = banner! + "\n" + message }
         }
     }
 
