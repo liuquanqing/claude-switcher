@@ -198,7 +198,9 @@ actor FictionalRenderGuard: GuardWorking {
      try await save(help.background(Color.card), name:"terminal-details-"+state+"-"+language, width:344)
     }
     if ["local-default", "separate", "waiting"].contains(state) {
-     try await save(HeroCard(store:store,protection:store.protection,busy:false,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-"+state+"-"+language,width:420)
+     try await save(HeroCard(store:store,protection:store.protection,busy:false,compact:true,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-"+state+"-"+language,width:420)
+     try await save(HeroCard(store:store,protection:store.protection,busy:false,compact:true,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-panel-"+state+"-"+language,width:420)
+     try await save(Panel(store:store,width:420).environment(\.appLanguage,language),name:"compact-panel-"+state+"-"+language,width:420)
     }
     if state == "unlinked", context != nil { try await saveChoice(store, connection: connection, language: language) }
    }

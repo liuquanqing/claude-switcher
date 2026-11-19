@@ -743,6 +743,10 @@ struct TerminalProtectionCard: View {
                     .foregroundColor(tone).frame(width: 14)
                 Text(guardTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(tone)
                     .lineLimit(1).fixedSize()
+                if controller.desktopScope == .subscription, !controller.working {
+                    Text("· " + t(store.claudeRunning ? "desktop.runningTiny" : "desktop.stoppedShort"))
+                        .font(.system(size: 11.5)).foregroundColor(.sub).lineLimit(1).fixedSize()
+                }
                 if let exit, statusColor == .good {
                     Text("· " + exit).font(.system(size: 11.5)).foregroundColor(.sub).lineLimit(1)
                 } else if statusColor != .good, !guardReason.isEmpty {

@@ -127,14 +127,16 @@ struct Header: View {
     @ObservedObject var store: Store
     @ObservedObject var protection: ProtectionController
     @Environment(\.appLanguage) private var language
+    /// Panel width; below 460pt the running control collapses to "● Show" so the account name stays whole.
+    var compact: Bool = false
     let openClaude: () -> Void
     @State private var openHover = false
     @State private var showAbout = false
     @State private var terminalHover = false
     @ObservedObject private var connection: CLIConnectionController
 
-    init(store: Store, protection: ProtectionController, openClaude: @escaping () -> Void) {
-        self.store = store; self.protection = protection; self.openClaude = openClaude
+    init(store: Store, protection: ProtectionController, compact: Bool = false, openClaude: @escaping () -> Void) {
+        self.store = store; self.protection = protection; self.compact = compact; self.openClaude = openClaude
         self.connection = store.cliConnection
     }
 
@@ -196,11 +198,25 @@ struct Header: View {
 
     private var terminalHelp: String {
         let account = store.current
+        var lines: [String] = []
         if let directory = terminalDirectoryLabel {
-            return appText("cli.openBindingHelp", language: language, arguments: ["account": account, "directory": directory])
+            lines.append(appText("cli.openBindingHelp", language: language, arguments: ["account": account, "directory": directory]))
+        } else {
+            lines.append(appText("cli.openTerminalHelp", language: language, arguments: ["account": account]))
         }
-        return appText("cli.openTerminalHelp", language: language, arguments: ["account": account])
+        if let path = terminalPath { lines.append(path) }
+        return lines.joined(separator: "\n")
     }
+
+    /// The directory is a property of the terminal entry, so it lives on the terminal icon
+    /// (badge + hover), not beside the account's email.
+    private var terminalPath: String? {
+        guard subscriptionDesktop else { return nil }
+        if let binding = connection.currentBinding { return binding.directory.path }
+        guard let identity = store.active?.snapshot?.identity, let choice = connection.preferredChoice else { return nil }
+        return (try? CLIBinding.directory(for: choice, identity: identity, home: FileManager.default.homeDirectoryForCurrentUser))?.path
+    }
+
 
     private var terminalControl: some View {
         Button { Task { await store.openTerminalFromHeader() } } label: {
@@ -212,7 +228,7 @@ struct Header: View {
                 if terminalNeedsAttention {
                     Circle().fill(connection.phase == .failed ? Color.bad : Color.warn).frame(width: 7, height: 7)
                         .overlay(Circle().stroke(Color.card, lineWidth: 2))
-                        .offset(x: -4, y: 4)
+                        .offset(x: -3, y: 3)
                 }
             }
             .frame(width: 32, height: 32)
@@ -253,15 +269,17 @@ struct Header: View {
                     HStack(spacing: 5) {
                         Circle().fill(Color.good).frame(width: 6, height: 6)
                             .overlay(Circle().stroke(Color.good.opacity(0.18), lineWidth: 3))
-                        Text(appText("desktop.runningTiny", language: language))
-                            .font(.system(size: 11, weight: .medium)).foregroundColor(.txt)
-                            .lineLimit(1).fixedSize()
+                        if !compact {
+                            Text(appText("desktop.runningTiny", language: language))
+                                .font(.system(size: 11, weight: .medium)).foregroundColor(.txt)
+                                .lineLimit(1).fixedSize()
+                        }
                     }
-                    .padding(.leading, 11).padding(.trailing, 9)
+                    .padding(.leading, compact ? 10 : 11).padding(.trailing, compact ? 7 : 9)
                     Rectangle().fill(Color.claude.opacity(0.28)).frame(width: 1, height: 14)
                     Text(actionTitle).font(.system(size: 11.5, weight: .semibold)).foregroundColor(.claude)
                         .lineLimit(1).fixedSize()
-                        .padding(.leading, 9).padding(.trailing, 12)
+                        .padding(.leading, compact ? 7 : 9).padding(.trailing, compact ? 10 : 12)
                 } else {
                     HStack(spacing: 6) {
                         Image(systemName: actionIcon).font(.system(size: 8.5, weight: .bold))
@@ -410,17 +428,8 @@ struct Header: View {
                                 .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
                         }
                     }
-                    HStack(spacing: 5) {
-                        Text(accountLine(a, language: language) ?? "")
-                            .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
-                            .layoutPriority(1)
-                        if let terminalDirectoryLabel {
-                            // The directory type is the fact worth keeping in a narrow window; the email yields first.
-                            Text("· " + appText("cli.metaPrefix", language: language) + " " + terminalDirectoryLabel)
-                                .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).fixedSize()
-                                .layoutPriority(2)
-                        }
-                    }
+                    Text(accountLine(a, language: language) ?? "")
+                        .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(modeTitle).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
@@ -1756,6 +1765,7 @@ struct LanguageMenu: View {
 struct Panel: View {
     @ObservedObject var store: Store
     @ObservedObject var protection: ProtectionController
+    var width: CGFloat = 500
     @ObservedObject private var updater = ApplicationUpdater.shared
     @ObservedObject private var updatePresentation = ApplicationUpdatePresentation.shared
     @Environment(\.appLanguage) private var language
@@ -1805,9 +1815,10 @@ struct Panel: View {
     private var languageBinding: Binding<String> {
         Binding(get: { store.appLanguage }, set: { store.setAppLanguage($0) })
     }
-    init(store: Store) {
+    init(store: Store, width: CGFloat = 500) {
         self.store = store
         self.protection = store.protection
+        self.width = width
     }
 
     /// Cards in their original order, then the add entry as the last grid cell.
@@ -1828,7 +1839,7 @@ struct Panel: View {
     var body: some View {
         VStack(spacing: 10) {
             VStack(spacing: 0) {
-                Header(store: store, protection: protection) {
+                Header(store: store, protection: protection, compact: width < 460) {
                     Task { await store.openProtectedClaude() }
                 }
                 TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)
@@ -1979,7 +1990,7 @@ struct Panel: View {
             .onChange(of: store.applicationUpdateNotice) { _ in dismissUpdateNoticeAfterDelay() }
         }
         .padding(12)
-        .frame(width: 500)
+        .frame(width: width)
         .background(Color.bg)
         .preferredColorScheme(.dark)
     }

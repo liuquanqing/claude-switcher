@@ -33,12 +33,12 @@ help_entry = """    var fixtureHelpOnly = false
             if needsRow { terminalRow }"""
 views = views.replace(help_body, help_entry)
 # V5: the hero card is Header + guard line + terminal row; render that composition as one card.
-panel_old = """                Header(store: store, protection: protection) {
+panel_old = """                Header(store: store, protection: protection, compact: width < 460) {
                     Task { await store.openProtectedClaude() }
                 }
                 TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)"""
 assert views.count(panel_old) == 1
-views = views.replace(panel_old, """                HeroCard(store: store, protection: protection, busy: store.busy != nil || store.statusRefreshInProgress) {
+views = views.replace(panel_old, """                HeroCard(store: store, protection: protection, busy: store.busy != nil || store.statusRefreshInProgress, compact: width < 460) {
                     Task { await store.openProtectedClaude() }
                 }""")
 hero = """
@@ -47,10 +47,11 @@ struct HeroCard: View {
     @ObservedObject var store: Store
     let protection: ProtectionController
     let busy: Bool
+    var compact: Bool = false
     let openClaude: () -> Void
     var body: some View {
         VStack(spacing: 0) {
-            Header(store: store, protection: protection, openClaude: openClaude)
+            Header(store: store, protection: protection, compact: compact, openClaude: openClaude)
             TerminalProtectionCard(store: store, controller: protection, busy: busy)
         }
         .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
