@@ -22,15 +22,46 @@ terminal = terminal.replace(locale_input, '@Environment(\\.appLanguage) private 
 # A detail fixture represents the UI after an explicit CLI check or launch.
 terminal = terminal.replace('officialReportActive ||', 'officialReportActive || fixtureHelpOnly ||', 1)
 views = views[:terminal_at] + terminal
-help_body = '    var body: some View {\n        let displayedStatus ='
+help_body = '    var body: some View {\n        VStack(alignment: .leading, spacing: 0) {\n            if needsRow { terminalRow }'
 assert views.count(help_body) == 1
-# Test-only selection keeps the real popover inside SwiftUI's environment lifecycle.
 help_entry = """    var fixtureHelpOnly = false
     @ViewBuilder var body: some View {
         if fixtureHelpOnly { helpPopover } else { fixtureSummary }
     }
-    @ViewBuilder private var fixtureSummary: some View {
-        let displayedStatus ="""
+    private var fixtureSummary: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if needsRow { terminalRow }"""
+views = views.replace(help_body, help_entry)
+# V5: the hero card is Header + guard line + terminal row; render that composition as one card.
+panel_old = """                Header(store: store, protection: protection, compact: width < 460) {
+                    Task { await store.openProtectedClaude() }
+                }
+                TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)"""
+assert views.count(panel_old) == 1
+views = views.replace(panel_old, """                HeroCard(store: store, protection: protection, busy: store.busy != nil || store.statusRefreshInProgress, compact: width < 460) {
+                    Task { await store.openProtectedClaude() }
+                }""")
+hero = """
+/// Test-only composition matching Panel's hero card.
+struct HeroCard: View {
+    @ObservedObject var store: Store
+    let protection: ProtectionController
+    let busy: Bool
+    var compact: Bool = false
+    let openClaude: () -> Void
+    var body: some View {
+        VStack(spacing: 0) {
+            Header(store: store, protection: protection, compact: compact, openClaude: openClaude)
+            TerminalProtectionCard(store: store, controller: protection, busy: busy)
+        }
+        .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+@MainActor
+struct TerminalStrip: View"""
+views = views.replace('\n@MainActor\nstruct TerminalStrip: View', hero, 1)
 Path('_qa/rc7/visual/FixtureViews.swift').write_text(views.replace(help_body, help_entry))
 protection_model = Path('App/Protection.swift').read_text()
 protection_model = protection_model.replace('@Published private(set) var checking = false', '@Published var checking = false')

@@ -54,7 +54,7 @@ actor FictionalRenderGuard: GuardWorking {
   print("\(name) \(size)")
  }
  @MainActor static func saveChoice(_ store: Store, connection: CLIConnectionController, language: String) async throws {
-  let host = NSHostingView(rootView: TerminalProtectionCard(store: store, controller: store.protection, busy: false).environment(\.controlActiveState, .active).environment(\.appLanguage, language).padding(12).frame(width:500).background(Color.bg))
+  let host = NSHostingView(rootView: HeroCard(store: store, protection: store.protection, busy: false, openClaude: {}).environment(\.controlActiveState, .active).environment(\.appLanguage, language).padding(12).frame(width:500).background(Color.bg))
   host.appearance = NSAppearance(named: .darkAqua)
   host.frame = NSRect(x:0,y:0,width:500,height:180)
   let window = NSWindow(contentRect:host.frame,styleMask:[.titled],backing:.buffered,defer:false)
@@ -127,7 +127,7 @@ actor FictionalRenderGuard: GuardWorking {
    if CommandLine.arguments.contains("--fixture-draft") { fullStore.protection.country = "JP" }
    if CommandLine.arguments.contains("--fixture-checking") { fullStore.protection.checking = true }
    if CommandLine.arguments.contains("--fixture-paused") { fullStore.protection.disable() }
-   try await save(Header(store:fullStore,protection:fullStore.protection,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
+   try await save(HeroCard(store:fullStore,protection:fullStore.protection,busy:false,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"header-"+language,width:500)
    try await save(Panel(store:fullStore).environment(\.appLanguage,language),name:"full-panel-"+language,width:500)
    var help = TerminalStrip(store:fullStore)
    help.fixtureHelpOnly = true
@@ -135,7 +135,7 @@ actor FictionalRenderGuard: GuardWorking {
    try await save(VStack { help }.environment(\.appLanguage,language).background(Color.card),name:"cli-help-"+language,width:340)
    if CommandLine.arguments.contains("--fixture-summary-only") { continue }
    if CommandLine.arguments.contains("--fixture-protection-expanded") {
-    try await save(TerminalProtectionCard(store:fullStore,controller:fullStore.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"settings-"+language,width:500)
+    try await save(HeroCard(store:fullStore,protection:fullStore.protection,busy:false,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"settings-"+language,width:500)
     continue
    }
    let update=ApplicationUpdater(demo:true,operations:.init(fetch:{_ in metadata},download:{_,target,_ in try payload.write(to:target);return target},verify:{_,_,_,_ in},directory:root),currentVersion:"1.3.6-rc.7",currentBuild:"1",architecture:"arm64")
@@ -153,18 +153,19 @@ actor FictionalRenderGuard: GuardWorking {
    let guardController = ProtectionController(testFiles:SafetyFiles(directory:root.appendingPathComponent("guard-"+language)), worker:FictionalRenderGuard(), observeNetwork:{_ in NetworkObservation(proxyConnected:false,tunOnline:false,country:nil)})
    let startGuard=Task { @MainActor in await guardController.enable() }
    while !guardController.working { await Task.yield() }
-   try await save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-starting-"+language,width:500)
+   try await save(HeroCard(store:guardStore,protection:guardController,busy:false,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-starting-"+language,width:500)
    await startGuard.value
-   try await save(TerminalProtectionCard(store:guardStore,controller:guardController,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-retry-"+language,width:500)
+   try await save(HeroCard(store:guardStore,protection:guardController,busy:false,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"protection-retry-"+language,width:500)
    for state in ["unlinked","local-default","local-isolated","local-different","default","separate","waiting","different","failed","route-failed"] {
     let store=Store(demo:true);store.setAppLanguage(language)
     let context: CLIConnectionContext? = store.protection.desktopScope == .subscription
      ? CLIConnectionContext(profile:store.current,identity:store.active!.snapshot!.identity) : nil
     var binding:CLIBinding?
-    if let context, ["failed", "route-failed", "different"].contains(state) {
+    if let context, ["local-default", "local-isolated", "failed", "route-failed", "different"].contains(state) {
      let home = URL(fileURLWithPath:"/fictional-home")
-     binding = CLIBinding(identity:context.identity,choice:.defaultLogin,
-      directory:try CLIBinding.directory(for:.defaultLogin,identity:context.identity,home:home))
+     let choice: CLIBindingChoice = state == "local-isolated" ? .isolated : .defaultLogin
+     binding = CLIBinding(identity:context.identity,choice:choice,
+      directory:try CLIBinding.directory(for:choice,identity:context.identity,home:home))
     }
     let connection=CLIConnectionController(operations:.init(context:{context},load:{_ in binding},save:{binding=$0},make:{mode,identity in
      CLIBinding(identity:identity,choice:mode,directory:try CLIBinding.directory(for:mode,identity:identity,home:URL(fileURLWithPath:"/fictional-home")))
@@ -189,15 +190,17 @@ actor FictionalRenderGuard: GuardWorking {
     else if state == "default" { await connection.choose(.defaultLogin) }
     else if state != "unlinked" && !state.hasPrefix("local-") { await connection.open() }
     connection.contextDidChange()
-    try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"cli-"+state+"-"+language,width:500)
+    try await save(HeroCard(store:store,protection:store.protection,busy:false,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:500).background(Color.bg),name:"cli-"+state+"-"+language,width:500)
     if ["separate", "waiting", "failed", "route-failed"].contains(state) {
      var help = TerminalStrip(store:store)
      help.fixtureHelpOnly = true
      help.fixtureLanguage = language
      try await save(help.background(Color.card), name:"terminal-details-"+state+"-"+language, width:344)
     }
-    if state == "local-default" {
-     try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-record-"+language,width:420)
+    if ["local-default", "separate", "waiting"].contains(state) {
+     try await save(HeroCard(store:store,protection:store.protection,busy:false,compact:true,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-"+state+"-"+language,width:420)
+     try await save(HeroCard(store:store,protection:store.protection,busy:false,compact:true,openClaude:{}).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-panel-"+state+"-"+language,width:420)
+     try await save(Panel(store:store,width:420).environment(\.appLanguage,language),name:"compact-panel-"+state+"-"+language,width:420)
     }
     if state == "unlinked", context != nil { try await saveChoice(store, connection: connection, language: language) }
    }
