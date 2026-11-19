@@ -145,9 +145,13 @@ public struct PreparedCLISwitch {
                 } else {
                     let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: sourceIdentity, remote: remote)
                     desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
-                    let record = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
-                    sameAccountWinningBackup = record
-                    sourceData = record
+                    // Same login, same expiry: keep the slot bytes; this round's proof lives in the plan.
+                    if CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) {
+                        let record = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
+                        sameAccountWinningBackup = record; sourceData = record
+                    } else {
+                        sameAccountWinningBackup = targetRaw; sourceData = nil
+                    }
                 }
             } else {
                 desired = original; restoration = sourceRemote ? .verifiedLogin : .storedLogin
@@ -220,8 +224,12 @@ public struct PreparedCLISwitch {
     }
     public func apply(_ plan: PreparedCLISwitch, requireUsableLogin: Bool = false) throws -> CLIRestoration {
         try revalidate(plan)
-        if requireUsableLogin, plan.restoration != .verifiedLogin || plan.desired.usableAccessToken(now: now()) == nil {
-            throw SafetyError("恢复时未能确认有效 CLI 登录，请在官方 CLI 登录后重试。")
+        if requireUsableLogin {
+            let at = now()
+            guard plan.restoration == .verifiedLogin, plan.desired.usableAccessToken(now: at) != nil,
+                  let expiry = CLIBackupFreshness.expiry(plan.desired), expiry > at.timeIntervalSince1970 * 1000 else {
+                throw SafetyError("恢复时未能确认有效 CLI 登录，请在官方 CLI 登录后重试。")
+            }
         }
         let oldMarker = plan.originalMarker
         var credentialsAttempted = false, identityAttempted = false, markerAttempted = false

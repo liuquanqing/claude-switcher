@@ -161,4 +161,23 @@ import XCTest
         XCTAssertThrowsError(try CLIPrivateFile.read(parentLink.appendingPathComponent("target")))
         XCTAssertEqual(try CLIPrivateFile.read(destination), Data("{}".utf8))
     }
+
+    func testCredentialFileCommitAbortsWhenTerminalRenewsDuringStage() async throws {
+        let file = try directory("fake-home/.claude").appendingPathComponent(".credentials.json")
+        let original = try CLIJSON.encode(["claudeAiOauth": ["accessToken": "old", "refreshToken": "r"]])
+        try CLIPrivateFile.write(original, to: file)
+        // Simulate the terminal saving a renewal after the snapshot was read: CAS must abort.
+        let renewal = try CLIJSON.encode(["claudeAiOauth": ["accessToken": "renewed", "refreshToken": "r2"]])
+        try CLIPrivateFile.write(renewal, to: file)
+        do { try CLIPrivateFile.write(original, to: file, ifUnchangedSince: original); XCTFail("stale") } catch {}
+        XCTAssertEqual(try CLIPrivateFile.read(file), renewal)
+    }
+    func testExclusiveDocumentCreationNeverReplacesConcurrentFile() throws {
+        let dir = try directory("fake-home/.claude")
+        let document = dir.appendingPathComponent(".claude.json")
+        // A concurrent writer creates the file; exclusive commit must fail and keep it.
+        try Data("concurrent".utf8).write(to: document)
+        do { try CLIPrivateFile.writeDocument(Data("ours".utf8), to: document, ifUnchangedSince: nil); XCTFail("must not replace") } catch {}
+        XCTAssertEqual(try Data(contentsOf: document), Data("concurrent".utf8))
+    }
 }

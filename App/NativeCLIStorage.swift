@@ -44,7 +44,8 @@ import SwitcherCore
         credentials = CLIStoredCredentialRouter(readPrimary: { try reader(cliService, account) },
             writePrimary: { try writer(cliService, account, $0) },
             readFile: { try CLIPrivateFile.read(credentialFile) },
-            writeFile: { try CLIPrivateFile.write($0, to: credentialFile) })
+            writeFile: { try CLIPrivateFile.write($0, to: credentialFile) },
+            writeFileIfUnchanged: { data, expected in try CLIPrivateFile.write(data, to: credentialFile, ifUnchangedSince: expected) })
     }
     private func readFile(_ path: URL) throws -> Data? {
         do { return try Data(contentsOf: path) }

@@ -89,13 +89,17 @@ public enum CLIPrivateFile {
             try handle.synchronize()
             try handle.close()
             if expectAbsent {
-                var info = stat()
-                guard lstat(url.path, &info) != 0, errno == ENOENT else { throw SafetyError("CLI 文件在提交前已被其他程序创建，未覆盖。") }
-            } else if let expected {
-                let current = document ? try readDocument(url) : try read(url)
-                guard current == expected else { throw SafetyError("CLI 文件在提交前已被其他程序更新，未覆盖。") }
+                // Atomic exclusive commit: a file created concurrently is never replaced.
+                guard renamex_np(temporary.path, url.path, UInt32(RENAME_EXCL)) == 0 else {
+                    throw SafetyError("CLI 文件在提交前已被其他程序创建，未覆盖。")
+                }
+            } else {
+                if let expected {
+                    let current = document ? try readDocument(url) : try read(url)
+                    guard current == expected else { throw SafetyError("CLI 文件在提交前已被其他程序更新，未覆盖。") }
+                }
+                guard rename(temporary.path, url.path) == 0 else { throw SafetyError("CLI 登录文件提交失败。") }
             }
-            guard rename(temporary.path, url.path) == 0 else { throw SafetyError("CLI 登录文件提交失败。") }
         } catch { throw SafetyError("CLI 登录文件写入失败，未确认同步完成。") }
     }
 }
@@ -109,13 +113,19 @@ public enum CLIPrivateFile {
     private let writePrimary: (Data?) throws -> Void
     private let readFile: () throws -> Data?
     private let writeFile: (Data?) throws -> Void
+    private let writeFileIfUnchanged: ((Data?, Data?) throws -> Void)?
     public private(set) var kind: Kind?
     private var observed: Observation?
+    private var rawFile: Data?
 
     public init(readPrimary: @escaping () throws -> Data?, writePrimary: @escaping (Data?) throws -> Void,
-                readFile: @escaping () throws -> Data?, writeFile: @escaping (Data?) throws -> Void) {
+                readFile: @escaping () throws -> Data?, writeFile: @escaping (Data?) throws -> Void,
+                writeFileIfUnchanged: ((Data?, Data?) throws -> Void)? = nil) {
         self.readPrimary = readPrimary; self.writePrimary = writePrimary
-        self.readFile = readFile; self.writeFile = writeFile
+        self.readFile = readFile; self.writeFile = writeFile; self.writeFileIfUnchanged = writeFileIfUnchanged
+    }
+    private func writeCredentialFile(_ data: Data?) throws {
+        if let writeFileIfUnchanged { try writeFileIfUnchanged(data, rawFile) } else { try writeFile(data) }
     }
     private func normalized(_ data: Data?) throws -> Data? { try data.map { try CLIJSON.encode(CLIJSON.object($0)) } }
     private func containers() throws -> Observation {
@@ -142,7 +152,7 @@ public enum CLIPrivateFile {
     public func read() throws -> Data? {
         let value = try containers(), selected = try route(value)
         guard kind == nil || kind == selected else { throw SafetyError("CLI 登录存储在操作期间变化，未改写登录。") }
-        kind = selected; observed = value
+        kind = selected; observed = value; rawFile = try readFile()
         return selected == .file ? value.file : value.primary
     }
     public func write(_ data: Data?) throws {
@@ -152,14 +162,14 @@ public enum CLIPrivateFile {
         func replacing(_ value: Data?) throws -> Data? { try CLIJSON.replacing(value, key: "claudeAiOauth", with: desired) }
         switch kind {
         case .keychain: try writePrimary(replacing(before.primary))
-        case .file: try writeFile(replacing(before.file))
+        case .file: try writeCredentialFile(replacing(before.file))
         case .mirrored:
             var primaryAttempted = false, fileAttempted = false
             do {
                 primaryAttempted = true; try writePrimary(replacing(before.primary))
                 // Do not overwrite a CLI refresh between the two store writes.
                 guard try normalized(readFile()) == before.file else { throw SafetyError("凭据文件已被其他操作修改。") }
-                fileAttempted = true; try writeFile(replacing(before.file))
+                fileAttempted = true; try writeCredentialFile(replacing(before.file))
             } catch {
                 func restore(_ original: Data?, read: () throws -> Data?, write: (Data?) throws -> Void) throws {
                     let current = try normalized(read()), field = try oauth(current), old = try oauth(original)
@@ -170,7 +180,7 @@ public enum CLIPrivateFile {
                     guard try oauth(read()) == old else { throw SafetyError("CLI 登录还原回读未通过。") }
                 }
                 var restored = true
-                if fileAttempted { do { try restore(before.file, read: readFile, write: writeFile) } catch { restored = false } }
+                if fileAttempted { do { try restore(before.file, read: readFile, write: writeCredentialFile) } catch { restored = false } }
                 if primaryAttempted { do { try restore(before.primary, read: readPrimary, write: writePrimary) } catch { restored = false } }
                 throw SafetyError(restored ? "CLI 双存储写入未完成，已还原本次写入；同步未完成。" : "CLI 双存储还原未能确认；保留外部新登录，请停止切换。")
             }

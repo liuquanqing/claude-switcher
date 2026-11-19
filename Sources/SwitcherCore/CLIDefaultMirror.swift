@@ -20,19 +20,20 @@ import Darwin
                     readDocument: (() throws -> Data?)? = nil, writeDocument: ((Data?) throws -> Void)? = nil) {
             self.directory = directory; self.readScoped = readScoped; self.writeScoped = writeScoped
             self.usesDefaultDocumentIO = readDocument == nil && writeDocument == nil
-            self.readDocument = readDocument ?? { try CLIPrivateFile.read(directory.appendingPathComponent(".claude.json")) }
-            self.writeDocumentData = writeDocument ?? { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".claude.json")) }
+            self.readDocument = readDocument ?? { try CLIPrivateFile.readDocument(directory.appendingPathComponent(".claude.json")) }
+            self.writeDocumentData = writeDocument ?? { try CLIPrivateFile.writeDocument($0, to: directory.appendingPathComponent(".claude.json"), ifUnchangedSince: nil) }
         }
         @MainActor public func router() -> CLIStoredCredentialRouter {
             CLIStoredCredentialRouter(readPrimary: readScoped, writePrimary: writeScoped,
                 readFile: { try CLIPrivateFile.read(directory.appendingPathComponent(".credentials.json")) },
-                writeFile: { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".credentials.json")) })
+                writeFile: { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".credentials.json")) },
+                writeFileIfUnchanged: { data, expected in try CLIPrivateFile.write(data, to: directory.appendingPathComponent(".credentials.json"), ifUnchangedSince: expected) })
         }
         public func document() throws -> Data? { try readDocument() }
         public func writeDocument(_ data: Data?) throws { try writeDocumentData(data) }
         /// Compare-and-swap for the real private file; injected stores fall back to their writer.
         public func writeDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws {
-            if readDocumentIsPrivateFile { try CLIPrivateFile.write(data, to: directory.appendingPathComponent(".claude.json"), ifUnchangedSince: expected) }
+            if readDocumentIsPrivateFile { try CLIPrivateFile.writeDocument(data, to: directory.appendingPathComponent(".claude.json"), ifUnchangedSince: expected) }
             else { guard try readDocument() == expected else { throw SafetyError("独立目录身份文件在写入前已变化，未覆盖。") }; try writeDocumentData(data) }
         }
         public var readDocumentIsPrivateFile: Bool { usesDefaultDocumentIO }

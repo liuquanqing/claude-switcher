@@ -634,7 +634,7 @@ import XCTest
         do {
             _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { clock }), target: profiles[1], profiles: profiles,
                 home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: { clock },
-                contextIsCurrent: { checks += 1; if checks == 3 { clock = self.date.addingTimeInterval(60) }; return true })
+                contextIsCurrent: { checks += 1; if checks == 4 { clock = self.date.addingTimeInterval(60) }; return true })
             XCTFail("expired at commit")
         } catch {}
         XCTAssertEqual(f.io.credentials, credentials)
@@ -645,15 +645,21 @@ import XCTest
         let f = try fixture()
         // B backup is an older unverified record; the transaction would upgrade it.
         f.io.backups["Design"] = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login(b, token: "access-b", expired: true).oauth!), "oauthAccount": CLIJSON.object(login(b, token: "access-b").metadata!)])
-        try writeIsolated(f.isolatedB, login(b, token: "access-b", lifetime: 9000))
+        // No isolated source: the transaction itself upgrades the pending target slot.
+        try FileManager.default.removeItem(at: f.isolatedB)
         let newerByOther = try CLIBackup.verifiedData(login: login(b, token: "access-b2", lifetime: 99999), identity: b, now: date)
-        f.io.backupWriter = { profile, data in
-            f.io.backups[profile] = data
-            if profile == "Personal" { f.io.backups["Design"] = newerByOther }
-        }
-        defer { f.io.backupWriter = nil }
         let credentials = f.io.credentials
-        do { _ = try await follow(f); XCTFail("must stop") } catch {}
+        // The other writer lands while the outgoing default is being verified online, i.e. after
+        // prepare captured the target slot but before persistOutgoing writes it.
+        do {
+            _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
+                home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home),
+                remote: { token in
+                    if token == "access-a" { f.io.backups["Design"] = newerByOther }
+                    return try await self.remote(token)
+                }, now: { self.date })
+            XCTFail("must stop")
+        } catch {}
         XCTAssertEqual(f.io.credentials, credentials)
         XCTAssertEqual(f.io.backups["Design"], newerByOther)
     }
