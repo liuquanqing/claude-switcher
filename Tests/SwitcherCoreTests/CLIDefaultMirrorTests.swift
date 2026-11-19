@@ -457,16 +457,65 @@ import XCTest
     func testSameAccountNewerBackupCommitsWithRealClockAndExpiredDefault() async throws {
         let f = try fixture()
         // Default A expired; A's own directory renewed and saved as a newer verified backup.
-        let expiredDefault = try login(a, token: "access-a", expired: true)
+        let now = Date()
+        func live(_ identity: CLIIdentity, _ token: String, _ seconds: TimeInterval) throws -> CLIOwnedLogin {
+            CLIOwnedLogin(oauth: try CLIJSON.encode(["accessToken": token, "refreshToken": "refresh-" + token, "expiresAt": now.addingTimeInterval(seconds).timeIntervalSince1970 * 1000]),
+                          metadata: try CLIJSON.encode(["accountUuid": identity.accountID!, "organizationUuid": identity.organizationID!, "emailAddress": identity.email!]))
+        }
+        let expiredDefault = try live(a, "access-a", -60)
         f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: expiredDefault.oauth)
-        let newer = try login(a, token: "access-a2", lifetime: 9000)
-        f.io.backups["Personal"] = try CLIBackup.verifiedData(login: newer, identity: a, now: Date().addingTimeInterval(-60))
+        let newer = try live(a, "access-a2", 9000)
+        f.io.backups["Personal"] = try CLIBackup.verifiedData(login: newer, identity: a, now: now.addingTimeInterval(-60))
+        var verifiedTokens: [String] = []
+        let trackingRemote: (String) async throws -> CLIIdentity = { token in verifiedTokens.append(token); return try await self.remote(token) }
+        let writesBefore = f.io.events.filter { $0 == "backup:Personal" }.count
         let clock: () -> Date = { Date() }
         let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: clock), target: profiles[0], profiles: profiles,
-            home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: clock)
+            home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: trackingRemote, now: clock)
         XCTAssertEqual(outcome.restoration, .verifiedLogin)
         XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), newer)
         XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, newer)
+        XCTAssertFalse(verifiedTokens.contains("access-a"), "the expired old default is never sent for verification")
+        XCTAssertEqual(f.io.events.filter { $0 == "backup:Personal" }.count - writesBefore, 0, "the already written slot is not written again")
+    }
+
+    func testManualRecoveryPreparationAllowsNewerSameAccountBackupOverExpiredDefault() async throws {
+        let io = MirrorIO()
+        let expired = try login(a, token: "access-a", expired: true)
+        io.credentials = try CLIJSON.replacing(nil, key: "claudeAiOauth", with: expired.oauth)
+        io.document = try CLIJSON.replacing(nil, key: "oauthAccount", with: expired.metadata)
+        io.backups["Personal"] = try CLIBackup.verifiedData(login: login(a, token: "access-a2", lifetime: 9000), identity: a, now: date)
+        let outcome = try await CLIBackupRecovery.prepare(target: profiles[0], io: io, now: { self.date }, requireUsableLogin: true,
+            renew: { _, _ in XCTFail("usable newer backup needs no renewal"); throw SafetyError("x") }, remote: remote)
+        XCTAssertEqual(outcome, .notNeeded)
+    }
+
+    func testDocumentWriteRaceIsAbortedByCompareAndSwap() async throws {
+        let f = try fixture()
+        let renewed = try login(b, token: "access-b2", lifetime: 7200)
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: renewed.oauth)
+        f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: renewed.metadata)
+        let document = f.isolatedB.appendingPathComponent(".claude.json")
+        // Real private-file store; the scoped keychain write hook simulates the terminal saving the
+        // document after the credential write but before the document commit.
+        let file = f.isolatedB.appendingPathComponent(".credentials.json")
+        let racing = CLIDefaultMirror.DirectoryStore(directory: f.isolatedB,
+            readScoped: { try CLIPrivateFile.read(file) },
+            writeScoped: { data in
+                try CLIPrivateFile.write(data, to: file)
+                var latest = try CLIJSON.object(CLIPrivateFile.read(document)!)
+                latest["projects"] = ["raced": true]
+                try CLIPrivateFile.write(CLIJSON.encode(latest), to: document)
+            })
+        do {
+            try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: racing, expected: b,
+                verified: CLIVerification(login: renewed, identity: b, checkedAt: date), now: { self.date })
+            XCTFail("race must abort")
+        } catch {}
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), try login(b, token: "access-b"), "credential rolled back")
+        let after = try CLIJSON.object(CLIPrivateFile.read(document)!)
+        XCTAssertEqual(after["projects"] as? [String: Bool], ["raced": true])
+        XCTAssertEqual(try CLIIdentity.metadata(CLIJSON.field(CLIPrivateFile.read(document), key: "oauthAccount"))?.accountID, b.accountID)
     }
 
     func testOfflineBackupNeverReplacesVerifiedSlotWithMixedIdentity() async throws {

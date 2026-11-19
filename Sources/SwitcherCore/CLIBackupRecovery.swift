@@ -38,11 +38,20 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
                                remote: (String) async throws -> CLIIdentity) async throws -> Outcome {
         let original = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
         guard let expected = target.identity, expected.isComplete else { return .notNeeded }
-        if original.hasSecrets, try original.identity?.samePrincipal(as: expected) == true {
-            if requireUsableLogin, original.usableAccessToken(now: now()) == nil {
-                throw SafetyError("当前默认 CLI 仍保留该账号的凭据。请在官方 CLI 中更新登录，再核对状态。")
+        let sameAccountDefault = original.hasSecrets && (try? original.identity?.samePrincipal(as: expected)) == true
+        if sameAccountDefault {
+            // A newer verified backup of the same account (renewed in its own directory) wins over
+            // an older or expired default; the transaction verifies it online this round.
+            if let raw = try io.readBackup(target.name), let backup = try? CLIBackup(data: raw),
+               backup.login.hasSecrets, (try? backup.login.identity?.samePrincipal(as: expected)) == true,
+               !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
+                if backup.login.usableAccessToken(now: now()) != nil { return .notNeeded }
+            } else {
+                if requireUsableLogin, original.usableAccessToken(now: now()) == nil {
+                    throw SafetyError("当前默认 CLI 仍保留该账号的凭据。请在官方 CLI 中更新登录，再核对状态。")
+                }
+                return .notNeeded
             }
-            return .notNeeded
         }
         guard let raw = try io.readBackup(target.name) else { return .notNeeded }
         let backup = try CLIBackup(data: raw)

@@ -189,7 +189,11 @@ enum CLITerminalIntent: Equatable { case open, signIn }
         } catch {
             guard stillCurrent(expected, generation: generation) else { return }
             detail = error.localizedDescription
-            phase = .choosing
+            let message = error.localizedDescription
+            if message.contains("还原未确认") || message.contains("回滚未确认") || message.contains("停止切换") {
+                legacyBackupAvailable = false
+                phase = .unconfirmed
+            } else { phase = .choosing }
         }
     }
     func choose(_ selected: CLIBindingChoice) async {

@@ -108,7 +108,11 @@ struct DesktopOnlySwitchOffer: Equatable {
                       DesktopModeInspector.read(support: support) == .subscription,
                       self.cliConfiguration().allowsSubscriptionMutation else { return false }
                 let now = try await token(for: profileDir(target), allowExpired: true, allowInteraction: false)
-                return now.map(desktopTokenDigest) == digest
+                guard now.map(desktopTokenDigest) == digest else { return false }
+                // Re-check after the asynchronous read: configuration may have changed while waiting.
+                return try confirmedCurrentProfile() == target && self.current == target
+                    && DesktopModeInspector.read(support: support) == .subscription
+                    && self.cliConfiguration().allowsSubscriptionMutation
             }
             let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
             let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: io),

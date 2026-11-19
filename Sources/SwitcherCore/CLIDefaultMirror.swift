@@ -19,6 +19,7 @@ import Darwin
         public init(directory: URL, readScoped: @escaping () throws -> Data?, writeScoped: @escaping (Data?) throws -> Void,
                     readDocument: (() throws -> Data?)? = nil, writeDocument: ((Data?) throws -> Void)? = nil) {
             self.directory = directory; self.readScoped = readScoped; self.writeScoped = writeScoped
+            self.usesDefaultDocumentIO = readDocument == nil && writeDocument == nil
             self.readDocument = readDocument ?? { try CLIPrivateFile.read(directory.appendingPathComponent(".claude.json")) }
             self.writeDocumentData = writeDocument ?? { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".claude.json")) }
         }
@@ -29,6 +30,13 @@ import Darwin
         }
         public func document() throws -> Data? { try readDocument() }
         public func writeDocument(_ data: Data?) throws { try writeDocumentData(data) }
+        /// Compare-and-swap for the real private file; injected stores fall back to their writer.
+        public func writeDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws {
+            if readDocumentIsPrivateFile { try CLIPrivateFile.write(data, to: directory.appendingPathComponent(".claude.json"), ifUnchangedSince: expected) }
+            else { guard try readDocument() == expected else { throw SafetyError("独立目录身份文件在写入前已变化，未覆盖。") }; try writeDocumentData(data) }
+        }
+        public var readDocumentIsPrivateFile: Bool { usesDefaultDocumentIO }
+        public let usesDefaultDocumentIO: Bool
     }
 
     public struct Outcome: Equatable, Sendable {
@@ -149,7 +157,7 @@ import Darwin
             }
             documentBefore = latest
             let newDocument = try CLIJSON.replacing(latest, key: "oauthAccount", with: live.metadata)
-            try store.writeDocument(newDocument); documentWritten = true
+            try store.writeDocument(newDocument, ifUnchangedSince: latest); documentWritten = true
             guard try CLIJSON.field(router.read(), key: "claudeAiOauth") == live.oauth,
                   try CLIJSON.field(store.document(), key: "oauthAccount") == live.metadata else {
                 throw SafetyError("独立目录回读未通过，登录同步未确认。")
@@ -160,7 +168,7 @@ import Darwin
                 do {
                     let current = try store.document()
                     if try CLIJSON.field(current, key: "oauthAccount") == live.metadata {
-                        try store.writeDocument(CLIJSON.replacing(current, key: "oauthAccount", with: own.metadata))
+                        try store.writeDocument(CLIJSON.replacing(current, key: "oauthAccount", with: own.metadata), ifUnchangedSince: current)
                     }
                 } catch { restored = false }
             }
@@ -213,6 +221,10 @@ import Darwin
         let source = try isolatedDirectory(identity: target.identity!, profile: target.name, home: home, repository: repository).map(storeFor)
         let observed = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
+        if let raw = try transaction.io.readBackup(target.name), let parsed = try? CLIBackup(data: raw),
+           parsed.verification != nil, parsed.login == observed || (observed == nil && parsed.login.hasSecrets) {
+            transaction.preverified[target.name] = raw
+        }
         let plan = try await transaction.prepare(target: target, profiles: profiles, remote: remote)
         // Compare against what was observed at sync time, not against the backup (which may
         // legitimately be newer than an expired source).

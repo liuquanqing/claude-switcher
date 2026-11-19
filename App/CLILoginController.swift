@@ -392,12 +392,16 @@ import SwitcherCore
                       self.cliConfiguration().allowsSubscriptionMutation,
                       self.active?.snapshot?.identity.samePrincipal(as: confirmedIdentity) == true,
                       let now = try await token(for: profileDir(target), allowExpired: true, allowInteraction: false) else { return false }
-                return desktopTokenDigest(now) == digest
+                guard desktopTokenDigest(now) == digest else { return false }
+                return try confirmedCurrentProfile() == target && self.current == target
+                    && DesktopModeInspector.read(support: support) == .subscription
+                    && self.cliConfiguration().allowsSubscriptionMutation
             }
             try await prepareTargetCLIRecovery(target: context.0, io: io, requireUsableLogin: true)
             guard try await stillSameDesktop() else { throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。") }
             let plan = try await transaction.prepare(target: context.0, profiles: context.1, requiresTargetLogin: true,
                 remote: { try await self.checkedCLIIdentity($0) })
+            guard try await stillSameDesktop() else { throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。") }
             try transaction.persistOutgoing(plan)
             guard try await stillSameDesktop() else {
                 throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。")

@@ -24,14 +24,15 @@ import SwitcherCore
             }
             // Only a login whose identity was verified online for this exact credential digest is
             // copied back into the account's own directory; the backup holds that proof.
-            if !isDemo, operation == nil,
-               let own = try? CLIDefaultMirror.isolatedDirectory(identity: identity, profile: name,
-                   home: FileManager.default.homeDirectoryForCurrentUser,
-                   repository: CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"),
-                                                    home: FileManager.default.homeDirectoryForCurrentUser)),
-               let raw = try NativeCLIStorage(allowInteraction: false, secretWriter: { _, _, _ in throw SafetyError("read-only") }).readBackup(name),
-               let verification = try CLIBackup(data: raw).verification {
-                await mirrorDefaultLoginIntoOwnDirectory(own, identity: identity, verified: verification, manual: false, now: now)
+            if !isDemo, operation == nil {
+                let home = FileManager.default.homeDirectoryForCurrentUser
+                let own = try CLIDefaultMirror.isolatedDirectory(identity: identity, profile: name, home: home,
+                    repository: CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"), home: home))
+                if let own {
+                    let raw = try NativeCLIStorage(allowInteraction: false, secretWriter: { _, _, _ in throw SafetyError("read-only") }).readBackup(name)
+                    let verification = try raw.flatMap { try CLIBackup(data: $0).verification }
+                    await mirrorDefaultLoginIntoOwnDirectory(own, identity: identity, verified: verification, manual: false, now: now)
+                }
             }
         } catch {
             guard current == name, active?.snapshot?.identity.samePrincipal(as: identity) == true else { return }

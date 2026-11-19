@@ -71,6 +71,9 @@ public struct PreparedCLISwitch {
         throw SafetyError("\(context) CLI 登录需要刷新或重新确认；旧备份保留，目录未移动。可先用原切换器切到对应档案，在 CLI 登录后再回来重试。")
     }
 
+    /// Records already written and verified this round (profile -> backup data). The transaction
+    /// reuses them instead of writing the same slot twice with a new timestamp.
+    public var preverified: [String: Data] = [:]
     public func prepare(target: CLIProfileIdentity, profiles: [CLIProfileIdentity], requiresTargetLogin: Bool = false,
                         remote: (String) async throws -> CLIIdentity) async throws -> PreparedCLISwitch {
         let original = try readOwned()
@@ -93,7 +96,8 @@ public struct PreparedCLISwitch {
                let priorIdentity = try prior.login.identity, let expected = source.identity, priorIdentity.samePrincipal(as: expected),
                let trusted = try prior.trustedIdentity(), !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
                 sourceName = source.name; sourceIdentity = trusted; sourceRemote = false
-                sourceData = try io.readBackup(source.name)
+                let raw = try io.readBackup(source.name)
+                sourceData = preverified[source.name] == raw ? nil : raw
             } else {
             let checked = try await verify(original, trusted: prior, context: "当前", expected: source.identity, remote: remote)
             if let prior, prior.login.hasSecrets {
@@ -107,6 +111,7 @@ public struct PreparedCLISwitch {
             // directory; a newer verified backup is never written back to an older login.
             if let prior, prior.login.hasSecrets, !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
                 sourceData = try io.readBackup(source.name)
+                if preverified[source.name] == sourceData { sourceData = nil }
             } else {
                 sourceData = try CLIBackup.verifiedData(login: original, identity: checked.0, now: checkedAt)
             }
@@ -122,11 +127,17 @@ public struct PreparedCLISwitch {
             if let targetRaw, let backup = try? CLIBackup(data: targetRaw), backup.login.hasSecrets,
                try backup.login.identity?.samePrincipal(as: sourceIdentity!) == true,
                !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
-                let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: sourceIdentity, remote: remote)
-                desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
-                let record = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
-                sameAccountWinningBackup = record
-                sourceData = record
+                if let already = preverified[target.name], let parsed = try? CLIBackup(data: already), parsed.login == backup.login,
+                   let proof = parsed.verification, proof.digest == backup.login.digest {
+                    desired = backup.login; restoration = .verifiedLogin
+                    sameAccountWinningBackup = already; sourceData = nil
+                } else {
+                    let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: sourceIdentity, remote: remote)
+                    desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
+                    let record = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
+                    sameAccountWinningBackup = record
+                    sourceData = record
+                }
             } else {
                 desired = original; restoration = sourceRemote ? .verifiedLogin : .storedLogin
             }
@@ -164,8 +175,11 @@ public struct PreparedCLISwitch {
             throw SafetyError("CLI 登录在准备期间变化，未修改账号。")
         }
         if let name = plan.sourceName, let data = plan.sourceBackup {
-            try io.writeBackup(name, data: data)
-            guard try normalized(io.readBackup(name)) == data else { throw SafetyError("CLI 备份回读未通过，未移动桌面目录。") }
+            if preverified[name] == data, try normalized(io.readBackup(name)) == data { /* already written and read back this round */ }
+            else {
+                try io.writeBackup(name, data: data)
+                guard try normalized(io.readBackup(name)) == data else { throw SafetyError("CLI 备份回读未通过，未移动桌面目录。") }
+            }
         }
         if let data = plan.targetUpgrade, plan.sourceName != plan.targetName {
             try io.writeBackup(plan.targetName, data: data)

@@ -32,13 +32,25 @@ public enum CLIPrivateFile {
         try check(info)
         return try handle.readToEnd() ?? Data()
     }
+    /// Replace only when the file still equals `expected`; a concurrent writer aborts this write.
+    public static func write(_ data: Data?, to url: URL, ifUnchangedSince expected: Data?) throws {
+        try checkParent(url)
+        guard try read(url) == expected else { throw SafetyError("CLI 登录文件在写入前已被其他程序更新，未覆盖。") }
+        try write(data, to: url, expecting: expected)
+    }
     public static func write(_ data: Data?, to url: URL) throws {
         try checkParent(url)
         _ = try read(url)
+        try write(data, to: url, expecting: nil)
+    }
+    private static func write(_ data: Data?, to url: URL, expecting expected: Data?) throws {
         guard let data else {
             if unlink(url.path) != 0 && errno != ENOENT { throw SafetyError("CLI 登录文件无法更新。") }
             return
         }
+        try stage(data, to: url, expecting: expected)
+    }
+    private static func stage(_ data: Data, to url: URL, expecting expected: Data?) throws {
         let temporary = url.deletingLastPathComponent().appendingPathComponent(".cli-login-" + UUID().uuidString + ".tmp")
         let fd = open(temporary.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw SafetyError("无法创建私有 CLI 登录临时文件。") }
@@ -48,6 +60,9 @@ public enum CLIPrivateFile {
             try handle.write(contentsOf: data)
             try handle.synchronize()
             try handle.close()
+            if let expected {
+                guard (try? read(url)) == expected else { throw SafetyError("CLI 登录文件在提交前已被其他程序更新，未覆盖。") }
+            }
             guard rename(temporary.path, url.path) == 0 else { throw SafetyError("CLI 登录文件提交失败。") }
         } catch { throw SafetyError("CLI 登录文件写入失败，未确认同步完成。") }
     }
