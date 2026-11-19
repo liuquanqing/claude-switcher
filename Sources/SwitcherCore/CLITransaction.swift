@@ -107,8 +107,7 @@ public struct PreparedCLISwitch {
                let priorIdentity = try prior.login.identity, let expected = source.identity, priorIdentity.samePrincipal(as: expected),
                let trusted = try prior.trustedIdentity(), !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
                 sourceName = source.name; sourceIdentity = trusted; sourceRemote = false
-                let raw = try io.readBackup(source.name)
-                sourceData = preverified[source.name] == raw ? nil : raw
+                sourceData = nil
             } else {
             let checked = try await verify(original, trusted: prior, context: "当前", expected: source.identity, remote: remote)
             if let prior, prior.login.hasSecrets {
@@ -121,8 +120,7 @@ public struct PreparedCLISwitch {
             // The outgoing default may be older than a renewal already saved from the account's own
             // directory; a newer verified backup is never written back to an older login.
             if let prior, prior.login.hasSecrets, !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
-                sourceData = try io.readBackup(source.name)
-                if preverified[source.name] == sourceData { sourceData = nil }
+                sourceData = nil
             } else {
                 sourceData = try CLIBackup.verifiedData(login: original, identity: checked.0, now: checkedAt)
             }
@@ -256,6 +254,12 @@ public struct PreparedCLISwitch {
             markerAttempted = true; try io.writeMarker(plan.targetName)
             guard try readOwned() == plan.desired, try io.readMarker() == plan.targetName else {
                 throw SafetyError("CLI 保存登录回读不一致。")
+            }
+            if requireUsableLogin {
+                let committedAt = now()
+                guard let expiry = CLIBackupFreshness.expiry(plan.desired), expiry > committedAt.timeIntervalSince1970 * 1000 else {
+                    throw SafetyError("CLI 登录在提交期间到期，已还原；请在官方 CLI 登录后重试。")
+                }
             }
             return plan.restoration
         } catch {

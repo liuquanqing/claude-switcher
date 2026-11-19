@@ -45,7 +45,11 @@ import SwitcherCore
             writePrimary: { try writer(cliService, account, $0) },
             readFile: { try CLIPrivateFile.read(credentialFile) },
             writeFile: { try CLIPrivateFile.write($0, to: credentialFile) },
-            writeFileIfUnchanged: { data, expected in try CLIPrivateFile.write(data, to: credentialFile, ifUnchangedSince: expected) })
+            writeFileIfUnchanged: { data, expected in try CLIPrivateFile.write(data, to: credentialFile, ifUnchangedSince: expected) },
+            writePrimaryIfUnchanged: { data, expected, absent in
+                if let data { try writeKeychain(service: cliService, account: NSUserName(), json: CLIJSON.object(data), ifUnchangedSince: expected, expectAbsent: absent) }
+                else { try writer(cliService, NSUserName(), nil) }
+            })
     }
     private func readFile(_ path: URL) throws -> Data? {
         do { return try Data(contentsOf: path) }

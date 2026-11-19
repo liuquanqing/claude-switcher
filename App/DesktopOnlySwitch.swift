@@ -166,6 +166,14 @@ struct DesktopOnlySwitchOffer: Equatable {
                     let status = SecItemDelete(query as CFDictionary)
                     guard [errSecSuccess, errSecItemNotFound].contains(status) else { throw SafetyError("独立目录登录还原失败（状态 \(status)）。") }
                 }
+            },
+            writeScopedIfUnchanged: { data, expected, absent in
+                if let data { try writeKeychain(service: service, account: account, json: CLIJSON.object(data), ifUnchangedSince: expected, expectAbsent: absent) }
+                else {
+                    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+                    let status = SecItemDelete(query as CFDictionary)
+                    guard [errSecSuccess, errSecItemNotFound].contains(status) else { throw SafetyError("独立目录登录还原失败（状态 \(status)）。") }
+                }
             })
     }
 

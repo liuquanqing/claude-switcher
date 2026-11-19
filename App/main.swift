@@ -585,8 +585,16 @@ func readKeychain(service: String, account: String, allowInteraction: Bool = fal
     return json
 }
 
-func writeKeychain(service: String, account: String, json: [String: Any]) throws {
+func writeKeychain(service: String, account: String, json: [String: Any], ifUnchangedSince expected: Data? = nil, expectAbsent: Bool = false) throws {
     let data = try JSONSerialization.data(withJSONObject: json)
+    if expectAbsent {
+        let existing = try KeychainReadAccess.read(service: service, account: account, allowInteraction: false)
+        guard existing == nil else { throw err("钥匙串条目在写入前已由其他程序创建，未覆盖。") }
+    } else if let expected {
+        let existing = try KeychainReadAccess.read(service: service, account: account, allowInteraction: false)
+        let same = (existing.flatMap { try? CLIJSON.encode(CLIJSON.object($0)) }) == (try? CLIJSON.encode(CLIJSON.object(expected)))
+        guard same else { throw err("钥匙串登录在写入前已由其他程序更新，未覆盖。") }
+    }
     let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: service, kSecAttrAccount as String: account]
     var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)

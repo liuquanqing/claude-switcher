@@ -14,11 +14,14 @@ import Darwin
         public let directory: URL
         public let readScoped: () throws -> Data?
         public let writeScoped: (Data?) throws -> Void
+        public let writeScopedIfUnchanged: ((Data?, Data?, Bool) throws -> Void)?
         public let readDocument: () throws -> Data?
         public let writeDocumentData: (Data?) throws -> Void
         public init(directory: URL, readScoped: @escaping () throws -> Data?, writeScoped: @escaping (Data?) throws -> Void,
-                    readDocument: (() throws -> Data?)? = nil, writeDocument: ((Data?) throws -> Void)? = nil) {
+                    readDocument: (() throws -> Data?)? = nil, writeDocument: ((Data?) throws -> Void)? = nil,
+                    writeScopedIfUnchanged: ((Data?, Data?, Bool) throws -> Void)? = nil) {
             self.directory = directory; self.readScoped = readScoped; self.writeScoped = writeScoped
+            self.writeScopedIfUnchanged = writeScopedIfUnchanged
             self.usesDefaultDocumentIO = readDocument == nil && writeDocument == nil
             self.readDocument = readDocument ?? { try CLIPrivateFile.readDocument(directory.appendingPathComponent(".claude.json")) }
             self.writeDocumentData = writeDocument ?? { try CLIPrivateFile.writeDocument($0, to: directory.appendingPathComponent(".claude.json"), ifUnchangedSince: nil) }
@@ -27,7 +30,8 @@ import Darwin
             CLIStoredCredentialRouter(readPrimary: readScoped, writePrimary: writeScoped,
                 readFile: { try CLIPrivateFile.read(directory.appendingPathComponent(".credentials.json")) },
                 writeFile: { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".credentials.json")) },
-                writeFileIfUnchanged: { data, expected in try CLIPrivateFile.write(data, to: directory.appendingPathComponent(".credentials.json"), ifUnchangedSince: expected) })
+                writeFileIfUnchanged: { data, expected in try CLIPrivateFile.write(data, to: directory.appendingPathComponent(".credentials.json"), ifUnchangedSince: expected) },
+                writePrimaryIfUnchanged: writeScopedIfUnchanged)
         }
         public func document() throws -> Data? { try readDocument() }
         public func writeDocument(_ data: Data?) throws { try writeDocumentData(data) }
@@ -107,6 +111,8 @@ import Darwin
         }
         guard let access = login.usableAccessToken(now: now()) else {
             if previous == nil {
+                // Another writer may have created the slot meanwhile; never overwrite it.
+                guard try io.readBackup(target.name) == nil else { return SyncResult(observed: login, verifiedRecord: nil) }
                 let data = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login.oauth!), "oauthAccount": CLIJSON.object(login.metadata!)])
                 try io.writeBackup(target.name, data: data)
                 guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == data else {

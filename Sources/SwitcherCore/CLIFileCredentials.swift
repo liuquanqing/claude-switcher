@@ -114,18 +114,24 @@ public enum CLIPrivateFile {
     private let readFile: () throws -> Data?
     private let writeFile: (Data?) throws -> Void
     private let writeFileIfUnchanged: ((Data?, Data?) throws -> Void)?
+    private let writePrimaryIfUnchanged: ((Data?, Data?, Bool) throws -> Void)?
     public private(set) var kind: Kind?
     private var observed: Observation?
-    private var rawFile: Data?
 
     public init(readPrimary: @escaping () throws -> Data?, writePrimary: @escaping (Data?) throws -> Void,
                 readFile: @escaping () throws -> Data?, writeFile: @escaping (Data?) throws -> Void,
-                writeFileIfUnchanged: ((Data?, Data?) throws -> Void)? = nil) {
+                writeFileIfUnchanged: ((Data?, Data?) throws -> Void)? = nil,
+                writePrimaryIfUnchanged: ((Data?, Data?, Bool) throws -> Void)? = nil) {
         self.readPrimary = readPrimary; self.writePrimary = writePrimary
         self.readFile = readFile; self.writeFile = writeFile; self.writeFileIfUnchanged = writeFileIfUnchanged
+        self.writePrimaryIfUnchanged = writePrimaryIfUnchanged
     }
+    /// Snapshots for conditional writes come from the pinned observation, not extra store reads.
     private func writeCredentialFile(_ data: Data?) throws {
-        if let writeFileIfUnchanged { try writeFileIfUnchanged(data, rawFile) } else { try writeFile(data) }
+        if let writeFileIfUnchanged { try writeFileIfUnchanged(data, observed?.file) } else { try writeFile(data) }
+    }
+    private func writeCredentialPrimary(_ data: Data?) throws {
+        if let writePrimaryIfUnchanged { try writePrimaryIfUnchanged(data, observed?.primary, observed?.primary == nil) } else { try writePrimary(data) }
     }
     private func normalized(_ data: Data?) throws -> Data? { try data.map { try CLIJSON.encode(CLIJSON.object($0)) } }
     private func containers() throws -> Observation {
@@ -152,7 +158,7 @@ public enum CLIPrivateFile {
     public func read() throws -> Data? {
         let value = try containers(), selected = try route(value)
         guard kind == nil || kind == selected else { throw SafetyError("CLI 登录存储在操作期间变化，未改写登录。") }
-        kind = selected; observed = value; rawFile = try readFile()
+        kind = selected; observed = value
         return selected == .file ? value.file : value.primary
     }
     public func write(_ data: Data?) throws {
@@ -161,12 +167,12 @@ public enum CLIPrivateFile {
         let desired = try oauth(data)
         func replacing(_ value: Data?) throws -> Data? { try CLIJSON.replacing(value, key: "claudeAiOauth", with: desired) }
         switch kind {
-        case .keychain: try writePrimary(replacing(before.primary))
+        case .keychain: try writeCredentialPrimary(replacing(before.primary))
         case .file: try writeCredentialFile(replacing(before.file))
         case .mirrored:
             var primaryAttempted = false, fileAttempted = false
             do {
-                primaryAttempted = true; try writePrimary(replacing(before.primary))
+                primaryAttempted = true; try writeCredentialPrimary(replacing(before.primary))
                 // Do not overwrite a CLI refresh between the two store writes.
                 guard try normalized(readFile()) == before.file else { throw SafetyError("凭据文件已被其他操作修改。") }
                 fileAttempted = true; try writeCredentialFile(replacing(before.file))
@@ -181,7 +187,7 @@ public enum CLIPrivateFile {
                 }
                 var restored = true
                 if fileAttempted { do { try restore(before.file, read: readFile, write: writeCredentialFile) } catch { restored = false } }
-                if primaryAttempted { do { try restore(before.primary, read: readPrimary, write: writePrimary) } catch { restored = false } }
+                if primaryAttempted { do { try restore(before.primary, read: readPrimary, write: writeCredentialPrimary) } catch { restored = false } }
                 throw SafetyError(restored ? "CLI 双存储写入未完成，已还原本次写入；同步未完成。" : "CLI 双存储还原未能确认；保留外部新登录，请停止切换。")
             }
         }

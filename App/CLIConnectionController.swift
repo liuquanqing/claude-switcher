@@ -133,6 +133,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             guard stillCurrent(context, generation: generation) else { return }
             let defaultRecord = operations.localRecord(context.identity, defaultBinding)
             defaultMatches = defaultStatus == .matched
+            if defaultMatches { restoreBlockedFor.remove(context.profile) }
             defaultLoginAvailable = defaultMatches || (defaultStatus == .notLoggedIn && defaultRecord != .differentAccount)
             if showLoginChoices, !defaultMatches, !restoreBlockedFor.contains(context.profile) {
                 do { legacyBackupAvailable = try operations.hasRecoverableBackup(context) }
@@ -155,6 +156,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             && operations.localRecord(context.identity, candidate) == .differentAccount)
         if candidate.choice == .defaultLogin {
             defaultMatches = status == .matched
+            if defaultMatches { restoreBlockedFor.remove(context.profile) }
             defaultLoginAvailable = !differs && (defaultMatches || status == .notLoggedIn)
         }
         guard !differs, status == .matched || status == .notLoggedIn else {
