@@ -10,13 +10,13 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.6-rc.18"
-BUILD = "20261119.18.0"
+RELEASE = "1.3.6"
+BUILD = "20261119.19.0"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.6-final"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
 APP_NAME = "Claude Switcher Preview.app"
-DISPLAY_NAME = "Claude Switcher 预览"
+DISPLAY_NAME = "Claude Switcher"
 BINARIES = (
     "Contents/Helpers/ClaudeGuard",
     "Contents/Helpers/ClaudeUpdater",
@@ -57,25 +57,25 @@ def pinned_team():
     return match.group(1)
 
 
-def verify_preview_metadata(info):
+def verify_release_metadata(info):
     require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
     require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
-    require(info.get("CSReleaseChannel") == "preview", "Preview channel must be explicit")
+    require(info.get("CSReleaseChannel") == "stable", "Stable channel must be explicit")
     require(info.get("CSUpdaterProtocolVersion") == 1, "Updater protocol missing")
-    require(info.get("CSReleaseVersion") == RELEASE, "Preview release version mismatch")
+    require(info.get("CSReleaseVersion") == RELEASE, "Stable release version mismatch")
     require(info.get("CFBundleShortVersionString") == "1.3.6", "Apple numeric version mismatch")
     require(info.get("CFBundleVersion") == BUILD, "Candidate build version mismatch")
     require(info.get("CFBundleName") == DISPLAY_NAME and info.get("CFBundleDisplayName") == DISPLAY_NAME,
-            "System display names must explicitly identify the preview")
+            "System display names must match the stable release")
 
 
-def prepare_preview_metadata(info):
+def prepare_release_metadata(info):
     require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
     require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
     result = dict(info, CFBundleShortVersionString="1.3.6", CFBundleVersion=BUILD,
                   CFBundleName=DISPLAY_NAME, CFBundleDisplayName=DISPLAY_NAME,
-                  CSReleaseChannel="preview", CSReleaseVersion=RELEASE, CSUpdaterProtocolVersion=1)
-    verify_preview_metadata(result)
+                  CSReleaseChannel="stable", CSReleaseVersion=RELEASE, CSUpdaterProtocolVersion=1)
+    verify_release_metadata(result)
     return result
 
 
@@ -103,7 +103,7 @@ def verify_code(path, team, runtime=True):
 
 def verify_app(app, team, evidence):
     require(team == pinned_team(), "Signing team differs from the update verifier's public Team pin")
-    verify_preview_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
+    verify_release_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
     inventory(app)
     for rel in BINARIES:
         (evidence / (Path(rel).name + "-signature.txt")).write_text(verify_code(app / rel, team))
@@ -171,12 +171,12 @@ def main():
         evidence.mkdir()
         run("ditto", "--norsrc", "--noextattr", ROOT / "build/Claude Switcher.app", app)
         info_path = app / "Contents/Info.plist"
-        info = prepare_preview_metadata(plistlib.loads(info_path.read_bytes()))
+        info = prepare_release_metadata(plistlib.loads(info_path.read_bytes()))
         info_path.write_bytes(plistlib.dumps(info))
         inventory(app)
         for rel in BINARIES:
             run("strip", "-S", app / rel)
-        state = dict(release=RELEASE, releaseChannel="preview", version="1.3.6", build=info["CFBundleVersion"],
+        state = dict(release=RELEASE, releaseChannel="stable", version="1.3.6", build=info["CFBundleVersion"],
                      sourceCommit=source, candidateCommit=candidate, teamID=pinned_team(),
                      architecture=run("uname", "-m").strip(),
                      bundleIdentifier=BUNDLE_ID, appPath=str(app), signing="NOT_RUN",
@@ -193,11 +193,11 @@ def main():
                 "Source HEAD differs from prepared package; resume from its original commit")
         require(not run("git", "status", "--porcelain").strip(), "Source has uncommitted changes")
         require(state["bundleIdentifier"] == BUNDLE_ID, "Manifest Bundle ID changed")
-        require(state["release"] == RELEASE and state.get("releaseChannel") == "preview",
-                "Manifest preview channel/version mismatch; prepare a new output")
+        require(state["release"] == RELEASE and state.get("releaseChannel") == "stable",
+                "Manifest release channel/version mismatch; prepare a new output")
         require(state["appPath"] == str(app), "Output directory was moved")
         require(state["teamID"] == pinned_team(), "Manifest team differs from candidate public Team pin")
-        verify_preview_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
+        verify_release_metadata(plistlib.loads((app / "Contents/Info.plist").read_bytes()))
         phase = args.phase
         if phase == "sign":
             require(state["phase"] == "prepared", "Sign only a newly prepared app")
@@ -280,7 +280,7 @@ def main():
             require(state["phase"] == "app-accepted", "App must be Accepted, stapled and assessed first")
             verify_app(app, state["teamID"], evidence)
             run("xcrun", "stapler", "validate", app)
-            stem = f"ClaudeSwitcher-{RELEASE}-{state['architecture']}-developer-id-preview"
+            stem = f"ClaudeSwitcher-{RELEASE}-{state['architecture']}"
             zip_path, dmg_path = directory / (stem + ".zip"), directory / (stem + ".dmg")
             require(not zip_path.exists() and not dmg_path.exists(), "Do not overwrite existing packages")
             # ditto's defaults preserve the stapled app's resource fork and extended attributes.
@@ -290,7 +290,7 @@ def main():
             stage.mkdir()
             run("ditto", app, stage / APP_NAME)
             (stage / "Applications").symlink_to("/Applications")
-            run("hdiutil", "create", "-volname", f"Claude Switcher {RELEASE} Preview", "-srcfolder", stage,
+            run("hdiutil", "create", "-volname", f"Claude Switcher {RELEASE}", "-srcfolder", stage,
                 "-fs", "HFS+", "-format", "UDZO", dmg_path)
             sign(dmg_path, state["identitySHA1"], runtime=False)
             (evidence / "dmg-signature.txt").write_text(verify_code(dmg_path, state["teamID"], runtime=False))

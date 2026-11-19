@@ -17,15 +17,15 @@ spec.loader.exec_module(release)
 
 
 class SigningChecks(unittest.TestCase):
-    def test_prepared_metadata_identifies_preview_without_demo_or_identity_change(self):
-        info = release.prepare_preview_metadata({"CFBundleIdentifier": release.BUNDLE_ID})
+    def test_prepared_metadata_identifies_stable_without_demo_or_identity_change(self):
+        info = release.prepare_release_metadata({"CFBundleIdentifier": release.BUNDLE_ID})
         self.assertEqual(info["CFBundleIdentifier"], "dev.claudeswitcher.candidate")
         self.assertEqual(info["CFBundleShortVersionString"], "1.3.6")
-        self.assertEqual(info["CSReleaseChannel"], "preview")
-        self.assertEqual(info["CSReleaseVersion"], "1.3.6-rc.18")
-        self.assertEqual(info["CFBundleVersion"], "20261119.18.0")
-        self.assertIn("预览", info["CFBundleDisplayName"])
-        self.assertIn("预览", info["CFBundleName"])
+        self.assertEqual(info["CSReleaseChannel"], "stable")
+        self.assertEqual(info["CSReleaseVersion"], "1.3.6")
+        self.assertEqual(info["CFBundleVersion"], "20261119.19.0")
+        self.assertEqual("Claude Switcher", info["CFBundleDisplayName"])
+        self.assertEqual("Claude Switcher", info["CFBundleName"])
         self.assertFalse(any(k.startswith("CSPreview") for k in info))
         self.assertNotIn("Demo", info["CFBundleDisplayName"])
 
@@ -33,13 +33,13 @@ class SigningChecks(unittest.TestCase):
         for info in ({"CFBundleIdentifier": release.BUNDLE_ID, "CSPreviewMode": True},
                      {"CFBundleIdentifier": "fictional.other.app"}):
             with self.subTest(info=info), self.assertRaises(ValueError):
-                release.prepare_preview_metadata(info)
+                release.prepare_release_metadata(info)
 
     def test_channel_gate_rejects_missing_markers_wrong_version_and_ordinary_display_name(self):
-        valid = release.prepare_preview_metadata({"CFBundleIdentifier": release.BUNDLE_ID})
-        for key, value in (("CSReleaseChannel", None), ("CSReleaseChannel", "stable"),
+        valid = release.prepare_release_metadata({"CFBundleIdentifier": release.BUNDLE_ID})
+        for key, value in (("CSReleaseChannel", None), ("CSReleaseChannel", "preview"),
                            ("CSUpdaterProtocolVersion", None), ("CSUpdaterProtocolVersion", 2),
-                           ("CSReleaseVersion", None), ("CSReleaseVersion", "1.3.6"),
+                           ("CSReleaseVersion", None), ("CSReleaseVersion", "1.3.6-rc.18"),
                            ("CSReleaseVersion", "1.3.6-rc.1"), ("CFBundleVersion", "20261102.1.0"),
                            ("CSReleaseVersion", "1.3.6-rc.2"), ("CFBundleVersion", "20261102.2.1"),
                            ("CSReleaseVersion", "1.3.6-rc.3"), ("CFBundleVersion", "20261103.3.0"),
@@ -47,8 +47,8 @@ class SigningChecks(unittest.TestCase):
                            ("CSReleaseVersion", "1.3.6-rc.4"), ("CFBundleVersion", "20261103.4.1"),
                            ("CFBundleVersion", "20261102.2.0"),
                            ("CFBundleShortVersionString", "1.3.6-rc.1"),
-                           ("CFBundleName", "Claude Switcher"),
-                           ("CFBundleDisplayName", "Claude Switcher"),
+                           ("CFBundleName", "Claude Switcher 预览"),
+                           ("CFBundleDisplayName", "Claude Switcher 预览"),
                            ("CSPreviewMode", False)):
             info = dict(valid)
             if value is None:
@@ -56,7 +56,7 @@ class SigningChecks(unittest.TestCase):
             else:
                 info[key] = value
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
-                release.verify_preview_metadata(info)
+                release.verify_release_metadata(info)
 
     def test_metadata_gate_runs_before_any_signature_check(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -64,7 +64,7 @@ class SigningChecks(unittest.TestCase):
             (app / "Contents").mkdir()
             (app / "Contents/Info.plist").write_bytes(plistlib.dumps({"CFBundleIdentifier": release.BUNDLE_ID}))
             with patch.object(release, "pinned_team", return_value="FAKE123456"), patch.object(release, "run") as run:
-                with self.assertRaisesRegex(ValueError, "Preview channel must be explicit"):
+                with self.assertRaisesRegex(ValueError, "Stable channel must be explicit"):
                     release.verify_app(app, "FAKE123456", app)
                 run.assert_not_called()
 
@@ -99,8 +99,8 @@ class SigningChecks(unittest.TestCase):
             with patch.object(release, "ROOT", root), patch.object(release, "pinned_team", return_value="FAKE123456"), \
                  patch.object(release, "run", side_effect=fake_run), patch.object(sys, "argv", ["release", "prepare"]):
                 release.main()
-            manifest = json.loads((root / "dist/developer-id/1.3.6-rc.18/RELEASE-MANIFEST.json").read_text())
-            self.assertEqual(manifest["release"], "1.3.6-rc.18")
+            manifest = json.loads((root / "dist/developer-id/1.3.6/RELEASE-MANIFEST.json").read_text())
+            self.assertEqual(manifest["release"], "1.3.6")
             self.assertEqual(manifest["candidateCommit"], "c" * 40)
             self.assertEqual(Path(manifest["appPath"]).name, "Claude Switcher Preview.app")
             self.assertEqual(release.DR_BASELINE_APP_NAME, "Claude Switcher Preview.app")
