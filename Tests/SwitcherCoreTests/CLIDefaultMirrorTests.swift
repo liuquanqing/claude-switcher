@@ -453,4 +453,73 @@ import XCTest
         } catch {}
         XCTAssertEqual(f.io.credentials, credentials)
     }
+
+    func testSameAccountNewerBackupCommitsWithRealClockAndExpiredDefault() async throws {
+        let f = try fixture()
+        // Default A expired; A's own directory renewed and saved as a newer verified backup.
+        let expiredDefault = try login(a, token: "access-a", expired: true)
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: expiredDefault.oauth)
+        let newer = try login(a, token: "access-a2", lifetime: 9000)
+        f.io.backups["Personal"] = try CLIBackup.verifiedData(login: newer, identity: a, now: Date().addingTimeInterval(-60))
+        let clock: () -> Date = { Date() }
+        let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: clock), target: profiles[0], profiles: profiles,
+            home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: clock)
+        XCTAssertEqual(outcome.restoration, .verifiedLogin)
+        XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), newer)
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, newer)
+    }
+
+    func testOfflineBackupNeverReplacesVerifiedSlotWithMixedIdentity() async throws {
+        let io = MirrorIO()
+        // OAuth already B, identity block still A (external sign-in in progress).
+        let mixed = CLIOwnedLogin(oauth: try login(b, token: "access-b", lifetime: 99999).oauth, metadata: try login(a, token: "access-a").metadata)
+        io.credentials = try CLIJSON.replacing(nil, key: "claudeAiOauth", with: mixed.oauth)
+        io.document = try CLIJSON.replacing(nil, key: "oauthAccount", with: mixed.metadata)
+        let verified = try CLIBackup.verifiedData(login: login(a, token: "access-a"), identity: a, now: date)
+        io.backups["Personal"] = verified
+        let result = try await CLICurrentBackup.save(target: profiles[0], io: io, now: { self.date }, contextIsCurrent: { true })
+        XCTAssertEqual(result, .upToDate)
+        XCTAssertEqual(io.backups["Personal"], verified)
+    }
+
+    func testReverseSyncPreservesConcurrentDocumentChangesAndRollsBackByField() async throws {
+        let f = try fixture()
+        let renewed = try login(b, token: "access-b2", lifetime: 7200)
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: renewed.oauth)
+        f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: renewed.metadata)
+        let document = f.isolatedB.appendingPathComponent(".claude.json")
+        // A store whose credential write succeeds and then the terminal updates the document's
+        // project settings before the identity write; the identity write must fail and roll back.
+        let base = store(f.isolatedB)
+        // File-only store (scoped Keychain empty). The document read simulates the terminal
+        // updating settings and identity right after the credential write; the identity write fails.
+        var reads = 0
+        let racingRead: () throws -> Data? = {
+            reads += 1
+            let data = try CLIPrivateFile.read(document)
+            if reads >= 3 {
+                var latest = try CLIJSON.object(data!)
+                latest["projects"] = ["changed": true]
+                latest["oauthAccount"] = try CLIJSON.object(self.login(self.a, token: "access-a").metadata!)
+                let encoded = try CLIJSON.encode(latest)
+                try CLIPrivateFile.write(encoded, to: document)
+                return encoded
+            }
+            return data
+        }
+        let racingStore = CLIDefaultMirror.DirectoryStore(directory: f.isolatedB, readScoped: { nil }, writeScoped: { _ in throw SafetyError("unused") },
+            readDocument: racingRead, writeDocument: { _ in throw SafetyError("fixture: document write denied") })
+        do {
+            try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: racingStore, expected: b,
+                verified: CLIVerification(login: renewed, identity: b, checkedAt: date), now: { self.date })
+            XCTFail("identity changed concurrently")
+        } catch {}
+        // Credential rolled back to B's seed; the terminal's concurrent document (A identity +
+        // changed settings) is left exactly as the terminal wrote it, never overwritten.
+        XCTAssertEqual(try CLIJSON.field(CLIPrivateFile.read(f.isolatedB.appendingPathComponent(".credentials.json")), key: "claudeAiOauth"),
+                       try login(b, token: "access-b").oauth)
+        let after = try CLIJSON.object(CLIPrivateFile.read(document)!)
+        XCTAssertEqual(after["projects"] as? [String: Bool], ["changed": true], "concurrent settings kept")
+        XCTAssertEqual(try CLIIdentity.metadata(CLIJSON.field(CLIPrivateFile.read(document), key: "oauthAccount"))?.accountID, a.accountID, "foreign identity kept, not overwritten")
+    }
 }

@@ -52,10 +52,9 @@ import Foundation
             guard let oauth = original.oauth, let metadata = original.metadata else {
                 throw SafetyError("当前 CLI 登录不完整，未更新备份。")
             }
-            // Without an online check, a previously verified backup is kept rather than downgraded
-            // to an unverified copy; the next gated verification upgrades it.
-            if let previous, let backup = try? CLIBackup(data: previous),
-               !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
+            // Without an online check a verified backup is never replaced: the local identity block
+            // can lag a new OAuth during an external sign-in. The next gated verification decides.
+            if let previous, let backup = try? CLIBackup(data: previous), backup.verification != nil {
                 return .upToDate
             }
             data = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(oauth), "oauthAccount": CLIJSON.object(metadata)])

@@ -41,6 +41,8 @@ import XCTest
 final class CLICurrentBackupTests: XCTestCase {
     @MainActor func testLocalSnapshotNeedsNoNetworkAndDoesNotInventOnlineVerification() async throws {
         let io = try BackupFixture(), original = try io.login
+        // No verified backup yet: a local snapshot is saved without inventing a proof.
+        io.backup = nil
         let result = try await CLICurrentBackup.save(target: .init(name: "Fixture", identity: io.identity), io: io,
             contextIsCurrent: { true })
         let backup = try CLIBackup(data: io.backup!)
@@ -49,6 +51,18 @@ final class CLICurrentBackupTests: XCTestCase {
         XCTAssertNil(backup.verification)
         XCTAssertEqual(try io.login, original)
         XCTAssertEqual(io.liveWrites, 0)
+        // A verified backup is never replaced offline, even by a newer-looking local login whose
+        // identity block may lag an external sign-in; the next gated verification decides.
+        let old = try CLIBackup.verifiedData(login: loginWithexpiry(1), identity: io.identity, now: .distantPast)
+        io.backup = old
+        let kept = try await CLICurrentBackup.save(target: .init(name: "Fixture", identity: io.identity), io: io, contextIsCurrent: { true })
+        XCTAssertEqual(kept, .upToDate)
+        XCTAssertEqual(io.backup, old)
+    }
+    private func loginWithexpiry(_ ms: Double) throws -> CLIOwnedLogin {
+        let identity = CLIIdentity(accountID: "fixture-account", organizationID: "fixture-org", email: "fixture@example.invalid")
+        return CLIOwnedLogin(oauth: try CLIJSON.encode(["accessToken": "fictional-old", "refreshToken": "fictional-old-refresh", "expiresAt": ms]),
+                             metadata: try CLIJSON.encode(["accountUuid": identity.accountID!, "organizationUuid": identity.organizationID!, "emailAddress": identity.email!]))
     }
     @MainActor func testFreshLoginReplacesOnlyBackupAndReadbackIsIdempotent() async throws {
         let io = try BackupFixture(), original = try io.login

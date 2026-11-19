@@ -14,18 +14,21 @@ import Darwin
         public let directory: URL
         public let readScoped: () throws -> Data?
         public let writeScoped: (Data?) throws -> Void
-        public init(directory: URL, readScoped: @escaping () throws -> Data?, writeScoped: @escaping (Data?) throws -> Void) {
+        public let readDocument: () throws -> Data?
+        public let writeDocumentData: (Data?) throws -> Void
+        public init(directory: URL, readScoped: @escaping () throws -> Data?, writeScoped: @escaping (Data?) throws -> Void,
+                    readDocument: (() throws -> Data?)? = nil, writeDocument: ((Data?) throws -> Void)? = nil) {
             self.directory = directory; self.readScoped = readScoped; self.writeScoped = writeScoped
+            self.readDocument = readDocument ?? { try CLIPrivateFile.read(directory.appendingPathComponent(".claude.json")) }
+            self.writeDocumentData = writeDocument ?? { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".claude.json")) }
         }
         @MainActor public func router() -> CLIStoredCredentialRouter {
             CLIStoredCredentialRouter(readPrimary: readScoped, writePrimary: writeScoped,
                 readFile: { try CLIPrivateFile.read(directory.appendingPathComponent(".credentials.json")) },
                 writeFile: { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".credentials.json")) })
         }
-        public func document() throws -> Data? { try CLIPrivateFile.read(directory.appendingPathComponent(".claude.json")) }
-        public func writeDocument(_ data: Data?) throws {
-            try CLIPrivateFile.write(data, to: directory.appendingPathComponent(".claude.json"))
-        }
+        public func document() throws -> Data? { try readDocument() }
+        public func writeDocument(_ data: Data?) throws { try writeDocumentData(data) }
     }
 
     public struct Outcome: Equatable, Sendable {
@@ -134,20 +137,39 @@ import Darwin
         let document = try store.document()
         guard try CLIOwnedLogin(credentials: credentials, identityDocument: document) == own else { return }
         let newCredentials = try CLIJSON.replacing(credentials, key: "claudeAiOauth", with: live.oauth)
-        let newDocument = try CLIJSON.replacing(document, key: "oauthAccount", with: live.metadata)
         try router.write(newCredentials)
+        var documentBefore: Data?
         var documentWritten = false
         do {
+            // Re-read the document after the credential write: the terminal may have changed
+            // project settings or its identity meanwhile; only oauthAccount is replaced.
+            let latest = try store.document()
+            guard try CLIJSON.field(latest, key: "oauthAccount") == own.metadata else {
+                throw SafetyError("独立目录的身份在同步期间变化，未覆盖。")
+            }
+            documentBefore = latest
+            let newDocument = try CLIJSON.replacing(latest, key: "oauthAccount", with: live.metadata)
             try store.writeDocument(newDocument); documentWritten = true
-            guard try CLIOwnedLogin(credentials: router.read(), identityDocument: store.document()) == live else {
+            guard try CLIJSON.field(router.read(), key: "claudeAiOauth") == live.oauth,
+                  try CLIJSON.field(store.document(), key: "oauthAccount") == live.metadata else {
                 throw SafetyError("独立目录回读未通过，登录同步未确认。")
             }
         } catch {
             var restored = true
-            if documentWritten {
-                do { if try store.document() == newDocument { try store.writeDocument(document) } } catch { restored = false }
+            if documentWritten, let documentBefore {
+                do {
+                    let current = try store.document()
+                    if try CLIJSON.field(current, key: "oauthAccount") == live.metadata {
+                        try store.writeDocument(CLIJSON.replacing(current, key: "oauthAccount", with: own.metadata))
+                    }
+                } catch { restored = false }
             }
-            do { if try router.read() == newCredentials { try router.write(credentials) } } catch { restored = false }
+            do {
+                let current = try router.read()
+                if try CLIJSON.field(current, key: "claudeAiOauth") == live.oauth {
+                    try router.write(CLIJSON.replacing(current, key: "claudeAiOauth", with: own.oauth))
+                }
+            } catch { restored = false }
             let confirmed = (try? CLIOwnedLogin(credentials: router.read(), identityDocument: store.document())) == own
             guard restored, confirmed else {
                 throw SafetyError("独立目录同步失败且回滚未确认，请保留现场并停止切换。")

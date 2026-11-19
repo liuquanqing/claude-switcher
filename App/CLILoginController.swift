@@ -380,22 +380,39 @@ import SwitcherCore
             guard context.0.identity?.samePrincipal(as: confirmedIdentity) == true else {
                 throw SafetyError("当前账号已变化，请重新检查旧 CLI 备份。")
             }
+            // Pin the desktop's on-disk login that the confirmed identity was bound to.
+            guard let digest = active?.snapshot?.identityTokenDigest,
+                  let access = try await token(for: profileDir(target), allowExpired: true, allowInteraction: false),
+                  desktopTokenDigest(access) == digest else {
+                throw SafetyError("桌面登录在核对期间变化，未覆盖 CLI 登录。")
+            }
+            let stillSameDesktop = { [weak self] () async throws -> Bool in
+                guard let self, try confirmedCurrentProfile() == target, self.current == target,
+                      DesktopModeInspector.read(support: support) == .subscription,
+                      self.cliConfiguration().allowsSubscriptionMutation,
+                      self.active?.snapshot?.identity.samePrincipal(as: confirmedIdentity) == true,
+                      let now = try await token(for: profileDir(target), allowExpired: true, allowInteraction: false) else { return false }
+                return desktopTokenDigest(now) == digest
+            }
             try await prepareTargetCLIRecovery(target: context.0, io: io, requireUsableLogin: true)
+            guard try await stillSameDesktop() else { throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。") }
             let plan = try await transaction.prepare(target: context.0, profiles: context.1, requiresTargetLogin: true,
                 remote: { try await self.checkedCLIIdentity($0) })
             try transaction.persistOutgoing(plan)
-            guard try confirmedCurrentProfile() == target, DesktopModeInspector.read(support: support) == .subscription,
-                  active?.snapshot?.identity.samePrincipal(as: confirmedIdentity) == true else {
+            guard try await stillSameDesktop() else {
                 throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。")
             }
             let restoration = try transaction.apply(plan, requireUsableLogin: true)
+            cliFollowPending = nil
             await refreshCLI(verify: false)
             presentCLIRestoration(restoration, target: target, identity: context.0.identity)
             usageRefreshPolicy.credentialsChanged(profile: target)
             banner = "已恢复默认 CLI 登录。请在新终端使用。"
             return true
         } catch {
-            banner = error.localizedDescription
+            let message = error.localizedDescription
+            if message.contains("还原未确认") || message.contains("回滚未确认") || message.contains("停止切换") { cliFollowPending = nil }
+            banner = message
             await refreshCLI(verify: false)
             return false
         }

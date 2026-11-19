@@ -50,8 +50,9 @@ import SwitcherCore
             try CLIDefaultMirror.refreshOwnDirectory(from: io, store: Store.isolatedStore(directory, allowInteraction: manual),
                                                      expected: identity, verified: verified, now: { now })
         } catch {
-            if manual { banner = "独立目录尚未同步最新登录：\(error.localizedDescription)" }
-            else if banner == nil { banner = "独立目录尚未同步最新登录：\(error.localizedDescription)" }
+            let message = error.localizedDescription
+            if message.contains("回滚未确认") || message.contains("停止切换") { cliFollowPending = nil }
+            banner = "独立目录尚未同步最新登录：\(message)"
         }
     }
 

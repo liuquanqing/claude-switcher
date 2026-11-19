@@ -87,6 +87,14 @@ public struct PreparedCLISwitch {
                 throw SafetyError("当前 CLI 登录不能唯一关联到桌面档案，未修改账号；请先刷新档案身份。")
             }
             let prior = try io.readBackup(source.name).map(CLIBackup.init(data:))
+            // An expired outgoing default need not be verified online when a newer verified backup
+            // of the same account already exists; that backup is kept and becomes the candidate.
+            if let prior, prior.login.hasSecrets, original.usableAccessToken(now: now()) == nil,
+               let priorIdentity = try prior.login.identity, let expected = source.identity, priorIdentity.samePrincipal(as: expected),
+               let trusted = try prior.trustedIdentity(), !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
+                sourceName = source.name; sourceIdentity = trusted; sourceRemote = false
+                sourceData = try io.readBackup(source.name)
+            } else {
             let checked = try await verify(original, trusted: prior, context: "当前", expected: source.identity, remote: remote)
             if let prior, prior.login.hasSecrets {
                 guard let priorIdentity = try prior.login.identity, priorIdentity.samePrincipal(as: checked.0) else {
@@ -102,18 +110,23 @@ public struct PreparedCLISwitch {
             } else {
                 sourceData = try CLIBackup.verifiedData(login: original, identity: checked.0, now: checkedAt)
             }
+            }
         }
         let desired: CLIOwnedLogin, restoration: CLIRestoration
         var targetUpgrade: Data?
+        var sameAccountWinningBackup: Data?
         if sourceName == target.name, sourceIdentity != nil {
             // Same account: a newer verified backup (renewed in the account's own directory) wins
-            // over an older default login, and must itself pass this round's online check.
+            // over an older default login, and must itself pass this round's online check. The
+            // winning record is written once and is also the commit expectation for this slot.
             if let targetRaw, let backup = try? CLIBackup(data: targetRaw), backup.login.hasSecrets,
                try backup.login.identity?.samePrincipal(as: sourceIdentity!) == true,
                !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
                 let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: sourceIdentity, remote: remote)
                 desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
-                targetUpgrade = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
+                let record = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
+                sameAccountWinningBackup = record
+                sourceData = record
             } else {
                 desired = original; restoration = sourceRemote ? .verifiedLogin : .storedLogin
             }
@@ -138,7 +151,7 @@ public struct PreparedCLISwitch {
             throw SafetyError("CLI 登录或备份在核验期间变化，未修改账号，请重试。")
         }
         return PreparedCLISwitch(original: original, originalMarker: originalMarker, targetName: target.name, targetBackupBefore: targetRaw,
-                                 targetBackupAfter: sourceName == target.name ? sourceData : (targetUpgrade ?? targetRaw),
+                                 targetBackupAfter: sourceName == target.name ? (sameAccountWinningBackup ?? sourceData) : (targetUpgrade ?? targetRaw),
                                  sourceName: sourceName, sourceBackup: sourceData, targetUpgrade: targetUpgrade,
                                  desired: desired, restoration: restoration)
     }
@@ -154,7 +167,7 @@ public struct PreparedCLISwitch {
             try io.writeBackup(name, data: data)
             guard try normalized(io.readBackup(name)) == data else { throw SafetyError("CLI 备份回读未通过，未移动桌面目录。") }
         }
-        if let data = plan.targetUpgrade {
+        if let data = plan.targetUpgrade, plan.sourceName != plan.targetName {
             try io.writeBackup(plan.targetName, data: data)
             guard try normalized(io.readBackup(plan.targetName)) == data else { throw SafetyError("目标 CLI 备份回读未通过，桌面目录未移动。") }
         }
