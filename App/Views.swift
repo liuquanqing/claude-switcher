@@ -1886,6 +1886,17 @@ struct Panel: View {
                     .help(t("protection.dismissAccessibility"))
                     .accessibilityLabel(t("protection.dismissAccessibility"))
                     .onHover { bannerDismissHover = $0 }
+                    if store.cliFollowPending == store.current {
+                        Button { Task { await store.retryDefaultCLIFollow() } } label: {
+                            Text(t("switch.retryFollow")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.claude)
+                                .padding(.horizontal, 9).frame(height: 24)
+                                .background(RoundedRectangle(cornerRadius: 6).fill(Color.claude.opacity(0.12)))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(store.busy != nil || store.refreshing)
+                        .help(t("switch.retryFollowHelp"))
+                    }
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))

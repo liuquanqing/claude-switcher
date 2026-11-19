@@ -344,7 +344,7 @@ actor FixtureGuardWorker: GuardWorking {
   await store.confirmDesktopOnlySwitch()
   require(store.current == "Business" && store.cliProfile == "Business", "a confirmed switch still requires network and guard gate")
   require(store.followNotice(target: "Design", restoration: .needsLogin, previousTerminals: 2)
-          == "桌面已切换；Design 还没有保存的终端登录，默认终端仍是上一个账号。请在终端里登录该账号。 还有 2 个终端在用上一个账号，未被关闭；新开的终端使用 Design。",
+          == "桌面已切换；Design 还没有保存的终端登录，默认终端仍是上一个账号。请在终端里登录该账号。 还有 2 个终端进程在运行，未被关闭；它们仍用启动时的登录。",
           "switch notice names the account without a saved login and reports old terminals without closing them")
   require(AppLocalization.text("switch.followOldTerminals", language: "en", arguments: ["count": "2", "target": "Design"]).contains("were not closed"),
           "old-terminal notice is localized")

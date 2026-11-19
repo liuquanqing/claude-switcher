@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import SwitcherCore
 
 struct DesktopOnlySwitchOffer: Equatable {
@@ -85,21 +86,64 @@ struct DesktopOnlySwitchOffer: Equatable {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let io = NativeCLIStorage(allowInteraction: true)
         let repository = CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"), home: home)
-        let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
         do {
+            // The cached profile identity can be stale if the target was re-signed-in elsewhere.
+            // Confirm the desktop's own identity before any terminal credential is written.
+            let confirmed = try await profileDescriptor(target, allowInteraction: true)
+            guard let confirmedIdentity = confirmed.identity, confirmedIdentity.isComplete,
+                  confirmedIdentity.samePrincipal(as: identity), try confirmedCurrentProfile() == target,
+                  DesktopModeInspector.read(support: support) == .subscription else {
+                throw SafetyError("目标桌面的实际账号与档案记录不一致，终端登录保持原样。")
+            }
+            let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
             let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: io),
                 target: CLIProfileIdentity(name: target, identity: identity), profiles: profiles, home: home, repository: repository,
+                storeFor: { Self.isolatedStore($0, allowInteraction: true) },
+                journalURL: protection.files.directory.appendingPathComponent("cli-transcript-links.json"),
                 remote: { try await self.checkedCLIIdentity($0) },
+                contextIsCurrent: { try confirmedCurrentProfile() == target && self.current == target
+                    && self.active?.snapshot?.identity.samePrincipal(as: identity) == true
+                    && DesktopModeInspector.read(support: support) == .subscription },
                 terminalsBefore: { terminalsBefore }, terminalsNow: { [weak self] in self?.runningCLITerminals() ?? [] })
             cliConnection.defaultLoginDidChange()
             resetCurrentCLIRecoveryObservation()
             usageRefreshPolicy.credentialsChanged(profile: target); usageCatchUpPending = true
+            cliFollowPending = nil
             let notice = followNotice(target: target, restoration: outcome.restoration, previousTerminals: outcome.previousTerminals)
             return DefaultCLIFollow(restoration: outcome.restoration, notice: notice)
         } catch {
             cliConnection.defaultLoginDidChange()
+            cliFollowPending = target
             return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认终端登录未跟随：\(error.localizedDescription)")
         }
+    }
+
+    /// Retry the terminal follow for the current desktop after a failed attempt.
+    func retryDefaultCLIFollow() async {
+        guard !isDemo, busy == nil, !refreshing, let target = cliFollowPending, target == current else { return }
+        let before = runningCLITerminals()
+        let result = await followDefaultCLI(to: target, terminalsBefore: before)
+        await refreshCLI(verify: false)
+        if let result { presentCLIRestoration(result.restoration, target: target, identity: active?.snapshot?.identity) }
+        banner = result?.notice ?? (cliFollowPending == nil ? "默认终端登录已跟随当前账号。" : banner)
+    }
+
+    /// The account's own directory uses the official CLI's directory-scoped Keychain item with a
+    /// private-file fallback, exactly like the recovery adapter. A denied read is never "empty".
+    static func isolatedStore(_ directory: URL, allowInteraction: Bool) -> CLIDefaultMirror.DirectoryStore {
+        let service = OfficialCLIRecovery.service(for: directory)
+        let account = NSUserName()
+        return CLIDefaultMirror.DirectoryStore(directory: directory,
+            readScoped: { try KeychainReadAccess.read(service: service, account: account, allowInteraction: allowInteraction) },
+            writeScoped: { data in
+                if let data { try writeKeychain(service: service, account: account, json: CLIJSON.object(data)) }
+                else {
+                    let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                        kSecAttrService as String: service, kSecAttrAccount as String: account]
+                    let status = SecItemDelete(query as CFDictionary)
+                    guard [errSecSuccess, errSecItemNotFound].contains(status) else { throw SafetyError("独立目录登录还原失败（状态 \(status)）。") }
+                }
+            })
     }
 
     func followNotice(target: String, restoration: CLIRestoration, previousTerminals: Int) -> String? {

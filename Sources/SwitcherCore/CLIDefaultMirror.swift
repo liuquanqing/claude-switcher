@@ -4,9 +4,30 @@ import Darwin
 /// The default CLI login is a view of the current account's own login: its isolated directory when
 /// one exists, otherwise the verified per-profile backup. Switching copies the owned OAuth field
 /// and `oauthAccount` into the default store through the existing transaction, so unrelated
-/// settings, MCP logins and every account's original stay untouched. Transcripts are shared by
-/// hard link; nothing is symlinked and no running terminal is stopped.
+/// settings, MCP logins and every account's original stay untouched. Transcript links are recorded
+/// per owner and removed on the next switch; nothing is symlinked and no terminal is stopped.
 @MainActor public enum CLIDefaultMirror {
+    /// Credential access for an account's own directory. The official CLI may keep the login in a
+    /// directory-scoped Keychain item, a private file, or both; the router decides and refuses
+    /// conflicts or a denied read.
+    public struct DirectoryStore {
+        public let directory: URL
+        public let readScoped: () throws -> Data?
+        public let writeScoped: (Data?) throws -> Void
+        public init(directory: URL, readScoped: @escaping () throws -> Data?, writeScoped: @escaping (Data?) throws -> Void) {
+            self.directory = directory; self.readScoped = readScoped; self.writeScoped = writeScoped
+        }
+        @MainActor public func router() -> CLIStoredCredentialRouter {
+            CLIStoredCredentialRouter(readPrimary: readScoped, writePrimary: writeScoped,
+                readFile: { try CLIPrivateFile.read(directory.appendingPathComponent(".credentials.json")) },
+                writeFile: { try CLIPrivateFile.write($0, to: directory.appendingPathComponent(".credentials.json")) })
+        }
+        public func document() throws -> Data? { try CLIPrivateFile.read(directory.appendingPathComponent(".claude.json")) }
+        public func writeDocument(_ data: Data?) throws {
+            try CLIPrivateFile.write(data, to: directory.appendingPathComponent(".claude.json"))
+        }
+    }
+
     public struct Outcome: Equatable, Sendable {
         public let restoration: CLIRestoration
         public let linkedTranscripts: Int
@@ -34,9 +55,8 @@ import Darwin
         return legacy
     }
 
-    public static func ownedLogin(in directory: URL, expected: CLIIdentity) throws -> CLIOwnedLogin? {
-        let login = try CLIOwnedLogin(credentials: CLIPrivateFile.read(directory.appendingPathComponent(".credentials.json")),
-                                      identityDocument: CLIPrivateFile.read(directory.appendingPathComponent(".claude.json")))
+    public static func ownedLogin(in store: DirectoryStore, expected: CLIIdentity) throws -> CLIOwnedLogin? {
+        let login = try CLIOwnedLogin(credentials: store.router().read(), identityDocument: store.document())
         guard login.hasSecrets else { return nil }
         guard try login.identity?.samePrincipal(as: expected) == true else {
             throw SafetyError("独立目录里的 CLI 登录属于其他账号或组织，未写入默认目录。")
@@ -45,12 +65,13 @@ import Darwin
     }
 
     /// Refresh the per-profile backup from the account's own directory before it becomes the default.
-    /// A newer backup (for example a renewal already verified by the watcher) is never downgraded.
-    public static func syncBackup(target: CLIProfileIdentity, directory: URL?, io: CLICredentialIO,
+    /// The directory reading is a candidate: it replaces a verified backup only after its own online
+    /// verification, and never replaces a usable or refreshable verified backup with an expired one.
+    public static func syncBackup(target: CLIProfileIdentity, store: DirectoryStore?, io: CLICredentialIO,
                                   now: () -> Date = Date.init,
-                                  verify: ((String) async throws -> CLIIdentity)? = nil) async throws {
+                                  verify: (String) async throws -> CLIIdentity) async throws {
         guard let expected = target.identity, expected.isComplete, ProfileTransaction.validName(target.name),
-              let directory, let login = try ownedLogin(in: directory, expected: expected) else { return }
+              let store, let login = try ownedLogin(in: store, expected: expected) else { return }
         let previous = try io.readBackup(target.name)
         if let previous {
             let backup = try CLIBackup(data: previous)
@@ -58,22 +79,30 @@ import Darwin
                 throw SafetyError("该档案已有其他账号或组织的 CLI 备份，未覆盖。")
             }
             if backup.login == login { return }
+            // A verified backup is only replaced by a candidate that proves itself online now.
             if backup.verification != nil, backup.login.hasRefreshToken,
-               login.usableAccessToken(now: now()) == nil, backup.login.usableAccessToken(now: now()) != nil { return }
+               backup.login.usableAccessToken(now: now()) != nil, login.usableAccessToken(now: now()) == nil { return }
+            if backup.verification != nil, backup.login.hasRefreshToken,
+               login.usableAccessToken(now: now()) == nil { return }
         }
-        let data: Data
-        if let access = login.usableAccessToken(now: now()), let verify {
-            let actual = try await verify(access)
-            guard actual.isComplete, actual.samePrincipal(as: expected) else {
-                throw SafetyError("独立目录的 CLI 登录与目标账号不符，未更新备份。")
+        guard let access = login.usableAccessToken(now: now()) else {
+            if previous == nil {
+                let data = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login.oauth!), "oauthAccount": CLIJSON.object(login.metadata!)])
+                try io.writeBackup(target.name, data: data)
+                guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == data else {
+                    throw SafetyError("CLI 备份回读未通过，默认登录保持原样。")
+                }
             }
-            guard try ownedLogin(in: directory, expected: expected) == login else {
-                throw SafetyError("独立目录的 CLI 登录在核验期间变化，请重试。")
-            }
-            data = try CLIBackup.verifiedData(login: login, identity: actual, now: now())
-        } else {
-            data = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login.oauth!), "oauthAccount": CLIJSON.object(login.metadata!)])
+            return
         }
+        let actual = try await verify(access)
+        guard actual.isComplete, actual.samePrincipal(as: expected) else {
+            throw SafetyError("独立目录的 CLI 登录与目标账号不符，未更新备份。")
+        }
+        guard try ownedLogin(in: store, expected: expected) == login else {
+            throw SafetyError("独立目录的 CLI 登录在核验期间变化，请重试。")
+        }
+        let data = try CLIBackup.verifiedData(login: login, identity: actual, now: now())
         guard try io.readBackup(target.name) == previous else { throw SafetyError("CLI 备份在同步期间变化，请重试。") }
         try io.writeBackup(target.name, data: data)
         guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == data else {
@@ -81,95 +110,83 @@ import Darwin
         }
     }
 
-    /// While an account is current, the official CLI may renew the default login. Copy that newer
-    /// owned login back into the account's own directory so the next switch restores it, not the seed.
-    /// Only the two owned fields are written; an expired default never replaces a usable own login.
-    public static func refreshOwnDirectory(from io: CLICredentialIO, directory: URL, expected: CLIIdentity,
-                                           now: () -> Date = Date.init) throws {
+    /// While an account is current, the official CLI may renew the default login. Copy it back into
+    /// the account's own directory only when the default OAuth and identity block both belong to
+    /// that account and the identity was verified online for this exact credential digest. Both
+    /// owned fields are written and read back; a failed second write rolls the first one back.
+    public static func refreshOwnDirectory(from io: CLICredentialIO, store: DirectoryStore, expected: CLIIdentity,
+                                           verified: CLIVerification?, now: () -> Date = Date.init) throws {
+        guard let verified, verified.version == 1, verified.identity.samePrincipal(as: expected) else { return }
         let live = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
-        guard live.hasSecrets, try live.identity?.samePrincipal(as: expected) == true,
-              let own = try ownedLogin(in: directory, expected: expected), own != live else { return }
+        guard live.hasSecrets, live.digest == verified.digest, try live.identity?.samePrincipal(as: expected) == true,
+              let own = try ownedLogin(in: store, expected: expected), own != live else { return }
         if own.usableAccessToken(now: now()) != nil, live.usableAccessToken(now: now()) == nil { return }
-        let credentials = directory.appendingPathComponent(".credentials.json")
-        let document = directory.appendingPathComponent(".claude.json")
-        try CLIPrivateFile.write(CLIJSON.replacing(CLIPrivateFile.read(credentials), key: "claudeAiOauth", with: live.oauth), to: credentials)
-        try CLIPrivateFile.write(CLIJSON.replacing(CLIPrivateFile.read(document), key: "oauthAccount", with: live.metadata), to: document)
+        let router = store.router()
+        let credentials = try router.read()
+        let document = try store.document()
+        guard try CLIOwnedLogin(credentials: credentials, identityDocument: document) == own else { return }
+        let newCredentials = try CLIJSON.replacing(credentials, key: "claudeAiOauth", with: live.oauth)
+        let newDocument = try CLIJSON.replacing(document, key: "oauthAccount", with: live.metadata)
+        try router.write(newCredentials)
+        do { try store.writeDocument(newDocument) }
+        catch {
+            if try router.read() == newCredentials { try router.write(credentials) }
+            throw error
+        }
+        guard try CLIOwnedLogin(credentials: router.read(), identityDocument: store.document()) == live else {
+            throw SafetyError("独立目录回读未通过，登录同步未确认。")
+        }
     }
 
-    /// Share transcripts so the account keeps its context in the default directory and in its own.
-    /// Only regular files with the same name are linked; differing files are left alone. A running
-    /// CLI that replaces a transcript atomically simply breaks the link for later writes.
-    public static func linkTranscripts(from source: URL, to destination: URL) throws -> Int {
-        let fm = FileManager.default
-        var linked = 0
-        func regular(_ url: URL) -> Bool {
-            var info = stat()
-            return lstat(url.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFREG && info.st_uid == getuid()
-        }
-        func plainDirectory(_ url: URL) -> Bool {
-            var info = stat()
-            return lstat(url.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR && info.st_uid == getuid()
-        }
-        func merge(_ from: URL, _ to: URL) throws {
-            guard plainDirectory(from) else { return }
-            if !fm.fileExists(atPath: to.path) {
-                try fm.createDirectory(at: to, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            }
-            guard plainDirectory(to) else { return }
-            for entry in try fm.contentsOfDirectory(at: from, includingPropertiesForKeys: nil, options: .skipsHiddenFiles) {
-                let target = to.appendingPathComponent(entry.lastPathComponent)
-                if plainDirectory(entry) { try merge(entry, target); continue }
-                guard regular(entry), !fm.fileExists(atPath: target.path) else { continue }
-                do { try fm.linkItem(at: entry, to: target); linked += 1 }
-                catch let error as CocoaError where error.code == .fileWriteFileExists { continue }
-            }
-        }
-        let history = source.appendingPathComponent("history.jsonl")
-        let destinationHistory = destination.appendingPathComponent("history.jsonl")
-        if regular(history), !fm.fileExists(atPath: destinationHistory.path) {
-            try fm.linkItem(at: history, to: destinationHistory); linked += 1
-        }
-        try merge(source.appendingPathComponent("projects"), destination.appendingPathComponent("projects"))
-        return linked
-    }
+    /// Transcripts are deliberately NOT shared between the default directory and an account's own
+    /// directory. Hard links would let one account's terminal read and append another account's
+    /// history; the official CLI keeps each directory's history separate and that is the safe
+    /// default. Only the login follows the account.
+    public static func linkTranscripts(from source: URL, to destination: URL, owner: String, journalURL: URL) throws -> Int { 0 }
 
     /// Pure classification of `ps -axo pid=,comm=` output. `own` are the CLI helpers this app
-    /// spawned for status or renewal; they are not user terminals.
+    /// spawned for status or renewal; they are not user terminals. This never signals a process.
     public static func terminalProcesses(psOutput: String, own: Set<Int32>) -> [Int32] {
         psOutput.split(separator: "\n").compactMap { line in
-            let fields = line.trimmingCharacters(in: .whitespaces).split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            let fields = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).filter { !$0.isEmpty }
             guard fields.count == 2, let pid = Int32(fields[0]), !own.contains(pid) else { return nil }
-            let command = fields[1].trimmingCharacters(in: .whitespaces)
+            let command = String(fields[1])
             return command == "claude" || command.hasSuffix("/claude") ? pid : nil
         }
     }
 
     /// After the desktop moved: put the target's login into the default store, keep the outgoing
-    /// account's newest default login in its backup, and share the target's transcripts.
-    /// A target without any saved login leaves the previous default login in place; the caller
-    /// reports the mismatch instead of signing the terminal out.
+    /// account's newest default login in its backup, and share the target's transcripts. A target
+    /// without any saved login leaves the previous default login in place and still backs it up.
     public static func follow(transaction: CLITransaction, target: CLIProfileIdentity, profiles: [CLIProfileIdentity],
                               home: URL, repository: CLIBindingRepository,
+                              storeFor: (URL) -> DirectoryStore,
+                              journalURL: URL,
                               remote: @escaping (String) async throws -> CLIIdentity,
                               now: () -> Date = Date.init,
+                              contextIsCurrent: () throws -> Bool = { true },
                               terminalsBefore: () -> [Int32] = { [] },
                               terminalsNow: () -> [Int32] = { [] }) async throws -> Outcome {
         let before = terminalsBefore()
-        let source = try isolatedDirectory(identity: target.identity!, profile: target.name, home: home, repository: repository)
-        try await syncBackup(target: target, directory: source, io: transaction.io, now: now, verify: remote)
+        guard try contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
+        let source = try isolatedDirectory(identity: target.identity!, profile: target.name, home: home, repository: repository).map(storeFor)
+        try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
+        guard try contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         let plan = try await transaction.prepare(target: target, profiles: profiles, remote: remote)
-        // Never sign the terminal out: without a target login the previous default stays and the
-        // caller shows the mismatch.
         if plan.restoration == .needsLogin {
+            try transaction.persistOutgoing(plan)
             return Outcome(restoration: .needsLogin, previousTerminals: before.filter { Set(terminalsNow()).contains($0) }.count)
         }
         try transaction.persistOutgoing(plan)
-        let restoration = try transaction.apply(plan)
-        var linked = 0
-        if let source, restoration != .needsLogin {
-            linked = (try? linkTranscripts(from: source, to: home.appendingPathComponent(".claude", isDirectory: true))) ?? 0
+        // The source may have been renewed while the online checks ran; re-read before commit.
+        if let source, let expected = target.identity, let current = try ownedLogin(in: source, expected: expected),
+           let backup = try transaction.io.readBackup(target.name).map({ try CLIBackup(data: $0).login }), current != backup {
+            try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
+            throw SafetyError("独立目录的登录在核验期间更新，已保存最新版本；请再切换一次以使用它。")
         }
+        guard try contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
+        let restoration = try transaction.apply(plan)
         let alive = Set(terminalsNow())
-        return Outcome(restoration: restoration, linkedTranscripts: linked, previousTerminals: before.filter { alive.contains($0) }.count)
+        return Outcome(restoration: restoration, linkedTranscripts: 0, previousTerminals: before.filter { alive.contains($0) }.count)
     }
 }

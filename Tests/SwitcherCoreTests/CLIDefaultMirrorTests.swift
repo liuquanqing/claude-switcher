@@ -24,7 +24,22 @@ import XCTest
     func writeMarker(_ value: String?) throws { events.append("marker"); marker = value }
 }
 
+@MainActor private final class ScopedSecrets {
+    var items: [String: Data] = [:]
+    var denyRead = false
+    var denyDocumentWrite = false
+    func store(_ directory: URL) -> CLIDefaultMirror.DirectoryStore {
+        let key = directory.path
+        return CLIDefaultMirror.DirectoryStore(directory: directory,
+            readScoped: { [self] in if denyRead { throw SafetyError("fixture: keychain denied") }; return items[key] },
+            writeScoped: { [self] data in items[key] = data })
+    }
+}
+
 @MainActor final class CLIDefaultMirrorTests: FixtureTest {
+    private let secrets = ScopedSecrets()
+    private func store(_ directory: URL) -> CLIDefaultMirror.DirectoryStore { secrets.store(directory) }
+    private func journal(_ home: URL) -> URL { home.appendingPathComponent("state/cli-transcript-links.json") }
     private let date = Date(timeIntervalSince1970: 1_800_000_000)
     private var a: CLIIdentity { CLIIdentity(accountID: "account-a", organizationID: "org-a", email: "a@example.test") }
     private var b: CLIIdentity { CLIIdentity(accountID: "account-b", organizationID: "org-b", email: "b@example.test") }
@@ -36,7 +51,7 @@ import XCTest
     }
     private func remote(_ token: String) async throws -> CLIIdentity {
         if token == "access-a" || token == "access-a2" { return a }
-        if token == "access-b" { return b }
+        if token == "access-b" || token == "access-b2" { return b }
         throw SafetyError("fixture unknown token")
     }
     private func writeIsolated(_ directory: URL, _ value: CLIOwnedLogin, extra: [String: Any] = [:]) throws {
@@ -67,7 +82,8 @@ import XCTest
     private func follow(_ fixture: (home: URL, io: MirrorIO, repository: CLIBindingRepository, isolatedB: URL),
                         before: [Int32] = [], now: [Int32] = []) async throws -> CLIDefaultMirror.Outcome {
         try await CLIDefaultMirror.follow(transaction: CLITransaction(io: fixture.io, now: { self.date }), target: profiles[1], profiles: profiles,
-                                          home: fixture.home, repository: fixture.repository, remote: remote, now: { self.date },
+                                          home: fixture.home, repository: fixture.repository, storeFor: store, journalURL: journal(fixture.home),
+                                          remote: remote, now: { self.date },
                                           terminalsBefore: { before }, terminalsNow: { now })
     }
 
@@ -75,7 +91,7 @@ import XCTest
         let f = try fixture()
         let outcome = try await follow(f)
         XCTAssertEqual(outcome.restoration, .verifiedLogin)
-        XCTAssertEqual(outcome.linkedTranscripts, 3)
+        XCTAssertEqual(outcome.linkedTranscripts, 0, "histories are never shared between directories")
         let live = try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document)
         XCTAssertEqual(try live.identity?.accountID, b.accountID)
         XCTAssertEqual(try CLIJSON.object(f.io.credentials!)["mcpOAuth"] as? [String: String], ["shared": "keep"])
@@ -88,22 +104,15 @@ import XCTest
         let original = try CLIOwnedLogin(credentials: CLIPrivateFile.read(f.isolatedB.appendingPathComponent(".credentials.json")),
                                          identityDocument: CLIPrivateFile.read(f.isolatedB.appendingPathComponent(".claude.json")))
         XCTAssertEqual(original, try login(b, token: "access-b"), "the account's own directory is never modified")
-        let linked = f.home.appendingPathComponent(".claude/projects/-Users-fixture-work/session-1.jsonl")
-        let source = f.isolatedB.appendingPathComponent("projects/-Users-fixture-work/session-1.jsonl")
-        let left = try FileManager.default.attributesOfItem(atPath: linked.path)[.systemFileNumber] as? NSNumber
-        let right = try FileManager.default.attributesOfItem(atPath: source.path)[.systemFileNumber] as? NSNumber
-        XCTAssertEqual(left, right, "transcripts are hard-linked, not copied")
-        XCTAssertEqual(try Data(contentsOf: f.home.appendingPathComponent(".claude/history.jsonl")), Data("prompt one\n".utf8))
-        var info = stat()
-        XCTAssertEqual(lstat(f.home.appendingPathComponent(".claude/projects").path, &info), 0)
-        XCTAssertNotEqual(info.st_mode & S_IFMT, S_IFLNK, "no symlinked directories")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.home.appendingPathComponent(".claude/projects").path), "no history is linked into the default directory")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.home.appendingPathComponent(".claude/history.jsonl").path))
     }
 
     func testRoundTripRestoresEachAccountsOwnLogin() async throws {
         let f = try fixture()
         _ = try await follow(f)
         try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[0], profiles: profiles,
-                                          home: f.home, repository: f.repository, remote: remote, now: { self.date })
+                                          home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: { self.date })
         let live = try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document)
         XCTAssertEqual(live, try login(a, token: "access-a"))
         XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b"))
@@ -112,11 +121,11 @@ import XCTest
     func testRenewedIsolatedLoginReplacesStaleBackupButNeverDowngrades() async throws {
         let f = try fixture()
         f.io.backups["Design"] = try CLIBackup.verifiedData(login: login(b, token: "access-b", expired: true), identity: b, now: date.addingTimeInterval(-7200))
-        try await CLIDefaultMirror.syncBackup(target: profiles[1], directory: f.isolatedB, io: f.io, now: { self.date }, verify: remote)
+        try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: remote)
         XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b"))
         try writeIsolated(f.isolatedB, login(b, token: "access-b", expired: true))
         f.io.backups["Design"] = try CLIBackup.verifiedData(login: login(b, token: "access-b2"), identity: b, now: date)
-        try await CLIDefaultMirror.syncBackup(target: profiles[1], directory: f.isolatedB, io: f.io, now: { self.date }, verify: remote)
+        try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: remote)
         XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b2"),
                        "a verified newer backup is not replaced by an expired directory copy")
     }
@@ -173,20 +182,6 @@ import XCTest
         XCTAssertFalse(io.events.contains("marker"))
     }
 
-    func testTranscriptMergeNeverOverwritesDifferingFiles() async throws {
-        let f = try fixture()
-        let destination = f.home.appendingPathComponent(".claude")
-        let project = destination.appendingPathComponent("projects/-Users-fixture-work")
-        try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
-        try Data("different\n".utf8).write(to: project.appendingPathComponent("session-1.jsonl"))
-        try Data("own history\n".utf8).write(to: destination.appendingPathComponent("history.jsonl"))
-        let linked = try CLIDefaultMirror.linkTranscripts(from: f.isolatedB, to: destination)
-        XCTAssertEqual(linked, 1)
-        XCTAssertEqual(try Data(contentsOf: project.appendingPathComponent("session-1.jsonl")), Data("different\n".utf8))
-        XCTAssertEqual(try Data(contentsOf: destination.appendingPathComponent("history.jsonl")), Data("own history\n".utf8))
-        XCTAssertEqual(try CLIDefaultMirror.linkTranscripts(from: f.isolatedB, to: destination), 0, "idempotent")
-    }
-
     func testTerminalClassificationExcludesOwnHelpersAndCountsOnlySurvivors() {
         let output = """
           101 /Users/test/.local/bin/claude
@@ -214,7 +209,7 @@ import XCTest
         XCTAssertEqual(found?.path, legacy.path)
         let outcome = try await follow(f)
         XCTAssertEqual(outcome.restoration, .verifiedLogin)
-        XCTAssertEqual(outcome.linkedTranscripts, 3)
+        XCTAssertEqual(outcome.linkedTranscripts, 0, "histories are never shared between directories")
     }
 
     func testRenewalInDefaultFlowsBackIntoOwnDirectoryBeforeNextSwitch() async throws {
@@ -223,15 +218,17 @@ import XCTest
         // The default store renewed B while B was current; its own directory still has the seed.
         let renewed = try login(b, token: "access-b2")
         f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: renewed.oauth)
-        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, directory: f.isolatedB, expected: b, now: { self.date })
-        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: f.isolatedB, expected: b), renewed)
+        f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: renewed.metadata)
+        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
+            verified: CLIVerification(login: renewed, identity: b, checkedAt: date), now: { self.date })
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), renewed)
         XCTAssertEqual(try CLIJSON.object(CLIPrivateFile.read(f.isolatedB.appendingPathComponent(".claude.json"))!)["isolatedOnly"] as? Bool, true)
         // Switch away and back: the renewed credential, not the seed, returns.
         let renewedRemote: (String) async throws -> CLIIdentity = { token in token == "access-b2" ? self.b : try await self.remote(token) }
         try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[0], profiles: profiles,
-                                          home: f.home, repository: f.repository, remote: renewedRemote, now: { self.date })
+                                          home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: renewedRemote, now: { self.date })
         try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
-                                          home: f.home, repository: f.repository, remote: renewedRemote, now: { self.date })
+                                          home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: renewedRemote, now: { self.date })
         XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), renewed)
     }
 
@@ -239,10 +236,128 @@ import XCTest
         let f = try fixture()
         let own = try login(b, token: "access-b")
         f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: login(b, token: "access-b", expired: true).oauth)
-        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, directory: f.isolatedB, expected: b, now: { self.date })
-        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: f.isolatedB, expected: b), own)
+        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
+            verified: CLIVerification(login: try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), identity: b, checkedAt: date), now: { self.date })
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), own)
         f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: login(a, token: "access-a").oauth)
-        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, directory: f.isolatedB, expected: b, now: { self.date })
-        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: f.isolatedB, expected: b), own)
+        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
+            verified: CLIVerification(login: try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), identity: b, checkedAt: date), now: { self.date })
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), own)
+    }
+
+    // MARK: Codex review regressions
+
+    func testReverseSyncRefusesForeignOAuthEvenWhenIdentityBlockMatches() async throws {
+        let f = try fixture()
+        // Default store holds A's OAuth but B's identity block (a real external-switch race).
+        let mixed = CLIOwnedLogin(oauth: try login(a, token: "access-a").oauth, metadata: try login(b, token: "access-b").metadata)
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: mixed.oauth)
+        f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: mixed.metadata)
+        let own = try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b)
+        // No verification exists for this digest: nothing is written.
+        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b, verified: nil, now: { self.date })
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), own)
+        // Even a verification for B cannot bless A's token: the digest differs.
+        try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
+            verified: CLIVerification(login: try login(b, token: "access-b2"), identity: b, checkedAt: date), now: { self.date })
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), own)
+    }
+
+    func testReverseSyncRollsBackCredentialWhenIdentityWriteFails() async throws {
+        let f = try fixture()
+        let renewed = try login(b, token: "access-b2")
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: renewed.oauth)
+        f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: renewed.metadata)
+        let document = f.isolatedB.appendingPathComponent(".claude.json")
+        try FileManager.default.setAttributes([.immutable: true], ofItemAtPath: document.path)
+        defer { try? FileManager.default.setAttributes([.immutable: false], ofItemAtPath: document.path) }
+        let own = try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b)
+        do {
+            try CLIDefaultMirror.refreshOwnDirectory(from: f.io, store: store(f.isolatedB), expected: b,
+                verified: CLIVerification(login: renewed, identity: b, checkedAt: date), now: { self.date })
+            XCTFail("document write must fail")
+        } catch {}
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), own, "credential rolled back, no mixed state")
+    }
+
+    func testScopedKeychainLoginIsReadAndUpdatedNotTheStaleFile() async throws {
+        let f = try fixture()
+        let renewed = try login(b, token: "access-b2")
+        try FileManager.default.removeItem(at: f.isolatedB.appendingPathComponent(".credentials.json"))
+        secrets.items[f.isolatedB.path] = try CLIJSON.replacing(nil, key: "claudeAiOauth", with: renewed.oauth)
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(f.isolatedB), expected: b), renewed)
+        let outcome = try await follow(f)
+        XCTAssertEqual(outcome.restoration, .verifiedLogin)
+        XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), renewed)
+        // A denied scoped read is never treated as an empty login.
+        secrets.denyRead = true
+        do { _ = try await follow(f); XCTFail("denied read") } catch {}
+    }
+
+    func testVerifiedBackupIsNeverDowngradedByAnExpiredOrUnverifiedCandidate() async throws {
+        let f = try fixture()
+        let verified = try CLIBackup.verifiedData(login: login(b, token: "access-b2"), identity: b, now: date)
+        f.io.backups["Design"] = verified
+        try writeIsolated(f.isolatedB, login(b, token: "access-b", expired: true))
+        try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: remote)
+        XCTAssertEqual(f.io.backups["Design"], verified)
+        // A usable candidate that verifies online may upgrade the backup; one that fails verification may not.
+        try writeIsolated(f.isolatedB, login(b, token: "access-b"))
+        do {
+            try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: { _ in throw SafetyError("offline") })
+            XCTFail("verify must fail")
+        } catch {}
+        XCTAssertEqual(f.io.backups["Design"], verified)
+        try await CLIDefaultMirror.syncBackup(target: profiles[1], store: store(f.isolatedB), io: f.io, now: { self.date }, verify: remote)
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b"))
+    }
+
+    func testSourceRenewalDuringVerificationIsSavedAndSwitchStopsBeforeCommit() async throws {
+        let f = try fixture()
+        var calls = 0
+        let credentials = f.io.credentials
+        do {
+            _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
+                home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home),
+                remote: { token in
+                    calls += 1
+                    // The source is renewed after the backup sync verified it, while the transaction
+                    // verifies the outgoing default login.
+                    if calls == 2 { try self.writeIsolated(f.isolatedB, self.login(self.b, token: "access-b2")) }
+                    return try await self.remote(token)
+                }, now: { self.date })
+            XCTFail("must stop")
+        } catch {}
+        XCTAssertEqual(f.io.credentials, credentials, "default untouched")
+        XCTAssertGreaterThanOrEqual(calls, 3)
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Design"]!).login, try login(b, token: "access-b2"), "newest source saved")
+        XCTAssertFalse(f.io.events.contains("marker"))
+    }
+    func testContextChangeBeforeCommitStopsWithoutWritingDefault() async throws {
+        let f = try fixture()
+        let credentials = f.io.credentials
+        var current = true
+        do {
+            _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
+                home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home),
+                remote: { token in current = false; return try await self.remote(token) }, now: { self.date },
+                contextIsCurrent: { current })
+            XCTFail("context changed")
+        } catch {}
+        XCTAssertEqual(f.io.credentials, credentials)
+        XCTAssertFalse(f.io.events.contains("marker"))
+    }
+
+    func testNeedsLoginStillBacksUpTheOutgoingDefault() async throws {
+        let f = try fixture()
+        try FileManager.default.removeItem(at: f.isolatedB)
+        let outcome = try await follow(f)
+        XCTAssertEqual(outcome.restoration, .needsLogin)
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, try login(a, token: "access-a"))
+    }
+
+    func testTerminalParsingHandlesTabsAndDoesNotSignal() {
+        let output = "  101\t/Users/x/.local/bin/claude\n  102  claude\n  103 /Applications/Claude.app/Contents/MacOS/Claude\n"
+        XCTAssertEqual(CLIDefaultMirror.terminalProcesses(psOutput: output, own: []), [101, 102])
     }
 }
