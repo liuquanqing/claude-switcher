@@ -161,10 +161,11 @@ actor FictionalRenderGuard: GuardWorking {
     let context: CLIConnectionContext? = store.protection.desktopScope == .subscription
      ? CLIConnectionContext(profile:store.current,identity:store.active!.snapshot!.identity) : nil
     var binding:CLIBinding?
-    if let context, ["failed", "route-failed", "different"].contains(state) {
+    if let context, ["local-default", "local-isolated", "failed", "route-failed", "different"].contains(state) {
      let home = URL(fileURLWithPath:"/fictional-home")
-     binding = CLIBinding(identity:context.identity,choice:.defaultLogin,
-      directory:try CLIBinding.directory(for:.defaultLogin,identity:context.identity,home:home))
+     let choice: CLIBindingChoice = state == "local-isolated" ? .isolated : .defaultLogin
+     binding = CLIBinding(identity:context.identity,choice:choice,
+      directory:try CLIBinding.directory(for:choice,identity:context.identity,home:home))
     }
     let connection=CLIConnectionController(operations:.init(context:{context},load:{_ in binding},save:{binding=$0},make:{mode,identity in
      CLIBinding(identity:identity,choice:mode,directory:try CLIBinding.directory(for:mode,identity:identity,home:URL(fileURLWithPath:"/fictional-home")))
@@ -196,8 +197,8 @@ actor FictionalRenderGuard: GuardWorking {
      help.fixtureLanguage = language
      try await save(help.background(Color.card), name:"terminal-details-"+state+"-"+language, width:344)
     }
-    if state == "local-default" {
-     try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-record-"+language,width:420)
+    if ["local-default", "separate", "waiting"].contains(state) {
+     try await save(TerminalProtectionCard(store:store,controller:store.protection,busy:false).environment(\.appLanguage,language).padding(12).frame(width:420).background(Color.bg),name:"compact-"+state+"-"+language,width:420)
     }
     if state == "unlinked", context != nil { try await saveChoice(store, connection: connection, language: language) }
    }

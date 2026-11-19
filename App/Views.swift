@@ -401,7 +401,8 @@ struct TerminalStrip: View {
 
     private var subscriptionDesktop: Bool { protection.desktopScope == .subscription }
     private var showsConnectionPhase: Bool {
-        subscriptionDesktop && (officialReportActive || connection.isBusy || verifiedMatch)
+        subscriptionDesktop && (officialReportActive || connection.isBusy || verifiedMatch
+            || [.waitingForLogin, .mismatched, .failed].contains(connection.phase))
     }
 
     private var summaryTitle: String {
@@ -414,6 +415,28 @@ struct TerminalStrip: View {
         connection.phase == .matched && connection.choice != nil && connection.checkedAt != nil
     }
 
+    private var hasCurrentPrincipalBinding: Bool {
+        guard let binding = connection.currentBinding,
+              let identity = store.active?.snapshot?.identity else { return false }
+        return binding.identity.samePrincipal(as: identity)
+    }
+
+    private func directoryTitle(_ choice: CLIBindingChoice) -> String {
+        t(choice == .isolated ? "cli.isolatedDirectory" : "cli.defaultDirectory")
+    }
+
+    private var summaryDirectory: CLIBindingChoice? {
+        if verifiedMatch { return connection.choice }
+        guard hasCurrentPrincipalBinding else { return nil }
+        return connection.currentBinding?.choice
+    }
+
+    private func accountSummary(_ state: String) -> String {
+        let identity = "\(state) · \(accountName)"
+        guard let choice = summaryDirectory else { return identity }
+        return "\(identity) · \(directoryTitle(choice))"
+    }
+
     private var connectionStatus: String {
         switch connection.phase {
         case .unlinked: return t("cli.unlinked")
@@ -422,7 +445,7 @@ struct TerminalStrip: View {
         case .opening: return t("cli.opening")
         case .waitingForLogin: return t("cli.waitingForLogin")
         case .matched:
-            return verifiedMatch ? t("cli.matchShort") : t("cli.unconfirmedIdentity")
+            return verifiedMatch ? t("cli.verified") : t("cli.unconfirmedIdentity")
         case .mismatched: return t("cli.accountMismatch")
         case .unconfirmed: return t("cli.unconfirmedIdentity")
         case .failed: return t(connection.failureTitle ?? "cli.openFailed")
@@ -455,7 +478,7 @@ struct TerminalStrip: View {
         case .opening: return t("cli.opening")
         case .choosing: return t("cli.choiceRequiredDetail")
         case .matched:
-            return verifiedMatch ? t("cli.verifiedDetail", arguments: ["account": accountName]) : t("cli.unconfirmedDetail")
+            return verifiedMatch ? t("cli.verifiedReportDetail", arguments: ["account": accountName]) : t("cli.unconfirmedDetail")
         case .waitingForLogin:
             return connection.detail.map(generated) ?? t("cli.waitingDetail")
         case .mismatched:
@@ -492,7 +515,8 @@ struct TerminalStrip: View {
         if verifiedMatch {
             return accountName
         }
-        if !showsConnectionPhase, !defaultMismatch, !usageLoginRequired, case .sameAccount = connection.localRecord {
+        if hasCurrentPrincipalBinding, !showsConnectionPhase, !defaultMismatch, !usageLoginRequired,
+           case .sameAccount = connection.localRecord {
             return accountName
         }
         return nil
@@ -500,13 +524,11 @@ struct TerminalStrip: View {
 
     private var verifiedIdentityDetail: String? {
         guard subscriptionDesktop, verifiedMatch else { return nil }
-        let match = t("cli.matchShort")
-        guard let email = store.active?.snapshot?.email.flatMap(maskedEmail) else { return match }
-        return "\(match) · \(email)"
+        return t("cli.verifiedReportDetail", arguments: ["account": accountName])
     }
 
     var showsSecondaryLine: Bool {
-        normalIdentity == nil
+        !terminalSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var mismatchedTerminalSummary: String {
@@ -520,7 +542,10 @@ struct TerminalStrip: View {
             if defaultMismatch { return mismatchedTerminalSummary }
             if case .differentAccount = connection.localRecord { return mismatchedTerminalSummary }
         }
-        return normalIdentity ?? terminalStatus
+        if normalIdentity != nil {
+            return accountSummary(verifiedMatch ? t("cli.verified") : t("cli.saved"))
+        }
+        return terminalStatus
     }
 
     private var terminalStatus: String {
@@ -544,6 +569,7 @@ struct TerminalStrip: View {
 
     private var terminalDetail: String {
         if let verifiedIdentityDetail { return verifiedIdentityDetail }
+        if normalIdentity != nil { return t("cli.savedDetail") }
         if showsConnectionPhase { return connectionDetail ?? accountName }
         if defaultMismatch { return t("cli.recordDifferentDetail", arguments: ["account": accountName]) }
         if usageLoginRequired { return t("cli.usageLoginHelp") }
@@ -562,7 +588,7 @@ struct TerminalStrip: View {
     private var terminalBoundary: String? {
         if showsConnectionPhase {
             switch connection.phase {
-            case .matched where verifiedMatch: return t("cli.officialMatchHelp")
+            case .matched where verifiedMatch: return t("cli.verifiedMatchHelp")
             case .waitingForLogin, .mismatched, .unconfirmed: return t("cli.officialReportHelp")
             default: return nil
             }
@@ -577,11 +603,11 @@ struct TerminalStrip: View {
     }
 
     private var opensTerminalOptions: Bool {
-        showsConnectionPhase && connection.phase == .mismatched
+        (showsConnectionPhase && connection.phase == .mismatched) || defaultMismatch
     }
 
-    private func openTerminalTitle(_ choice: CLIBindingChoice, account: String) -> String {
-        t(choice == .isolated ? "cli.openNamedIsolated" : "cli.openNamedDefault", arguments: ["account": account])
+    private func openTerminalTitle(_ choice: CLIBindingChoice) -> String {
+        t(choice == .isolated ? "cli.openIsolatedDirectory" : "cli.openDefaultDirectory")
     }
 
     private var primaryDirectory: CLIBindingChoice? {
@@ -597,21 +623,29 @@ struct TerminalStrip: View {
                 return t(connection.failureTitle == "cli.routeNotVerified" ? "cli.recheckProxy" : "cli.retry")
             }
         }
-        if opensTerminalOptions { return t("cli.terminalOptions") }
-        if connection.currentBinding == nil { return t("cli.chooseDirectory") }
-        if usageLoginRequired { return t("cli.signInNamed", arguments: ["account": accountName]) }
-        if let choice = primaryDirectory { return openTerminalTitle(choice, account: accountName) }
-        return t("cli.chooseDirectory")
+        if opensTerminalOptions { return t("cli.loginOptions") }
+        if connection.currentBinding == nil { return t("cli.chooseDirectoryShort") }
+        if usageLoginRequired { return t("cli.signInShort") }
+        if primaryDirectory != nil { return t("cli.open") }
+        return t("cli.chooseDirectoryShort")
     }
 
     private var showsPrimaryAction: Bool {
         subscriptionDesktop && !connection.isBusy
     }
 
+    private var showsMoreActions: Bool {
+        subscriptionDesktop && showsConnectionPhase && connection.phase == .waitingForLogin
+    }
+
     private var primaryActionHelp: String {
         if showsConnectionPhase, connection.phase == .waitingForLogin { return t("cli.confirmLoginHelp") }
+        if showsConnectionPhase, connection.phase == .failed { return primaryTitle }
         if opensTerminalOptions { return t("cli.terminalOptionsHelp") }
-        if let choice = connection.currentBinding?.choice { return openTerminalTitle(choice, account: accountName) }
+        if usageLoginRequired { return t("cli.signInNamed", arguments: ["account": accountName]) }
+        if let choice = primaryDirectory {
+            return t("cli.openBindingHelp", arguments: ["account": accountName, "directory": directoryTitle(choice)])
+        }
         return t("cli.chooseDirectory")
     }
 
@@ -777,16 +811,14 @@ struct TerminalStrip: View {
     }
 
     var body: some View {
-        let displayedStatus = subscriptionDesktop ? terminalStatus : status
+        let displayedStatus = subscriptionDesktop ? terminalSummary : status
         let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
-        let normalIdentity = subscriptionDesktop ? self.normalIdentity : nil
-        let showsSecondaryLine = self.showsSecondaryLine
         let summary = subscriptionDesktop ? terminalSummary : accountDetail ?? status
         let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
         let title = Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
             .lineLimit(1).fixedSize(horizontal: true, vertical: false)
         let identity = Text(summary).font(.system(size: 10.5)).foregroundColor(displayedStatusColor)
-            .lineLimit(1).truncationMode(.middle)
+            .lineLimit(2).truncationMode(.middle).fixedSize(horizontal: false, vertical: true).help(summary)
         let statusInfo = Button { showHelp.toggle() } label: {
             Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
                 .frame(width: 28, height: 28)
@@ -798,22 +830,27 @@ struct TerminalStrip: View {
         .accessibilityHint(statusHelp)
         .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: summaryIcon).font(.system(size: 12, weight: .semibold)).foregroundColor(.claude)
+            Image(systemName: summaryIcon).font(.system(size: 12, weight: .semibold)).foregroundColor(.sub)
                 .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(0.1)))
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.txt.opacity(0.06)))
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     title
-                    if normalIdentity != nil && !showsPrimaryAction { identity }
                     statusInfo
                 }
                 .frame(height: 28)
-                if normalIdentity == nil {
-                    identity.frame(maxWidth: .infinity, alignment: .leading)
+                identity.frame(maxWidth: .infinity, alignment: .leading)
+                if showsMoreActions {
+                    HStack(spacing: 6) {
+                        primaryAction
+                        moreActions
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(.top, 3)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if showsPrimaryAction {
+            if showsPrimaryAction && !showsMoreActions {
                 primaryAction.padding(.top, 5)
             }
         }
@@ -914,30 +951,14 @@ struct TerminalStrip: View {
 
     private var primaryAction: some View {
         Button { runPrimaryAction() } label: {
-            VStack(spacing: 2) {
-                if let choice = primaryDirectory {
-                    ViewThatFits(in: .horizontal) {
-                        Text(t("cli.openNamed", arguments: ["account": accountName]))
-                        Text(accountName).truncationMode(.tail)
-                    }
-                    Text(t(choice == .isolated ? "cli.isolatedDirectory" : "cli.defaultDirectory"))
-                        .font(.system(size: 9)).foregroundColor(.sub)
-                } else if primaryTitle == t("cli.chooseDirectory") {
-                    ViewThatFits(in: .horizontal) {
-                        Text(primaryTitle)
-                        Text(t("cli.chooseDirectoryShort"))
-                    }
-                } else {
-                    Text(primaryTitle).truncationMode(.tail)
-                }
-            }
-            .font(.system(size: 10.5, weight: .medium)).lineLimit(1)
-            .padding(.horizontal, 7)
-            .frame(minWidth: 48).frame(height: primaryDirectory == nil ? 28 : 34)
-            .foregroundColor(.claude)
-            .background(RoundedRectangle(cornerRadius: 7)
-                .fill(Color.claude.opacity(openHover ? 0.16 : 0.08)))
-            .contentShape(Rectangle())
+            Text(primaryTitle).truncationMode(.tail)
+                .font(.system(size: 10.5, weight: .medium)).lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 48).frame(height: 28)
+                .foregroundColor(.claude)
+                .background(RoundedRectangle(cornerRadius: 7)
+                    .fill(Color.claude.opacity(openHover ? 0.16 : 0.08)))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(controlsLocked || connection.isBusy)
@@ -945,6 +966,31 @@ struct TerminalStrip: View {
         .onHover { openHover = $0 }
         .help(primaryActionHelp)
         .accessibilityLabel(primaryTitle)
+        .accessibilityHint(primaryActionHelp)
+    }
+
+    private var moreActions: some View {
+        Menu {
+            Button(t("cli.returnToAuthorizationTerminal")) {
+                connection.returnToAuthorizationTerminal()
+            }
+            .disabled(controlsLocked || connection.isBusy)
+            Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
+                .disabled(controlsLocked || connection.isBusy)
+        } label: {
+            Text(t("cli.more"))
+                .font(.system(size: 10.5, weight: .medium)).lineLimit(1)
+                .padding(.horizontal, 8)
+                .frame(minWidth: 48).frame(height: 28)
+                .foregroundColor(.txt)
+                .background(RoundedRectangle(cornerRadius: 7).fill(Color.txt.opacity(0.06)))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .disabled(controlsLocked || connection.isBusy)
+        .opacity(controlsLocked || connection.isBusy ? 0.55 : 1)
+        .help(t("cli.moreHelp"))
+        .accessibilityLabel(t("cli.more"))
     }
 
     private var helpPopover: some View {
@@ -952,36 +998,28 @@ struct TerminalStrip: View {
             if subscriptionDesktop {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(terminalSummary).font(.system(size: 11, weight: .semibold)).foregroundColor(.txt)
+                        .fixedSize(horizontal: false, vertical: true)
                     Text(terminalDetail).font(.system(size: 10.5)).foregroundColor(terminalStatusColor)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .help(terminalBoundary ?? t("cli.statusHelp"))
-                if let binding = connection.currentBinding,
-                   let identity = store.active?.snapshot?.identity,
-                   binding.identity.samePrincipal(as: identity) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(t("cli.boundDirectory"))
-                            .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
-                        Text(binding.directory.path)
-                            .font(.system(size: 10)).foregroundColor(.sub)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
                 if showsPrimaryAction {
                     primaryAction
                 }
                 if showsConnectionPhase, connection.phase == .waitingForLogin {
-                    Button(t("cli.returnToAuthorizationTerminal")) {
-                        connection.returnToAuthorizationTerminal()
+                    HStack(spacing: 12) {
+                        Button(t("cli.returnToAuthorizationTerminal")) {
+                            connection.returnToAuthorizationTerminal()
+                        }
+                        .disabled(controlsLocked || connection.isBusy)
+                        Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
+                            .disabled(controlsLocked || connection.isBusy)
                     }
-                    .disabled(controlsLocked || connection.isBusy)
                     Text(t("cli.authorizationFallbackHelp"))
                         .font(.system(size: 10)).foregroundColor(.sub)
                         .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                }
-                if !opensTerminalOptions {
-                    Button(t("cli.terminalOptions")) { runPrimaryAction(showLoginChoices: true) }
+                } else if !opensTerminalOptions {
+                    Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
                         .disabled(controlsLocked || connection.isBusy)
                 }
                 Divider().opacity(0.5)
@@ -996,6 +1034,18 @@ struct TerminalStrip: View {
                             }
                         }
                         .help(advancedHelp)
+                        if let binding = connection.currentBinding,
+                           let identity = store.active?.snapshot?.identity,
+                           binding.identity.samePrincipal(as: identity) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(t("cli.boundDirectory"))
+                                    .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
+                                Text(binding.directory.path)
+                                    .font(.system(size: 10)).foregroundColor(.sub)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                         Link(destination: URL(string: "https://claude.ai/settings/usage")!) {
                             Label(t("refresh.officialUsage"), systemImage: "arrow.up.right")
                                 .font(.system(size: 10.5)).foregroundColor(.sub)
@@ -1050,22 +1100,28 @@ struct TerminalStrip: View {
         let defaultAvailable = connection.defaultLoginAvailable
         let preferDefault = defaultAvailable && connection.preferredChoice != .isolated
         return VStack(alignment: .leading, spacing: 14) {
-            Text(t("cli.terminalOptionsFor", arguments: ["account": target.profile]))
-                .font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(t("cli.choiceTitle"))
+                    .font(.system(size: 16, weight: .semibold)).foregroundColor(.txt)
+                Text(t("cli.choiceAccount", arguments: ["account": target.profile]))
+                    .font(.system(size: 11)).foregroundColor(.sub)
+            }
             if let route = connection.routeDecision {
                 Text(AppLocalization.decision(route, language: language))
                     .font(.system(size: 10.5)).foregroundColor(.warn)
+                    .fixedSize(horizontal: false, vertical: true)
             } else if let detail = connection.detail, !detail.isEmpty {
                 Text(generated(detail)).font(.system(size: 10.5)).foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if defaultAvailable {
-                terminalOption(connection.defaultMatches ? openTerminalTitle(.defaultLogin, account: target.profile)
+                terminalOption(connection.defaultMatches ? openTerminalTitle(.defaultLogin)
                                : t("cli.defaultLoginAction"), choice: .defaultLogin, target: target, prominent: preferDefault)
             } else if connection.detail == nil {
                 Text(t("cli.defaultUnavailable")).font(.system(size: 11)).foregroundColor(.sub)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            terminalOption(openTerminalTitle(.isolated, account: target.profile),
+            terminalOption(openTerminalTitle(.isolated),
                            choice: .isolated, target: target, prominent: !preferDefault)
             HStack(spacing: 10) {
                 if restoreAvailable {
