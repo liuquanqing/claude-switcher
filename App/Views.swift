@@ -218,7 +218,21 @@ struct Header: View {
     }
 
 
+    /// A tiny caption under the terminal icon names which login the terminal uses.
+    private var terminalCaption: (text: String, color: Color)? {
+        guard subscriptionDesktop else { return nil }
+        if let choice = connection.currentBinding?.choice ?? connection.preferredChoice {
+            return (appText(choice == .isolated ? "cli.badgeIsolated" : "cli.badgeDefault", language: language), .sub.opacity(0.85))
+        }
+        if connection.phase == .waitingForLogin { return (appText("cli.badgeWaiting", language: language), .warn) }
+        if connection.localRecord == .notPrepared || connection.localRecord == .differentAccount {
+            return (appText("cli.metaUnset", language: language), .warn)
+        }
+        return nil
+    }
+
     private var terminalControl: some View {
+        VStack(spacing: 1) {
         Button { Task { await store.openTerminalFromHeader() } } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: "terminal").font(.system(size: 13, weight: .medium))
@@ -241,6 +255,13 @@ struct Header: View {
         .help(terminalHelp)
         .accessibilityLabel(appText("cli.openTerminal", language: language))
         .accessibilityHint(terminalHelp)
+            if let terminalCaption {
+                Text(terminalCaption.text).font(.system(size: 9, weight: .medium)).foregroundColor(terminalCaption.color)
+                    .lineLimit(1).fixedSize()
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(width: 36)
     }
 
     private var desktopHelp: String {

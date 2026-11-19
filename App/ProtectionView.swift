@@ -743,17 +743,15 @@ struct TerminalProtectionCard: View {
                     .foregroundColor(tone).frame(width: 14)
                 Text(guardTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(tone)
                     .lineLimit(1).fixedSize()
-                if controller.desktopScope == .subscription, !controller.working {
-                    Text("· " + t(store.claudeRunning ? "desktop.runningTiny" : "desktop.stoppedShort"))
-                        .font(.system(size: 11.5)).foregroundColor(.sub).lineLimit(1).fixedSize()
-                }
-                if let exit, statusColor == .good {
-                    Text("· " + exit).font(.system(size: 11.5)).foregroundColor(.sub).lineLimit(1)
-                } else if statusColor != .good, !guardReason.isEmpty {
-                    Text("· " + guardReason).font(.system(size: 11.5)).foregroundColor(.sub)
+                if statusColor != .good, !guardReason.isEmpty {
+                    Text(guardReason).font(.system(size: 11)).foregroundColor(.sub)
                         .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                        .padding(.leading, 2)
                 }
                 Spacer(minLength: 6)
+                if statusColor == .good, let exit {
+                    exitTag(exit)
+                }
                 if let action = guardAction {
                     Button(action: action.run) {
                         HStack(spacing: 5) {
@@ -788,6 +786,20 @@ struct TerminalProtectionCard: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel(t("protection.statusAccessibility", arguments: ["title": guardTitle, "detail": guardReason]))
         }
+    }
+
+    /// The exit is a fact about the route, shown as a small tag rather than another "·" clause.
+    private func exitTag(_ country: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.right.circle").font(.system(size: 10, weight: .medium))
+            Text(country).font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+        }
+        .foregroundColor(.sub)
+        .padding(.horizontal, 7).frame(height: 20)
+        .background(Capsule().fill(Color.white.opacity(0.05)))
+        .overlay(Capsule().stroke(Color.stroke, lineWidth: 1))
+        .help(t("protection.observedExit", arguments: ["country": country]))
+        .accessibilityLabel(t("protection.observedExit", arguments: ["country": country]))
     }
 
     private var guardTitle: String {
