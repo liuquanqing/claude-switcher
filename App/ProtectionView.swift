@@ -119,6 +119,10 @@ struct TerminalProtectionCard: View {
         guard let report = controller.lastCheckReport, let observation = report.observation else {
             return NetworkItem(title: t("protection.exitCountry"), value: t("protection.notRun"), status: .notRun)
         }
+        if offerDesktopProtection {
+            return NetworkItem(title: t("protection.exitCountry"), value: t("protection.desktopUnverified"), status: .unknown,
+                               help: t("protection.takeoverHelp"))
+        }
         if observation.routesDisagree {
             return NetworkItem(title: t("protection.exitCountry"), value: t("protection.routesDisagree"), status: .failed,
                                help: t("protection.routesHelp"))
@@ -252,18 +256,16 @@ struct TerminalProtectionCard: View {
     }
 
     private func networkCell(_ item: NetworkItem) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(item.title).font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub)
-            HStack(spacing: 4) {
-                Image(systemName: item.status.icon).font(.system(size: 10))
-                Text(item.value).font(.system(size: 11, weight: .semibold))
-                    .lineLimit(1).minimumScaleFactor(0.8)
-            }
-            .foregroundColor(item.status.color)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(item.title).font(.system(size: 9.5, weight: .medium)).foregroundColor(.sub.opacity(0.85))
+                .lineLimit(1).minimumScaleFactor(0.8)
+            Text(item.value).font(.system(size: 12, weight: .semibold))
+                .foregroundColor(item.status.color)
+                .lineLimit(1).minimumScaleFactor(0.8)
         }
-        .padding(.horizontal, 8).padding(.vertical, 5)
+        .padding(.horizontal, 10).padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(Color.card))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.16)))
         .help(item.help ?? "")
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(item.title): \(item.value), \(item.status.spoken(language))")
@@ -698,24 +700,7 @@ struct TerminalProtectionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 0) {
-                TerminalStrip(store: store, showsSecondaryLine: $terminalShowsSecondaryLine)
-                    .overlay(alignment: .bottom) {
-                        if showSettings { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
-                    }
-                Rectangle().fill(Color.stroke.opacity(0.55)).frame(width: 1)
-                    .padding(.vertical, showSettings ? 0 : 10)
-                VStack(alignment: .leading, spacing: 0) {
-                    protectionHeader
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 4).padding(.vertical, 4)
-                .frame(width: language == "en" ? 184 : 164)
-                .frame(maxHeight: .infinity)
-                .background(showSettings ? panelTint : Color.clear)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-
+            guardLine
             if showSettings {
                 settings.background(panelTint)
             } else if hasNotices {
@@ -724,9 +709,8 @@ struct TerminalProtectionCard: View {
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            TerminalStrip(store: store)
         }
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
         .onChange(of: controller.lastCheckReport?.checkedAt) { _ in
             if controller.lastCheckReport?.origin == .manualInput {
                 resultsExpanded = true
@@ -746,6 +730,92 @@ struct TerminalProtectionCard: View {
         } message: {
             Text(t("protection.takeoverBody"))
         }
+    }
+
+    /// V5: one line shared by desktop and terminal. Normal states are quiet; a problem tints the
+    /// left edge, names the reason and offers the matching next step. Details fold underneath.
+    private var guardLine: some View {
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            let exit = freshNetworkExit(now: context.date)?.country
+            let tone: Color = statusColor == .good ? .good : statusColor == .bad ? .bad : statusColor == .warn ? .warn : .sub
+            HStack(spacing: 8) {
+                Image(systemName: statusIcon).font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(tone).frame(width: 14)
+                Text(guardTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(tone)
+                    .lineLimit(1).fixedSize()
+                if let exit, statusColor == .good {
+                    Text("· " + exit).font(.system(size: 11.5)).foregroundColor(.sub).lineLimit(1)
+                } else if statusColor != .good, !guardReason.isEmpty {
+                    Text("· " + guardReason).font(.system(size: 11.5)).foregroundColor(.sub)
+                        .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                }
+                Spacer(minLength: 6)
+                if let action = guardAction {
+                    Button(action: action.run) {
+                        HStack(spacing: 5) {
+                            if controller.working { ProgressView().controlSize(.mini) }
+                            Text(action.title).font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+                        }
+                        .foregroundColor(.txt).padding(.horizontal, 10).frame(height: 24)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(operationLocked || controller.working)
+                    .opacity(operationLocked || controller.working ? 0.5 : 1)
+                    .help(action.help)
+                    .accessibilityLabel(action.title)
+                } else if let checkedAt = latestGuardCheck {
+                    Text(AppLocalization.date(checkedAt, language: language, timeStyle: .short))
+                        .font(.system(size: 10.5)).foregroundColor(.sub.opacity(0.8)).lineLimit(1).fixedSize()
+                }
+                settingsToggleButton
+            }
+            .padding(.leading, 14).padding(.trailing, 6).padding(.vertical, 5)
+            .frame(height: 36)
+            .background(alignment: .leading) {
+                if statusColor == .warn || statusColor == .bad {
+                    LinearGradient(colors: [tone.opacity(0.1), .clear], startPoint: .leading, endPoint: .trailing)
+                }
+            }
+            .overlay(alignment: .top) { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
+            .help(networkSummary(now: context.date) + "\n" + desktopScopeHelp)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(t("protection.statusAccessibility", arguments: ["title": guardTitle, "detail": guardReason]))
+        }
+    }
+
+    private var guardTitle: String {
+        if controller.desktopScope != .subscription { return statusTitle }
+        if controller.working { return statusTitle }
+        if offerDesktopProtection { return t("guard.unmanagedShort") }
+        if !controller.enabled { return t("guard.pausedShort") }
+        if !controller.lastDecision.allowed { return statusTitle }
+        if !store.claudeRunning { return t("guard.readyShort") }
+        return statusTitle
+    }
+
+    private var guardReason: String {
+        if offerDesktopProtection { return t("protection.takeoverHint") }
+        if !controller.enabled { return t("protection.disabled") }
+        if controller.enabled, !controller.guardOnline { return t("protection.unconfirmedStatus") }
+        if !controller.lastDecision.allowed { return failureText(controller.lastDecision) }
+        return ""
+    }
+
+    private var latestGuardCheck: Date? {
+        if let report = controller.lastCheckReport, report.passed { return report.checkedAt }
+        return controller.guardCheckedAt
+    }
+
+    private var guardAction: (title: String, help: String, run: () -> Void)? {
+        guard controller.desktopScope == .subscription, !controller.working else { return nil }
+        if needsRetry { return (t("protection.retry"), t("protection.retryHelp"), { runProtectionAction() }) }
+        if offerDesktopProtection { return (t("guard.takeover"), t("protection.takeoverHelp"), { confirmProtectCurrentDesktop = true }) }
+        if !controller.enabled { return (t("guard.resume"), t("protection.primaryHelp"), { runProtectionAction() }) }
+        if !controller.lastDecision.allowed { return (t("guard.recheck"), t("protection.checkOnlyHelp"), { runDiagnostic() }) }
+        return nil
     }
 
     /// The original task layout is clearer: results and refresh on the left, protection action on the right.
@@ -867,9 +937,53 @@ struct TerminalProtectionCard: View {
             if hasNotices {
                 VStack(alignment: .leading, spacing: 8) { notices }
             }
-            diagnosticRow
-                .help(scopeHelp)
-            diagnosticDetails
+            HStack(spacing: 6) {
+                ForEach(networkItems, id: \.title) { networkCell($0) }
+            }
+            .opacity(resultStale && !controller.checking ? 0.45 : 1)
+            .help(scopeHelp)
+            if let note = reportContextNote {
+                Text(note).font(.system(size: 9.5)).foregroundColor(.warn)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Button(action: runDiagnostic) {
+                    HStack(spacing: 5) {
+                        if controller.checking { ProgressView().controlSize(.mini) }
+                        else { Image(systemName: "arrow.clockwise").font(.system(size: 10, weight: .semibold)) }
+                        Text(controller.checking ? t("common.checking") : t("protection.recheck"))
+                            .font(.system(size: 10.5, weight: .semibold)).lineLimit(1)
+                    }
+                    .foregroundColor(.txt).padding(.horizontal, 10).frame(height: 26)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.stroke, lineWidth: 1))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(diagnosticLocked)
+                .opacity(diagnosticLocked ? 0.5 : 1)
+                .help(t("protection.checkOnlyHelp"))
+                .accessibilityLabel(t("protection.recheck"))
+                Link(destination: URL(string: "https://ip.net.coffee/claude/")!) {
+                    Text("IP / WebRTC ↗").font(.system(size: 10)).foregroundColor(.sub)
+                        .frame(height: 26).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(t("protection.webCheckHelp"))
+                Spacer(minLength: 0)
+                if controller.enabled, controller.desktopScope == .subscription {
+                    Button { controller.disable() } label: {
+                        Text(t("protection.pauseShort")).font(.system(size: 10.5, weight: .medium))
+                            .foregroundColor(.bad).padding(.horizontal, 9).frame(height: 26)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.04)))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(operationLocked || controller.working)
+                    .opacity(operationLocked || controller.working ? 0.5 : 1)
+                    .help(t("protection.primaryHelp"))
+                }
+            }
             Divider().opacity(0.45)
             HStack(alignment: .center, spacing: 10) {
                 HStack(spacing: 6) {

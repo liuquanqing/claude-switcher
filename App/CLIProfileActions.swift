@@ -2,6 +2,14 @@ import AppKit
 import SwitcherCore
 
 @MainActor extension Store {
+    /// The header's terminal icon: open the bound terminal, or show the directory choice for an
+    /// unbound account. All gating stays in the connection controller.
+    func openTerminalFromHeader() async {
+        guard protection.desktopScope == .subscription, !updating, busy == nil else { return }
+        guard await prepareTerminalIdentity() else { return }
+        await cliConnection.open(showLoginChoices: cliConnection.currentBinding == nil)
+    }
+
     @discardableResult
     func copyScopedCLICommand() -> Bool {
         guard busy == nil, !refreshing, !statusRefreshInProgress,

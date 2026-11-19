@@ -5,6 +5,12 @@ import SwitcherCore
 /// Bounds only this newly spawned helper. Never captures raw output in persistent logs.
 enum BoundedCLICommand {
     struct Output: Sendable { let status: Int32; let text: String; let timedOut: Bool }
+    private static let ownLock = NSLock()
+    private static var own: Set<Int32> = []
+    /// Helpers this app spawned (status, renewal, usage). They are not user terminals.
+    static func ownProcessIDs() -> Set<Int32> { ownLock.lock(); defer { ownLock.unlock() }; return own }
+    private static func track(_ pid: Int32) { ownLock.lock(); own.insert(pid); ownLock.unlock() }
+    private static func untrack(_ pid: Int32) { ownLock.lock(); own.remove(pid); ownLock.unlock() }
     static func run(home: URL, executable: URL, arguments: [String], inherited: [String: String],
                                 timeoutSeconds: TimeInterval, graceSeconds: TimeInterval, combineStderr: Bool = true,
                                 input: Data? = nil) async throws -> Output {
@@ -46,6 +52,7 @@ enum BoundedCLICommand {
                 let forceStop = DispatchWorkItem { if process.isRunning { kill(process.processIdentifier, SIGKILL) } }
                 process.terminationHandler = { child in
                     terminate.cancel(); forceStop.cancel(); child.terminationHandler = nil
+                    untrack(child.processIdentifier)
                     queue.async {
                         capture.drain(fd); source.cancel()
                         let result = Output(status: child.terminationStatus, text: capture.text,
@@ -55,6 +62,7 @@ enum BoundedCLICommand {
                 }
                 do {
                     try process.run()
+                    track(process.processIdentifier)
                     try? output.fileHandleForWriting.close()
                     DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds, execute: terminate)
                     DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds + graceSeconds, execute: forceStop)

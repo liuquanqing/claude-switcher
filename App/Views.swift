@@ -130,6 +130,13 @@ struct Header: View {
     let openClaude: () -> Void
     @State private var openHover = false
     @State private var showAbout = false
+    @State private var terminalHover = false
+    @ObservedObject private var connection: CLIConnectionController
+
+    init(store: Store, protection: ProtectionController, openClaude: @escaping () -> Void) {
+        self.store = store; self.protection = protection; self.openClaude = openClaude
+        self.connection = store.cliConnection
+    }
 
     private var appIcon: NSImage? {
         guard let url = Bundle.main.resourceURL?.appendingPathComponent("AppIcon.png") else { return nil }
@@ -158,8 +165,67 @@ struct Header: View {
     private var running: Bool { store.claudeRunning }
     private var controlLocked: Bool { store.busy != nil || store.statusRefreshInProgress || protection.working }
 
-    private var actionTitle: String { appText(running ? "desktop.show" : "desktop.open", language: language) }
+    private var actionTitle: String { appText(running ? "desktop.show" : "desktop.openClaude", language: language) }
     private var actionIcon: String { running ? "macwindow" : "play.fill" }
+
+    /// The route gate refused the last desktop launch: the main control says why instead of looking idle.
+    private var launchBlocked: Bool {
+        subscriptionDesktop && !running && !controlLocked && !protection.lastDecision.allowed
+            && protection.lastDecision.reason != .disabled && protection.lastCheckReport?.origin == .operation
+    }
+
+    private var terminalDirectoryLabel: String? {
+        guard subscriptionDesktop else { return nil }
+        if let choice = connection.currentBinding?.choice ?? connection.preferredChoice {
+            return appText(choice == .isolated ? "cli.isolatedDirectory" : "cli.defaultDirectory", language: language)
+        }
+        switch connection.localRecord {
+        case .notPrepared: return appText("cli.metaUnset", language: language)
+        case .differentAccount, .unconfirmed: return nil
+        case .sameAccount: return nil
+        }
+    }
+
+    private var terminalNeedsAttention: Bool {
+        guard subscriptionDesktop else { return false }
+        switch connection.phase {
+        case .waitingForLogin, .mismatched, .failed: return true
+        default: return connection.localRecord == .differentAccount
+        }
+    }
+
+    private var terminalHelp: String {
+        let account = store.current
+        if let directory = terminalDirectoryLabel {
+            return appText("cli.openBindingHelp", language: language, arguments: ["account": account, "directory": directory])
+        }
+        return appText("cli.openTerminalHelp", language: language, arguments: ["account": account])
+    }
+
+    private var terminalControl: some View {
+        Button { Task { await store.openTerminalFromHeader() } } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: "terminal").font(.system(size: 13, weight: .medium))
+                    .foregroundColor(terminalHover ? .txt : .sub)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(terminalHover ? 0.07 : 0)))
+                if terminalNeedsAttention {
+                    Circle().fill(connection.phase == .failed ? Color.bad : Color.warn).frame(width: 7, height: 7)
+                        .overlay(Circle().stroke(Color.card, lineWidth: 2))
+                        .offset(x: -4, y: 4)
+                }
+            }
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(controlLocked || connection.isBusy)
+        .opacity(controlLocked || connection.isBusy ? 0.45 : 1)
+        .onHover { terminalHover = $0 }
+        .help(terminalHelp)
+        .accessibilityLabel(appText("cli.openTerminal", language: language))
+        .accessibilityHint(terminalHelp)
+    }
 
     private var desktopHelp: String {
         var lines: [String]
@@ -179,34 +245,46 @@ struct Header: View {
     private var desktopControl: some View {
         Button(action: openClaude) {
             HStack(spacing: 0) {
-                HStack(spacing: 5) {
-                    Circle().fill(running ? Color.good : Color.sub.opacity(0.7)).frame(width: 6, height: 6)
-                    Text(appText(running ? "desktop.runningShort" : "desktop.stopped", language: language))
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundColor(running ? .txt : .sub)
+                if launchBlocked {
+                    Text(appText("desktop.blockedShort", language: language))
+                        .font(.system(size: 11, weight: .semibold)).foregroundColor(.sub).lineLimit(1).fixedSize()
+                        .padding(.horizontal, 12)
+                } else if running {
+                    HStack(spacing: 5) {
+                        Circle().fill(Color.good).frame(width: 6, height: 6)
+                            .overlay(Circle().stroke(Color.good.opacity(0.18), lineWidth: 3))
+                        Text(appText("desktop.runningTiny", language: language))
+                            .font(.system(size: 11, weight: .medium)).foregroundColor(.txt)
+                            .lineLimit(1).fixedSize()
+                    }
+                    .padding(.leading, 11).padding(.trailing, 9)
+                    Rectangle().fill(Color.claude.opacity(0.28)).frame(width: 1, height: 14)
+                    Text(actionTitle).font(.system(size: 11.5, weight: .semibold)).foregroundColor(.claude)
                         .lineLimit(1).fixedSize()
+                        .padding(.leading, 9).padding(.trailing, 12)
+                } else {
+                    HStack(spacing: 6) {
+                        Image(systemName: actionIcon).font(.system(size: 8.5, weight: .bold))
+                        Text(actionTitle).font(.system(size: 12, weight: .semibold)).lineLimit(1).fixedSize()
+                    }
+                    .foregroundColor(.claude)
+                    .padding(.horizontal, 13)
                 }
-                .padding(.leading, 10).padding(.trailing, 9)
-                Rectangle().fill(Color.claude.opacity(0.28)).frame(width: 1, height: 16)
-                HStack(spacing: 5) {
-                    Image(systemName: actionIcon).font(.system(size: running ? 9.5 : 8, weight: .bold))
-                    Text(actionTitle).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
-                }
-                .foregroundColor(.claude)
-                .padding(.leading, 9).padding(.trailing, 11)
             }
-            .frame(height: 30)
-            .background(RoundedRectangle(cornerRadius: 8).fill(Color.claude.opacity(openHover ? 0.2 : 0.1)))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.claude.opacity(0.26), lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 9)
+                .fill(launchBlocked ? Color.white.opacity(0.04) : Color.claude.opacity(openHover ? 0.22 : 0.13)))
+            .overlay(RoundedRectangle(cornerRadius: 9)
+                .stroke(launchBlocked ? Color.stroke : Color.claude.opacity(0.4), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 9))
         }
         .buttonStyle(.plain)
-        .disabled(controlLocked)
+        .disabled(controlLocked || launchBlocked)
         .opacity(controlLocked ? 0.45 : 1)
-        .help(desktopHelp)
+        .help(launchBlocked ? AppLocalization.decision(protection.lastDecision, language: language) : desktopHelp)
         .onHover { openHover = $0 }
         .accessibilityLabel(appText("desktop.accessibility", language: language, arguments: [
-            "state": appText(running ? "desktop.runningShort" : "desktop.stopped", language: language),
+            "state": appText(running ? "desktop.runningTiny" : "desktop.stopped", language: language),
             "action": actionTitle
         ]))
         .accessibilityHint(desktopHelp)
@@ -323,13 +401,26 @@ struct Header: View {
             VStack(alignment: .leading, spacing: 3) {
                 if subscriptionDesktop {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
-                        Text(appText("account.current", language: language)).font(.system(size: 10, weight: .medium)).foregroundColor(.claude)
-                            .fixedSize()
+                        Text(store.current).font(.system(size: 19, weight: .bold)).foregroundColor(.txt)
+                            .lineLimit(1).truncationMode(.tail).help(store.current).layoutPriority(-1)
+                        if let plan = s?.plan {
+                            Text(plan).font(.system(size: 9.5, weight: .semibold))
+                                .padding(.horizontal, 5).padding(.vertical, 2).fixedSize()
+                                .foregroundColor(.sub)
+                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
+                        }
                     }
-                    Text([accountLine(a, language: language), s?.plan]
-                        .compactMap { $0 }.joined(separator: "  ·  "))
-                        .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
+                    HStack(spacing: 5) {
+                        Text(accountLine(a, language: language) ?? "")
+                            .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).truncationMode(.middle)
+                            .layoutPriority(1)
+                        if let terminalDirectoryLabel {
+                            // The directory type is the fact worth keeping in a narrow window; the email yields first.
+                            Text("· " + appText("cli.metaPrefix", language: language) + " " + terminalDirectoryLabel)
+                                .font(.system(size: 10.5)).foregroundColor(.sub).lineLimit(1).fixedSize()
+                                .layoutPriority(2)
+                        }
+                    }
                 } else {
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         Text(modeTitle).font(.system(size: 19, weight: .bold)).foregroundColor(.txt).lineLimit(1)
@@ -346,10 +437,11 @@ struct Header: View {
                 }
             }
             Spacer(minLength: 8)
-            if subscriptionDesktop { desktopControl } else { managerControl }
+            if subscriptionDesktop {
+                HStack(spacing: 6) { terminalControl; desktopControl }
+            } else { managerControl }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
+        .padding(.horizontal, 14).padding(.vertical, 12)
     }
 }
 
@@ -810,57 +902,57 @@ struct TerminalStrip: View {
         }
     }
 
+    /// V5: the terminal is a header icon; only states that need the user get a row here.
+    /// Unset / occupied directories are handled by the icon's sheet, not a standing row.
+    /// "Later" hides the row until the state changes or the terminal is opened again.
+    @State private var rowDismissedFor: String?
+    private var rowStateKey: String {
+        "\(connection.expectedProfile)|\(connection.phase)|\(connection.failureTitle ?? "")|\(connection.checkedAt?.timeIntervalSince1970 ?? 0)"
+    }
+    private var needsRow: Bool {
+        guard subscriptionDesktop else { return false }
+        guard rowDismissedFor != rowStateKey else { return false }
+        switch connection.phase {
+        case .waitingForLogin, .mismatched, .failed: return true
+        default: return connection.localRecord == .differentAccount
+        }
+    }
+
+    private var rowTitle: String {
+        switch connection.phase {
+        case .waitingForLogin: return t("cli.rowWaiting")
+        case .mismatched: return t("cli.rowMismatch")
+        case .failed: return t(connection.failureTitle ?? "cli.rowFailed")
+        default: return t("cli.rowMismatch")
+        }
+    }
+    private var rowTone: Color {
+        switch connection.phase {
+        case .failed: return .bad
+        case .waitingForLogin, .mismatched: return .warn
+        default: return .warn
+        }
+    }
+    private var rowSubtitle: String? {
+        if connection.phase == .waitingForLogin, let choice = connection.currentBinding?.choice { return directoryTitle(choice) }
+        if connection.phase == .failed || connection.phase == .mismatched { return connection.detail.map(generated) }
+        return nil
+    }
+    private var rowActionTitle: String {
+        switch connection.phase {
+        case .waitingForLogin: return t("cli.rowDone")
+        case .failed: return t(connection.failureTitle == "cli.routeNotVerified" ? "cli.recheckProxy" : "cli.retry")
+        default: return t("cli.loginOptions")
+        }
+    }
+    private var rowActionProminent: Bool { connection.phase == .waitingForLogin }
+
     var body: some View {
-        let displayedStatus = subscriptionDesktop ? terminalSummary : status
-        let displayedStatusColor = subscriptionDesktop ? terminalStatusColor : statusColor
-        let summary = subscriptionDesktop ? terminalSummary : accountDetail ?? status
-        let statusHelp = t(subscriptionDesktop ? "cli.statusHelp" : "cli.defaultStatusHelp")
-        let title = Text(summaryTitle).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
-            .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-        let identity = Text(summary).font(.system(size: 10.5)).foregroundColor(displayedStatusColor)
-            .lineLimit(2).truncationMode(.middle).fixedSize(horizontal: false, vertical: true).help(summary)
-        let statusInfo = Button { showHelp.toggle() } label: {
-            Image(systemName: "info.circle").font(.system(size: 11)).foregroundColor(.sub)
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
+        VStack(alignment: .leading, spacing: 0) {
+            if needsRow { terminalRow }
         }
-        .buttonStyle(.plain)
-        .help(statusHelp)
-        .accessibilityLabel("\(t("cli.statusAccessibility")): \(displayedStatus)")
-        .accessibilityHint(statusHelp)
-        .popover(isPresented: $showHelp, arrowEdge: .bottom) { helpPopover }
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: summaryIcon).font(.system(size: 12, weight: .semibold)).foregroundColor(.sub)
-                .frame(width: 28, height: 28)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.txt.opacity(0.06)))
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    title
-                    statusInfo
-                }
-                .frame(height: 28)
-                identity.frame(maxWidth: .infinity, alignment: .leading)
-                if showsMoreActions {
-                    HStack(spacing: 6) {
-                        primaryAction
-                        moreActions
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                    .padding(.top, 3)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if showsPrimaryAction && !showsMoreActions {
-                primaryAction.padding(.top, 5)
-            }
-        }
-        .padding(.leading, 12).padding(.trailing, 10).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .onAppear {
-            reportsSecondaryLine = showsSecondaryLine
-            connection.contextDidChange()
-        }
-        .onChange(of: showsSecondaryLine) { reportsSecondaryLine = $0 }
+        .onAppear { connection.contextDidChange() }
         .onChange(of: store.current) { _ in
             officialReportActive = false
             showHelp = false
@@ -969,28 +1061,72 @@ struct TerminalStrip: View {
         .accessibilityHint(primaryActionHelp)
     }
 
-    private var moreActions: some View {
-        Menu {
-            Button(t("cli.returnToAuthorizationTerminal")) {
-                connection.returnToAuthorizationTerminal()
+    private var terminalRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal").font(.system(size: 11, weight: .medium)).foregroundColor(.sub)
+                Text(rowTitle).font(.system(size: 11.5, weight: .semibold)).foregroundColor(rowTone)
+                    .lineLimit(1).truncationMode(.tail).layoutPriority(1)
+                    .help(rowTitle)
+                if let rowSubtitle, connection.phase != .waitingForLogin {
+                    Text(rowSubtitle).font(.system(size: 10.5)).foregroundColor(.sub)
+                        .lineLimit(1).truncationMode(.middle).layoutPriority(-1)
+                }
+                Spacer(minLength: 6)
+                if connection.isBusy {
+                    HStack(spacing: 5) {
+                        ProgressView().controlSize(.mini)
+                        Text(t("cli.rowVerifying")).font(.system(size: 10.5, weight: .medium)).foregroundColor(.sub)
+                    }
+                    .frame(height: 26)
+                } else {
+                    Button { runPrimaryAction(showLoginChoices: connection.phase == .mismatched || connection.localRecord == .differentAccount) } label: {
+                        Text(rowActionTitle).font(.system(size: 10.5, weight: .semibold)).lineLimit(1).fixedSize()
+                            .padding(.horizontal, 11).frame(height: 26)
+                            .foregroundColor(rowActionProminent ? .claude : .txt)
+                            .background(RoundedRectangle(cornerRadius: 7)
+                                .fill(rowActionProminent ? Color.claude.opacity(0.12) : Color.white.opacity(0.05)))
+                            .overlay(RoundedRectangle(cornerRadius: 7)
+                                .stroke(rowActionProminent ? Color.claude.opacity(0.3) : Color.stroke, lineWidth: 1))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(controlsLocked)
+                    .opacity(controlsLocked ? 0.5 : 1)
+                    .help(primaryActionHelp)
+                    .accessibilityLabel(rowActionTitle)
+                }
             }
-            .disabled(controlsLocked || connection.isBusy)
-            Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
-                .disabled(controlsLocked || connection.isBusy)
-        } label: {
-            Text(t("cli.more"))
-                .font(.system(size: 10.5, weight: .medium)).lineLimit(1)
-                .padding(.horizontal, 8)
-                .frame(minWidth: 48).frame(height: 28)
-                .foregroundColor(.txt)
-                .background(RoundedRectangle(cornerRadius: 7).fill(Color.txt.opacity(0.06)))
+            if connection.phase == .waitingForLogin {
+                Text(t("cli.rowHint")).font(.system(size: 10.5)).foregroundColor(.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 6) {
+                    drawerChip(t("cli.returnToAuthorizationTerminal")) { connection.returnToAuthorizationTerminal() }
+                    drawerChip(t("cli.relogin")) { runPrimaryAction(showLoginChoices: true) }
+                    drawerChip(t("cli.changeDirectory")) { connection.resetChoice() }
+                    Spacer(minLength: 0)
+                    Button(t("cli.rowLater")) { rowDismissedFor = rowStateKey }
+                        .buttonStyle(.plain).font(.system(size: 10)).foregroundColor(.sub)
+                        .help(t("cli.rowLaterHelp"))
+                }
+            }
+            if showHelp { advancedDetails }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Rectangle().fill(Color.stroke.opacity(0.4)).frame(height: 1) }
+    }
+
+    private func drawerChip(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                .padding(.horizontal, 9).frame(height: 24).foregroundColor(.txt)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.white.opacity(0.05)))
                 .contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
+        .buttonStyle(.plain)
         .disabled(controlsLocked || connection.isBusy)
-        .opacity(controlsLocked || connection.isBusy ? 0.55 : 1)
-        .help(t("cli.moreHelp"))
-        .accessibilityLabel(t("cli.more"))
+        .opacity(controlsLocked || connection.isBusy ? 0.5 : 1)
     }
 
     private var helpPopover: some View {
@@ -1007,23 +1143,35 @@ struct TerminalStrip: View {
                     primaryAction
                 }
                 if showsConnectionPhase, connection.phase == .waitingForLogin {
-                    HStack(spacing: 12) {
-                        Button(t("cli.returnToAuthorizationTerminal")) {
-                            connection.returnToAuthorizationTerminal()
-                        }
-                        .disabled(controlsLocked || connection.isBusy)
-                        Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
-                            .disabled(controlsLocked || connection.isBusy)
+                    HStack(spacing: 6) {
+                        drawerChip(t("cli.returnToAuthorizationTerminal")) { connection.returnToAuthorizationTerminal() }
+                        drawerChip(t("cli.relogin")) { runPrimaryAction(showLoginChoices: true) }
                     }
                     Text(t("cli.authorizationFallbackHelp"))
                         .font(.system(size: 10)).foregroundColor(.sub)
                         .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
                 } else if !opensTerminalOptions {
-                    Button(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
-                        .disabled(controlsLocked || connection.isBusy)
+                    drawerChip(t("cli.loginOptions")) { runPrimaryAction(showLoginChoices: true) }
                 }
                 Divider().opacity(0.5)
-                DisclosureGroup(t("cli.advanced")) {
+                advancedDetails
+            } else {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(status).font(.system(size: 11, weight: .semibold)).foregroundColor(statusColor)
+                    if store.cliStatus != .otherAuthentication {
+                        Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Text(observedLine).font(.system(size: 10)).foregroundColor(.sub)
+                    Text(t("cli.defaultObservationHelp")).font(.system(size: 10)).foregroundColor(.sub)
+                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .frame(width: subscriptionDesktop ? 320 : 256, alignment: .leading).padding(12)
+    }
+
+    private var advancedDetails: some View {
                     VStack(alignment: .leading, spacing: 8) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(t("cli.defaultStatus")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
@@ -1072,23 +1220,8 @@ struct TerminalStrip: View {
                             .onHover { copyHover = $0 }
                         }
                     }
-                    .padding(.top, 8)
-                }
-                .font(.system(size: 10.5, weight: .semibold)).foregroundColor(.txt)
-            } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(status).font(.system(size: 11, weight: .semibold)).foregroundColor(statusColor)
-                    if store.cliStatus != .otherAuthentication {
-                        Text(detail).font(.system(size: 10.5)).foregroundColor(.sub)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    Text(observedLine).font(.system(size: 10)).foregroundColor(.sub)
-                    Text(t("cli.defaultObservationHelp")).font(.system(size: 10)).foregroundColor(.sub)
-                        .lineSpacing(2).fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
-        .frame(width: subscriptionDesktop ? 320 : 256, alignment: .leading).padding(12)
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.16)))
     }
 
     private func choiceActionsDisabled(for target: ChoiceTarget) -> Bool {
@@ -1099,6 +1232,9 @@ struct TerminalStrip: View {
         let restoreAvailable = connection.phase == .choosing && connection.legacyBackupAvailable
         let defaultAvailable = connection.defaultLoginAvailable
         let preferDefault = defaultAvailable && connection.preferredChoice != .isolated
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let defaultPath = (try? CLIBinding.directory(for: .defaultLogin, identity: target.identity, home: home))?.path
+        let isolatedPath = (try? operations_isolatedPath(target.identity, home: home))
         return VStack(alignment: .leading, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(t("cli.choiceTitle"))
@@ -1116,13 +1252,14 @@ struct TerminalStrip: View {
             }
             if defaultAvailable {
                 terminalOption(connection.defaultMatches ? openTerminalTitle(.defaultLogin)
-                               : t("cli.defaultLoginAction"), choice: .defaultLogin, target: target, prominent: preferDefault)
+                               : t("cli.defaultLoginAction"), choice: .defaultLogin, target: target, prominent: preferDefault,
+                               path: defaultPath)
             } else if connection.detail == nil {
                 Text(t("cli.defaultUnavailable")).font(.system(size: 11)).foregroundColor(.sub)
                     .fixedSize(horizontal: false, vertical: true)
             }
             terminalOption(openTerminalTitle(.isolated),
-                           choice: .isolated, target: target, prominent: !preferDefault)
+                           choice: .isolated, target: target, prominent: !preferDefault, path: isolatedPath)
             HStack(spacing: 10) {
                 if restoreAvailable {
                     Button(t("cli.restoreBackupAction")) {
@@ -1155,16 +1292,42 @@ struct TerminalStrip: View {
         }
     }
 
+    private func operations_isolatedPath(_ identity: CLIIdentity, home: URL) throws -> String {
+        if let binding = connection.currentBinding, binding.choice == .isolated { return binding.directory.path }
+        return try CLIBinding.directory(for: .isolated, identity: identity, home: home).path
+    }
+
     @ViewBuilder private func terminalOption(_ title: String, choice: CLIBindingChoice,
-                                             target: ChoiceTarget, prominent: Bool) -> some View {
-        let action = Button(title) { chooseAndOpen(choice, target: target) }
-            .frame(maxWidth: .infinity)
-            .disabled(choiceActionsDisabled(for: target))
-        if prominent {
-            action.buttonStyle(.borderedProminent).tint(.claude).keyboardShortcut(.defaultAction)
-        } else {
-            action.buttonStyle(.bordered)
+                                             target: ChoiceTarget, prominent: Bool, path: String?) -> some View {
+        Button { chooseAndOpen(choice, target: target) } label: {
+            HStack(spacing: 10) {
+                Circle().stroke(prominent ? Color.claude : Color.sub, lineWidth: prominent ? 5 : 1.5)
+                    .frame(width: 15, height: 15)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(title).font(.system(size: 12, weight: .semibold)).foregroundColor(.txt)
+                        if prominent {
+                            Text(t("cli.recommended")).font(.system(size: 9.5, weight: .semibold)).foregroundColor(.claude)
+                        }
+                    }
+                    if let path {
+                        Text(path).font(.system(size: 10, design: .monospaced)).foregroundColor(.sub)
+                            .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: 10).fill(prominent ? Color.claude.opacity(0.06) : Color.white.opacity(0.02)))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(prominent ? Color.claude.opacity(0.7) : Color.stroke, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
+        .buttonStyle(.plain)
+        .disabled(choiceActionsDisabled(for: target))
+        .opacity(choiceActionsDisabled(for: target) ? 0.45 : 1)
+        .help(path ?? title)
+        .accessibilityLabel(title + (path.map { ", " + $0 } ?? ""))
     }
 
     private func restoreLegacyBackup(_ target: ChoiceTarget) {
@@ -1382,7 +1545,14 @@ struct ProfileCard: View {
         // Current card: one warm hairline and a slightly lifted surface; the mark above names it.
         .background(RoundedRectangle(cornerRadius: 14).fill(active ? Color.cardHi : Color.card))
         .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(active ? Color.claude.opacity(0.42) : Color.stroke.opacity(0.32), lineWidth: 1))
+            .stroke(active ? Color.claude.opacity(0.5) : Color.stroke.opacity(0.32), lineWidth: 1))
+        .overlay(alignment: .top) {
+            if active {
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(LinearGradient(colors: [Color.white.opacity(0.035), .clear], startPoint: .top, endPoint: .bottom))
+                    .frame(height: 40).allowsHitTesting(false)
+            }
+        }
     }
 }
 
@@ -1657,10 +1827,14 @@ struct Panel: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            Header(store: store, protection: protection) {
-                Task { await store.openProtectedClaude() }
+            VStack(spacing: 0) {
+                Header(store: store, protection: protection) {
+                    Task { await store.openProtectedClaude() }
+                }
+                TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)
             }
-            TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)
+            .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
             if let b = store.banner {
                 HStack(spacing: 8) {
                     Label(t("banner.lastOperation", arguments: ["message": generated(b)]), systemImage: "exclamationmark.triangle.fill")

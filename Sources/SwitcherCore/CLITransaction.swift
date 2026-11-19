@@ -35,7 +35,7 @@ public struct PreparedCLISwitch {
 }
 
 @MainActor public final class CLITransaction {
-    private let io: CLICredentialIO
+    public let io: CLICredentialIO
     private let now: () -> Date
     public init(io: CLICredentialIO, now: @escaping () -> Date = Date.init) { self.io = io; self.now = now }
     public func readOwned() throws -> CLIOwnedLogin {
