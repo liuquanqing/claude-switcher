@@ -1877,13 +1877,17 @@ struct Panel: View {
             }
             .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
             .clipShape(RoundedRectangle(cornerRadius: 14))
-            if let b = store.banner {
+            if let b = store.banner ?? store.displayedCLIBackupNotice {
                 HStack(spacing: 8) {
-                    Label(t("banner.lastOperation", arguments: ["message": generated(b)]), systemImage: "exclamationmark.triangle.fill")
+                    Label(store.banner == nil ? generated(b) : t("banner.lastOperation", arguments: ["message": generated(b)]),
+                          systemImage: "exclamationmark.triangle.fill")
                         .font(.system(size: 11))
                         .foregroundColor(.warn).fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    Button { store.banner = nil } label: {
+                    Button {
+                        if store.banner != nil { store.banner = nil }
+                        else { store.cliBackupNotice = nil }
+                    } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(bannerDismissHover ? .txt : .sub)

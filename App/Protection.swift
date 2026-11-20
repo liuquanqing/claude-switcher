@@ -71,6 +71,7 @@ final class ProtectionController: ObservableObject {
     }
 
     init(demo: Bool = false, testFiles: SafetyFiles? = nil, worker: (any GuardWorking)? = nil,
+         demoScope: DesktopProtectionScope? = nil,
          observeNetwork: ((ProxyMode) async -> NetworkObservation)? = nil) {
         self.demo = demo
         files = testFiles ?? SafetyFiles(directory: FileManager.default.homeDirectoryForCurrentUser
@@ -97,7 +98,7 @@ final class ProtectionController: ObservableObject {
                 guardOnline = false; lastDecision = SafetyDecision(.staleReceipt)
                 status = "演示：守卫回执过期，保护状态待确认。"
             }
-            if CommandLine.arguments.contains("--demo-api") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewAPI") as? Bool == true {
+            if demoScope == .api || CommandLine.arguments.contains("--demo-api") || Bundle.main.object(forInfoDictionaryKey: "CSPreviewAPI") as? Bool == true {
                 desktopScope = .api; desktopManaged = false
                 switch Bundle.main.object(forInfoDictionaryKey: "CSPreviewAPIManager") as? String {
                 case "ccswitch": apiConfiguration = .ccSwitch

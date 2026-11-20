@@ -29,6 +29,7 @@ struct LocalAccountObservation: Equatable {
         localAccountObservation = observation
         if changed { usageRefreshPolicy.credentialsChanged(profile: current); usageCatchUpPending = true }
         if cliChanged {
+            resetCurrentCLIRecoveryObservation()
             invalidateCLIStatus()
             cliConnection.defaultLoginDidChange()
         }

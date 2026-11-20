@@ -260,7 +260,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
         do { try await operations.backupDefaultLogin(context) }
         catch {
             guard stillCurrent(context, generation: generation) else { return }
-            detail = "已登录，但备份尚未更新。请点击刷新重试。"
+            detail = "已登录，但备份尚未更新。"
         }
     }
     func confirmLogin() async {

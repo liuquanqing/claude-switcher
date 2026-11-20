@@ -218,12 +218,7 @@ enum CLITerminalLaunch {
                   self.active?.snapshot?.identity.samePrincipal(as: expected.identity) == true else {
                 throw SafetyError("账号已变化，未更新 CLI 备份。")
             }
-            do {
-                try await self.backupCurrentDefaultCLI(manual: true)
-            } catch {
-                self.banner = "已登录，但备份尚未更新。请点击刷新重试。"
-                throw error
-            }
+            try await self.backupCurrentDefaultCLI(manual: true)
         }, focusAuthorizationTerminal: { [weak self] in
             if self?.isDemo == true { return true }
             guard let terminal = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.Terminal").first,

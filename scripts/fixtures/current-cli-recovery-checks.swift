@@ -127,14 +127,65 @@ import SwitcherCore
             "an official CLI token rotation is backed up on the next eligible watcher tick without native renewal")
     watcher.currentCLIBackupAttemptAt = nil
     await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(122), operation: { throw CLIInteractionRequired() })
-    require(watcher.currentCLIBackupPending?.name == "Personal" && watcher.banner?.contains("备份尚未更新") == true,
-            "a background permission failure remains visibly pending without being treated as logout")
-    await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(183), operation: snapshot)
-    require(watcher.currentCLIBackupPending == nil && watcher.banner == nil,
-            "a later successful local snapshot clears the pending backup warning")
+    require(watcher.currentCLIBackupPending?.name == "Personal" && watcher.displayedCLIBackupNotice == nil && watcher.banner == nil,
+            "a background permission failure stays pending without reopening the warning")
+    let unrelated = "fixture unrelated notice"
+    watcher.banner = unrelated
+    watcherIO.denyCredentialRead = true
+    await watcher.refreshCurrentCLIBackup {
+        try await watcher.backupCurrentDefaultCLI(manual: true, io: watcherIO, gate: { true },
+            verify: { _ in identity }, context: { true })
+    }
+    require(watcher.displayedCLIBackupNotice == "CLI 备份需要 macOS 钥匙串授权。" && watcher.banner == unrelated,
+            "manual refresh explains the precise failure without replacing another operation's notice")
+    watcher.cliBackupNotice = nil
+    await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(183), operation: { throw CLIInteractionRequired() })
+    require(watcher.displayedCLIBackupNotice == nil && watcher.banner == unrelated,
+            "a later background failure does not recreate a dismissed notice")
+    watcherIO.denyCredentialRead = false
+    var manualVerifications = 0
+    watcherIO.backups["Personal"] = try CLIBackup.verifiedData(login: watchedLogin, identity: identity, now: fixtureNow)
+    let staleVerifiedBackup = watcherIO.backups["Personal"]
+    try CLIJSON.encode(["claudeAiOauth": ["accessToken": "fictional-expired",
+        "refreshToken": "fictional-refresh", "expiresAt": 1]])
+        .write(to: home.appendingPathComponent(".claude/.credentials.json"))
+    await watcher.refreshCurrentCLIBackup {
+        try await watcher.backupCurrentDefaultCLI(manual: true, io: watcherIO, gate: { true },
+            verify: { _ in preconditionFailure("an expired credential cannot verify online") }, context: { true })
+    }
+    require(watcher.displayedCLIBackupNotice == "CLI 备份待更新，等待 Claude Code 续期。"
+            && watcherIO.backups["Personal"] == staleVerifiedBackup,
+            "expired credentials explain the dependency on native renewal and preserve the existing backup")
+    try data(token: "fixture-latest", seconds: 10800).write(to: home.appendingPathComponent(".claude/.credentials.json"))
+    await watcher.refreshCurrentCLIBackup {
+        try await watcher.backupCurrentDefaultCLI(manual: true, io: watcherIO, gate: { true },
+            verify: { _ in manualVerifications += 1; return identity }, context: { true })
+    }
+    let manuallySaved = try CLIBackup(data: watcherIO.backups["Personal"]!)
+    require(manualVerifications == 1 && manuallySaved.login != watchedLogin
+            && manuallySaved.verification != nil && watcherIO.liveWrites == 0,
+            "manual refresh replaces a stale verified backup only after verifying the newer credential")
+    require(watcher.currentCLIBackupPending == nil && watcher.displayedCLIBackupNotice == nil && watcher.banner == unrelated,
+            "successful backup clears only its own state")
+    let api = Store(demo: true, demoScope: .api)
+    api.cliObservedIdentity = api.active?.snapshot?.identity
+    api.cliProfile = api.current
+    api.cliStatus = .reported
+    api.cliBackupNotice = (.init(name: api.current, identity: api.cliObservedIdentity), "stale subscription notice")
+    var apiAttempts = 0
+    await api.maintainCurrentCLIBackup(now: fixtureNow, operation: { apiAttempts += 1 })
+    await api.refreshCurrentCLIBackup(operation: { apiAttempts += 1 })
+    require(apiAttempts == 0 && api.displayedCLIBackupNotice == nil,
+            "API mode suppresses an existing subscription notice and skips both backup routes")
+    let readsBeforeAPI = watcherIO.credentialReadCount
+    do {
+        try await api.backupCurrentDefaultCLI(manual: true, io: watcherIO, context: { true })
+        preconditionFailure("API mode must reject direct subscription backup")
+    } catch {}
+    require(watcherIO.credentialReadCount == readsBeforeAPI, "API mode never reads default subscription credentials for backup")
     watcher.cliStatus = .needsLogin
     await watcher.maintainCurrentCLIBackup(now: fixtureNow.addingTimeInterval(244), operation: snapshot)
-    require(watcherCalls == 3, "an explicit rejected login cannot silently replace a backup")
+    require(watcherCalls == 2, "an explicit rejected login cannot silently replace a backup")
     try new.write(to: home.appendingPathComponent(".claude/.credentials.json"))
     let delayedRejectionStore = Store(demo: true)
     delayedRejectionStore.cliStatus = .reported

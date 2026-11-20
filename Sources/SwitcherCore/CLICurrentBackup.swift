@@ -3,6 +3,10 @@ import Foundation
 @MainActor public enum CLICurrentBackup {
     public enum Outcome: Equatable { case saved, upToDate }
 
+    public enum Deferred: Error, Equatable {
+        case renewalRequired, identityUnconfirmed, verificationUnavailable
+    }
+
     public static func save(target: CLIProfileIdentity, io: CLICredentialIO,
                             now: () -> Date = Date.init,
                             contextIsCurrent: () throws -> Bool,
@@ -15,13 +19,13 @@ import Foundation
               try contextIsCurrent() else { throw SafetyError("账号已变化，未更新 CLI 备份。") }
         let original = try live()
         guard original.hasSecrets, try original.identity?.samePrincipal(as: expected) == true else {
-            throw SafetyError("当前 CLI 登录与桌面账号不符，未更新备份。")
+            throw Deferred.identityUnconfirmed
         }
         let previous = try io.readBackup(target.name)
         if let previous {
             let backup = try CLIBackup(data: previous)
             guard try backup.login.identity?.samePrincipal(as: expected) == true else {
-                throw SafetyError("现有 CLI 备份属于其他账号或组织，未覆盖。")
+                throw Deferred.identityUnconfirmed
             }
             if backup.login == original, backup.verification != nil || verify == nil {
                 guard try contextIsCurrent(), try live() == original,
@@ -31,17 +35,20 @@ import Foundation
                 return .upToDate
             }
         }
-        guard await gate(), try contextIsCurrent(), try live() == original else {
+        guard await gate() else { throw Deferred.verificationUnavailable }
+        guard try contextIsCurrent(), try live() == original else {
             throw SafetyError("网络或当前登录未能确认，备份尚未更新。")
         }
         let data: Data
         if let verify {
             guard let access = original.usableAccessToken(now: now()) else {
-                throw SafetyError("当前 CLI 登录需由官方 CLI 续期，备份尚未更新。")
+                throw Deferred.renewalRequired
             }
-            let actual = try await verify(access)
+            let actual: CLIIdentity
+            do { actual = try await verify(access) }
+            catch { throw Deferred.verificationUnavailable }
             guard actual.isComplete, actual.samePrincipal(as: expected) else {
-                throw SafetyError("CLI 远端身份与当前账号不符，未更新备份。")
+                throw Deferred.identityUnconfirmed
             }
             if let previous, let backup = try? CLIBackup(data: previous), backup.login != original,
                !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {

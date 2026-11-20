@@ -10,8 +10,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.7"
-BUILD = "20261120.1.1"
+RELEASE = "1.3.8"
+BUILD = "20261120.2.0"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.6-final"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
@@ -63,7 +63,7 @@ def verify_release_metadata(info):
     require(info.get("CSReleaseChannel") == "stable", "Stable channel must be explicit")
     require(info.get("CSUpdaterProtocolVersion") == 1, "Updater protocol missing")
     require(info.get("CSReleaseVersion") == RELEASE, "Stable release version mismatch")
-    require(info.get("CFBundleShortVersionString") == "1.3.7", "Apple numeric version mismatch")
+    require(info.get("CFBundleShortVersionString") == "1.3.8", "Apple numeric version mismatch")
     require(info.get("CFBundleVersion") == BUILD, "Candidate build version mismatch")
     require(info.get("CFBundleName") == DISPLAY_NAME and info.get("CFBundleDisplayName") == DISPLAY_NAME,
             "System display names must match the stable release")
@@ -72,7 +72,7 @@ def verify_release_metadata(info):
 def prepare_release_metadata(info):
     require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
     require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
-    result = dict(info, CFBundleShortVersionString="1.3.7", CFBundleVersion=BUILD,
+    result = dict(info, CFBundleShortVersionString="1.3.8", CFBundleVersion=BUILD,
                   CFBundleName=DISPLAY_NAME, CFBundleDisplayName=DISPLAY_NAME,
                   CSReleaseChannel="stable", CSReleaseVersion=RELEASE, CSUpdaterProtocolVersion=1)
     verify_release_metadata(result)
@@ -176,7 +176,7 @@ def main():
         inventory(app)
         for rel in BINARIES:
             run("strip", "-S", app / rel)
-        state = dict(release=RELEASE, releaseChannel="stable", version="1.3.7", build=info["CFBundleVersion"],
+        state = dict(release=RELEASE, releaseChannel="stable", version="1.3.8", build=info["CFBundleVersion"],
                      sourceCommit=source, candidateCommit=candidate, teamID=pinned_team(),
                      architecture=run("uname", "-m").strip(),
                      bundleIdentifier=BUNDLE_ID, appPath=str(app), signing="NOT_RUN",

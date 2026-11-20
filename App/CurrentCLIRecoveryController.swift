@@ -5,6 +5,7 @@ import SwitcherCore
     func resetCurrentCLIRecoveryObservation() {
         clearCurrentCLIRecoveryNotice()
         currentCLIRecoveryOutcome=nil;currentCLIBackupPending=nil;currentCLIObservedLogin=nil
+        cliBackupNotice = nil
         currentCLIInspectionAt=nil;currentCLIRenewalPolicy=CLIRenewalPolicy()
         currentCLIBackupAttemptAt = nil
     }

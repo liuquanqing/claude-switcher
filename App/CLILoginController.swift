@@ -206,6 +206,7 @@ import SwitcherCore
 
     func observeCLIStatusScope() {
         cliScopeObservation = protection.$desktopScope.removeDuplicates().dropFirst().sink { [weak self] _ in
+            self?.resetCurrentCLIRecoveryObservation()
             self?.invalidateCLIStatus()
         }
     }

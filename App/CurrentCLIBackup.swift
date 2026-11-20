@@ -2,29 +2,46 @@ import Foundation
 import SwitcherCore
 
 @MainActor extension Store {
+    var displayedCLIBackupNotice: String? {
+        guard let notice = cliBackupNotice,
+              protection.desktopScope == .subscription,
+              notice.target.name == current,
+              let identity = active?.snapshot?.identity,
+              notice.target.identity?.samePrincipal(as: identity) == true,
+              ![.different, .needsLogin, .otherAuthentication, .unsupportedStorage].contains(cliStatus)
+        else { return nil }
+        return notice.message
+    }
+
+    private var observedCLIBackupTarget: CLIProfileIdentity? {
+        guard protection.desktopScope == .subscription, !defaultCLISyncNeedsReview,
+              cliProfile == current, [.unverified, .reported, .matched].contains(cliStatus),
+              let identity = active?.snapshot?.identity, cliObservedIdentity?.samePrincipal(as: identity) == true
+        else { return nil }
+        return CLIProfileIdentity(name: current, identity: identity)
+    }
+
+    func refreshCurrentCLIBackup(operation: (() async throws -> Void)? = nil) async {
+        guard observedCLIBackupTarget != nil else { return }
+        do {
+            if let operation { try await operation() }
+            else { try await backupCurrentDefaultCLI(manual: true) }
+        } catch {
+            // The backup entry records the reason. A backup failure must not change the usage refresh result.
+        }
+    }
+
     func maintainCurrentCLIBackup(now: Date = Date(), operation: (() async throws -> Void)? = nil) async {
         guard !isDemo || operation != nil else { return }
-        guard !updating, busy == nil, !refreshing, !statusRefreshInProgress, !currentCLIRecoveryRunning, !defaultCLISyncNeedsReview,
-              cliProfile == current, [.unverified, .reported, .matched].contains(cliStatus),
-              let identity = active?.snapshot?.identity,
-              cliObservedIdentity?.samePrincipal(as: identity) == true,
+        guard !updating, busy == nil, !refreshing, !statusRefreshInProgress, !currentCLIRecoveryRunning,
+              let target = observedCLIBackupTarget,
               currentCLIBackupAttemptAt.map({ now.timeIntervalSince($0) >= 60 }) ?? true else { return }
-        let name = current
         currentCLIBackupAttemptAt = now
         do {
             if let operation { try await operation() }
-            else {
-                // The passive path verifies under the existing CLI network gate so the backup keeps
-                // a proof bound to this credential; a gate/verification failure leaves the old backup.
-                try await backupCurrentDefaultCLI(manual: false, gate: { await self.protection.preflight(target: .cli).allowed },
-                    verify: { token in try await self.checkedCLIIdentity(token) })
-            }
+            else { try await backupCurrentDefaultCLI(manual: false) }
         } catch {
-            guard current == name, active?.snapshot?.identity.samePrincipal(as: identity) == true else { return }
-            currentCLIBackupPending = CLIProfileIdentity(name: name, identity: identity)
-            let message = "已登录，但备份尚未更新。请点击刷新重试。"
-            let lines = (banner ?? "").split(separator: "\n").map(String.init).filter { $0 != message }
-            banner = (lines + [message]).joined(separator: "\n")
+            if observedCLIBackupTarget == target { currentCLIBackupPending = target }
         }
     }
 
@@ -35,7 +52,8 @@ import SwitcherCore
         guard !isDemo || (provided != nil && suppliedContext != nil) else {
             throw SafetyError("演示模式不读取真实登录。")
         }
-        guard !updating, !currentCLIRecoveryRunning, let identity = active?.snapshot?.identity,
+        guard protection.desktopScope == .subscription, !defaultCLISyncNeedsReview,
+              !updating, !currentCLIRecoveryRunning, let identity = active?.snapshot?.identity,
               identity.isComplete else { throw SafetyError("CLI 备份尚未完成，请稍后刷新重试。") }
         let name = current
         if !isDemo {
@@ -52,16 +70,39 @@ import SwitcherCore
         defer {
             if let native = io as? NativeCLIStorage { lastRefreshDiagnostics?.credentialReads = native.readSummary }
         }
-        _ = try await CLICurrentBackup.save(target: .init(name: name, identity: identity), io: io,
-            contextIsCurrent: suppliedContext ?? {
-                try confirmedCurrentProfile() == name && self.current == name
-                    && self.active?.snapshot?.identity.samePrincipal(as: identity) == true
-                    && self.cliConfiguration().allowsSubscriptionMutation
-            }, gate: suppliedGate ?? { true }, verify: suppliedVerify)
-        currentCLIBackupPending = nil
-        if let current = banner {
-            let lines = current.split(separator: "\n").map(String.init).filter { $0 != "已登录，但备份尚未更新。请点击刷新重试。" }
-            banner = lines.isEmpty ? nil : lines.joined(separator: "\n")
+        let target = CLIProfileIdentity(name: name, identity: identity)
+        func matchesCurrent() -> Bool {
+            protection.desktopScope == .subscription && current == name
+                && active?.snapshot?.identity.samePrincipal(as: identity) == true
+        }
+        let verify: ((String) async throws -> CLIIdentity)? = suppliedVerify
+            ?? (isDemo ? nil : { access in try await self.checkedCLIIdentity(access) })
+        do {
+            _ = try await CLICurrentBackup.save(target: target, io: io,
+                contextIsCurrent: {
+                    guard matchesCurrent() else { return false }
+                    if let suppliedContext { return try suppliedContext() }
+                    return try confirmedCurrentProfile() == name
+                        && DesktopModeInspector.read(support: support) == .subscription
+                        && self.cliConfiguration().allowsSubscriptionMutation
+                }, gate: suppliedGate ?? { true }, verify: verify)
+            guard matchesCurrent() else { return }
+            currentCLIBackupPending = nil
+            cliBackupNotice = nil
+        } catch {
+            if matchesCurrent(), manual {
+                currentCLIBackupPending = target
+                let message: String
+                switch error {
+                case is CLIInteractionRequired: message = "CLI 备份需要 macOS 钥匙串授权。"
+                case CLICurrentBackup.Deferred.renewalRequired: message = "CLI 备份待更新，等待 Claude Code 续期。"
+                case CLICurrentBackup.Deferred.identityUnconfirmed: message = "CLI 登录归属未确认，备份保留原样。"
+                case CLICurrentBackup.Deferred.verificationUnavailable: message = "暂时无法在线核验 CLI 登录，备份保留原样。"
+                default: message = "本次未能更新 CLI 备份。"
+                }
+                cliBackupNotice = (target, message)
+            }
+            throw error
         }
     }
 }

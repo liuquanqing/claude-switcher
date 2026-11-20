@@ -230,6 +230,7 @@ final class Store: ObservableObject {
     var currentCLIRecoveryOutcome: CLICurrentRecoveryOutcome?
     var currentCLIRecoveryMessage: String?
     var currentCLIBackupPending: CLIProfileIdentity?
+    @Published var cliBackupNotice: (target: CLIProfileIdentity, message: String)?
     /// Target whose terminal login did not follow the desktop; retry from the banner.
     @Published var cliFollowPending: String?
     @Published var defaultCLISyncNeedsReview = false
@@ -242,9 +243,9 @@ final class Store: ObservableObject {
     var allowBackgroundCLIRenewal = false
 
     /// Fake accounts for README screenshots — touches no files, keychain or network.
-    init(demo: Bool) {
+    init(demo: Bool, demoScope: DesktopProtectionScope? = nil) {
         isDemo = true
-        protection = ProtectionController(demo: true)
+        protection = ProtectionController(demo: true, demoScope: demoScope)
         appLanguage = AppLocalization.normalized(Bundle.main.object(forInfoDictionaryKey: "CSPreviewLanguage") as? String ?? "zh")
         let now = Date()
         func snap(_ email: String, _ plan: String, _ s: Double, _ sh: Double, _ w: Double, _ wh: Double) -> Snapshot {
