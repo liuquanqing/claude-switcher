@@ -20,6 +20,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     let save: (CLIBinding) throws -> Void
     let make: (CLIBindingChoice, CLIIdentity) throws -> CLIBinding
     let access: () async throws -> CLIConnectionAccess
+    var usesDefaultLogin: (CLIIdentity) -> Bool = { _ in false }
     var backupDefaultLogin: (CLIConnectionContext) async throws -> Void = { _ in }
     var focusAuthorizationTerminal: () -> Bool = { false }
     var didVerifyLogin: (CLIConnectionContext, CLIBinding) -> Void = { _, _ in }
@@ -50,6 +51,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     private var binding: CLIBinding?
     var currentBinding: CLIBinding? { binding }
     var preferredChoice: CLIBindingChoice? {
+        if let context, operations.usesDefaultLogin(context.identity) { return .defaultLogin }
         if let binding { return binding.choice }
         switch localRecord {
         case .sameAccount(let choice): return choice
@@ -59,6 +61,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     }
     func bindingForCachedUsage() -> CLIBinding? {
         guard let context else { return nil }
+        if operations.usesDefaultLogin(context.identity) { return try? operations.make(.defaultLogin, context.identity) }
         if let binding { return binding }
         guard case .sameAccount(let choice) = localRecord else { return nil }
         return try? operations.make(choice, context.identity)
@@ -123,6 +126,17 @@ enum CLITerminalIntent: Equatable { case open, signIn }
         do {
             let access = try await operations.access()
             guard stillCurrent(context, generation: generation) else { return }
+            if !showLoginChoices, operations.usesDefaultLogin(context.identity) {
+                let candidate = try operations.make(.defaultLogin, context.identity)
+                let status = try await access.status(candidate)
+                guard stillCurrent(context, generation: generation) else { return }
+                if status == .matched {
+                    try await complete(status, binding: candidate, access: access, context: context, generation: generation)
+                } else {
+                    phase = status == .different ? .mismatched : .unconfirmed
+                }
+                return
+            }
             if !needsPicker, let binding {
                 try await inspectAndOpen(binding, access: access, context: context, generation: generation)
                 return
@@ -208,6 +222,10 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             phase = .unconfirmed; detail = "桌面账号身份尚未确认，暂不能关联 CLI。"; return
         }
         let generation = self.generation
+        guard selected != .isolated || !operations.usesDefaultLogin(context.identity) else {
+            detail = "当前账号已使用默认终端。"
+            return
+        }
         phase = .checking; clearFeedback()
         legacyBackupAvailable = false
         do {

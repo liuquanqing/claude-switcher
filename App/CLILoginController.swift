@@ -400,17 +400,17 @@ import SwitcherCore
             }
             try await prepareTargetCLIRecovery(target: context.0, io: io, requireUsableLogin: true)
             guard try await stillSameDesktop() else { throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。") }
-            let plan = try await transaction.prepare(target: context.0, profiles: context.1, requiresTargetLogin: true,
-                remote: { try await self.checkedCLIIdentity($0) })
-            guard try await stillSameDesktop() else { throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。") }
-            try transaction.persistOutgoing(plan)
-            guard try await stillSameDesktop() else {
-                throw SafetyError("桌面账号或模式在同步期间变化，已保留备份，未覆盖 CLI 登录。")
-            }
-            let restoration = try transaction.apply(plan, requireUsableLogin: true)
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let repository = CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"), home: home)
+            let outcome = try await CLIDefaultMirror.follow(transaction: transaction, target: context.0, profiles: context.1,
+                home: home, repository: repository, storeFor: { Self.isolatedStore($0, allowInteraction: true) },
+                journalURL: protection.files.directory.appendingPathComponent("cli-transcript-links.json"),
+                remote: { try await self.checkedCLIIdentity($0) }, contextIsCurrent: stillSameDesktop)
+            guard outcome.restoration == .verifiedLogin else { throw SafetyError("当前账号的默认终端登录尚未同步。") }
+            cliConnection.defaultLoginDidChange()
             cliFollowPending = nil
             await refreshCLI(verify: false)
-            presentCLIRestoration(restoration, target: target, identity: context.0.identity)
+            presentCLIRestoration(outcome.restoration, target: target, identity: context.0.identity)
             usageRefreshPolicy.credentialsChanged(profile: target)
             banner = "已恢复默认 CLI 登录。请在新终端使用。"
             return true

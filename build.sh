@@ -30,7 +30,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundleShortVersionString</key><string>1.3.7</string>
-<key>CFBundleVersion</key><string>20261120.1.0</string>
+<key>CFBundleVersion</key><string>20261120.1.1</string>
 <key>CSReleaseVersion</key><string>1.3.7</string>
 <key>CSUpdaterProtocolVersion</key><integer>1</integer>
 <key>CSReleaseChannel</key><string>stable</string>

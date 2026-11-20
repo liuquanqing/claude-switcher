@@ -142,13 +142,18 @@ import Darwin
         if own.usableAccessToken(now: now()) != nil, live.usableAccessToken(now: now()) == nil { return }
         // "Newer" must be provable: the default credential's own expiry is later than the directory's.
         guard let ownExpiry = expiry(own), let liveExpiry = expiry(live), liveExpiry > ownExpiry else { return }
+        try replaceDirectoryLogin(in: store, from: own, to: live)
+    }
+
+    private static func replaceDirectoryLogin(in store: DirectoryStore, from own: CLIOwnedLogin, to live: CLIOwnedLogin) throws {
         let router = store.router()
         let credentials = try router.read()
         let document = try store.document()
-        guard try CLIOwnedLogin(credentials: credentials, identityDocument: document) == own else { return }
+        guard try CLIOwnedLogin(credentials: credentials, identityDocument: document) == own else {
+            throw SafetyError("独立目录登录在写入前变化。")
+        }
         let newCredentials = try CLIJSON.replacing(credentials, key: "claudeAiOauth", with: live.oauth)
         try router.write(newCredentials)
-        var documentBefore: Data?
         var documentWritten = false
         do {
             // Re-read the document after the credential write: the terminal may have changed
@@ -157,16 +162,18 @@ import Darwin
             guard try CLIJSON.field(latest, key: "oauthAccount") == own.metadata else {
                 throw SafetyError("独立目录的身份在同步期间变化，未覆盖。")
             }
-            documentBefore = latest
             let newDocument = try CLIJSON.replacing(latest, key: "oauthAccount", with: live.metadata)
-            try store.writeDocument(newDocument, ifUnchangedSince: latest); documentWritten = true
+            if live.metadata != own.metadata {
+                documentWritten = true
+                try store.writeDocument(newDocument, ifUnchangedSince: latest)
+            }
             guard try CLIJSON.field(router.read(), key: "claudeAiOauth") == live.oauth,
                   try CLIJSON.field(store.document(), key: "oauthAccount") == live.metadata else {
                 throw SafetyError("独立目录回读未通过，登录同步未确认。")
             }
         } catch {
             var restored = true
-            if documentWritten, let documentBefore {
+            if documentWritten {
                 do {
                     let current = try store.document()
                     if try CLIJSON.field(current, key: "oauthAccount") == live.metadata {
@@ -227,10 +234,15 @@ import Darwin
             throw SafetyError("目标账号或组织尚未确认，未修改终端登录。")
         }
         let source = try isolatedDirectory(identity: identity, profile: target.name, home: home, repository: repository).map(storeFor)
-        let sync = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
-        let observed = sync.observed
+        let initial = try transaction.readOwned()
+        let observed = try source.flatMap { try ownedLogin(in: $0, expected: identity) }
+        if try initial.identity?.samePrincipal(as: identity) != true || initial.usableAccessToken(now: now()) == nil
+            || (observed.flatMap(expiry) ?? 0) > (expiry(initial) ?? 0) {
+            let sync = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
+            guard sync.observed == observed else { throw SafetyError("独立目录授权已变化，请重试。") }
+            if let record = sync.verifiedRecord { transaction.preverified[target.name] = record }
+        }
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
-        if let record = sync.verifiedRecord { transaction.preverified[target.name] = record }
         let plan = try await transaction.prepare(target: target, profiles: profiles, remote: remote)
         // Compare against what was observed at sync time, not against the backup (which may
         // legitimately be newer than an expired source).
@@ -244,8 +256,6 @@ import Darwin
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         if plan.restoration == .needsLogin {
             try transaction.persistOutgoing(plan)
-            try returnOutgoingLogin(plan: plan, target: target, profiles: profiles, home: home,
-                                    repository: repository, storeFor: storeFor, io: transaction.io, now: now)
             return Outcome(restoration: .needsLogin, previousTerminals: Set(before).intersection(terminalsNow()).count)
         }
         // The follow path promises an online-verified login; a merely stored backup is not enough.
@@ -254,14 +264,42 @@ import Darwin
             throw SafetyError("目标终端登录本次未能在线核验，默认登录保持原样；请在终端里确认登录后重试。")
         }
         try transaction.persistOutgoing(plan)
-        try returnOutgoingLogin(plan: plan, target: target, profiles: profiles, home: home,
-                                repository: repository, storeFor: storeFor, io: transaction.io, now: now)
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         // Last asynchronous step is done: re-read the source once more immediately before commit.
         if let source, let expected = target.identity, try ownedLogin(in: source, expected: expected) != observed {
             throw SafetyError("独立目录的登录在提交前变化，未修改默认登录；请再切换一次。")
         }
-        let restoration = try transaction.apply(plan, requireUsableLogin: true)
+        try transaction.revalidate(plan)
+        let parked = try returnOutgoingLogin(plan: plan, target: target, profiles: profiles, home: home,
+                                             repository: repository, storeFor: storeFor, io: transaction.io)
+        let empty = CLIOwnedLogin(oauth: nil, metadata: nil)
+        var removedTarget = false
+        let restoration: CLIRestoration
+        do {
+            if let source, let observed {
+                guard let backup = try transaction.io.readBackup(target.name),
+                      try CLIBackup(data: backup).login == plan.desired else {
+                    throw SafetyError("目标登录尚无可恢复的备份，未移交独立目录授权。")
+                }
+                try replaceDirectoryLogin(in: source, from: observed, to: empty)
+                removedTarget = true
+            }
+            restoration = try transaction.apply(plan, requireUsableLogin: true)
+        } catch {
+            if (try? transaction.readOwned()) == plan.original {
+                do {
+                    if let parked { try replaceDirectoryLogin(in: parked.store, from: parked.saved, to: parked.original) }
+                    if removedTarget, let source, let observed {
+                        try replaceDirectoryLogin(in: source, from: empty, to: observed)
+                    }
+                } catch {
+                    throw SafetyError("独立目录授权回滚未确认。已保留备份，请停止切换。")
+                }
+            } else {
+                throw SafetyError("默认登录已变化，授权回滚未确认。已保留备份，请停止切换。")
+            }
+            throw error
+        }
         let alive = Set(terminalsNow())
         return Outcome(restoration: restoration, linkedTranscripts: 0, previousTerminals: before.filter { alive.contains($0) }.count)
     }
@@ -272,13 +310,32 @@ import Darwin
     /// directory relies on the backup alone.
     private static func returnOutgoingLogin(plan: PreparedCLISwitch, target: CLIProfileIdentity, profiles: [CLIProfileIdentity],
                                             home: URL, repository: CLIBindingRepository, storeFor: (URL) -> DirectoryStore,
-                                            io: CLICredentialIO, now: () -> Date) throws {
+                                            io: CLICredentialIO) throws -> (store: DirectoryStore, original: CLIOwnedLogin, saved: CLIOwnedLogin)? {
         guard let outgoing = plan.sourceName, outgoing != target.name,
               let identity = profiles.first(where: { $0.name == outgoing })?.identity, identity.isComplete,
-              let directory = try isolatedDirectory(identity: identity, profile: outgoing, home: home, repository: repository) else { return }
-        let verification = try io.readBackup(outgoing).flatMap { try CLIBackup(data: $0).verification }
+              let directory = try isolatedDirectory(identity: identity, profile: outgoing, home: home, repository: repository) else { return nil }
         do {
-            try refreshOwnDirectory(from: io, store: storeFor(directory), expected: identity, verified: verification, now: now)
+            guard let raw = try io.readBackup(outgoing) else { throw SafetyError("切出账号缺少可恢复备份。") }
+            let backup = try CLIBackup(data: raw)
+            guard try backup.trustedIdentity()?.samePrincipal(as: identity) == true else {
+                throw SafetyError("切出账号的备份归属未验证。")
+            }
+            let store = storeFor(directory)
+            let original = try CLIOwnedLogin(credentials: store.router().read(), identityDocument: store.document())
+            if let existing = try original.identity, !existing.samePrincipal(as: identity) {
+                throw SafetyError("独立目录属于其他账号或组织。")
+            }
+            if original == backup.login { return nil }
+            if original.hasSecrets {
+                guard try original.identity?.samePrincipal(as: identity) == true else {
+                    throw SafetyError("独立目录凭据归属未确认。")
+                }
+                guard let ownExpiry = expiry(original), let backupExpiry = expiry(backup.login),
+                      ownExpiry != backupExpiry else { throw SafetyError("无法判定两份授权的新旧。") }
+                if ownExpiry > backupExpiry { return nil }
+            }
+            try replaceDirectoryLogin(in: store, from: original, to: backup.login)
+            return (store, original, backup.login)
         } catch {
             throw SafetyError("切出账号的登录未能写回它的独立目录，默认登录保持原样：\(error.localizedDescription)")
         }

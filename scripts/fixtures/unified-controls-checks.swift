@@ -70,6 +70,17 @@ private extension CLIConnectionOperations {
             "opening an isolated directory does not mean official login has completed")
     isolatedStatus = .matched; await controller.confirmLogin()
     require(controller.phase == .matched && controller.checkedAt != nil, "the official identity report completes linking")
+    var nativeFollowOperations = operations
+    nativeFollowOperations.usesDefaultLogin = { $0.samePrincipal(as: identity) }
+    let nativeFollow = CLIConnectionController(operations: nativeFollowOperations)
+    defaultStatus = .matched
+    await nativeFollow.open()
+    require(launched.last?.choice == .defaultLogin && nativeFollow.preferredChoice == .defaultLogin,
+            "a current default login takes precedence over the saved isolated binding")
+    let nativeLaunchCount = launched.count
+    await nativeFollow.choose(.isolated)
+    require(launched.count == nativeLaunchCount && nativeFollow.currentBinding?.choice == .isolated,
+            "an isolated binding is retained for write-back without launching another login")
     var backedUp: [CLIConnectionContext] = []
     var backupDenied = false
     var backupOperations = operations

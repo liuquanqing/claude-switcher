@@ -207,6 +207,10 @@ enum CLITerminalLaunch {
         }, access: { [weak self] in
             guard let self else { throw CLITerminalFailure.terminalUnavailable }
             return try await self.prepareCLIConnection(home: home)
+        }, usesDefaultLogin: { [weak self] identity in
+            guard let self else { return false }
+            return self.cliObservedIdentity?.samePrincipal(as: identity) == true
+                || (self.isDemo && self.cliStatus == .matched && self.cliProfile == self.current)
         }, backupDefaultLogin: { [weak self] expected in
             guard let self else { throw SafetyError("CLI 备份尚未完成。") }
             if self.isDemo { return }

@@ -7,7 +7,7 @@ import SwitcherCore
     func openTerminalFromHeader() async {
         guard protection.desktopScope == .subscription, !updating, busy == nil else { return }
         guard await prepareTerminalIdentity() else { return }
-        await cliConnection.open(showLoginChoices: cliConnection.currentBinding == nil)
+        await cliConnection.open(showLoginChoices: cliConnection.currentBinding == nil && cliConnection.preferredChoice != .defaultLogin)
     }
 
     @discardableResult
