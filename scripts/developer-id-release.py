@@ -10,13 +10,13 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.8"
-BUILD = "20261120.2.0"
+RELEASE = "1.3.8-rc.1"
+BUILD = "20261120.2.1"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.6-final"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
 APP_NAME = "Claude Switcher Preview.app"
-DISPLAY_NAME = "Claude Switcher"
+DISPLAY_NAME = "Claude Switcher 预览"
 BINARIES = (
     "Contents/Helpers/ClaudeGuard",
     "Contents/Helpers/ClaudeUpdater",
@@ -60,13 +60,13 @@ def pinned_team():
 def verify_release_metadata(info):
     require(info.get("CFBundleIdentifier") == BUNDLE_ID, "Bundle ID changed")
     require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
-    require(info.get("CSReleaseChannel") == "stable", "Stable channel must be explicit")
+    require(info.get("CSReleaseChannel") == "preview", "Preview channel must be explicit")
     require(info.get("CSUpdaterProtocolVersion") == 1, "Updater protocol missing")
-    require(info.get("CSReleaseVersion") == RELEASE, "Stable release version mismatch")
+    require(info.get("CSReleaseVersion") == RELEASE, "Preview release version mismatch")
     require(info.get("CFBundleShortVersionString") == "1.3.8", "Apple numeric version mismatch")
     require(info.get("CFBundleVersion") == BUILD, "Candidate build version mismatch")
     require(info.get("CFBundleName") == DISPLAY_NAME and info.get("CFBundleDisplayName") == DISPLAY_NAME,
-            "System display names must match the stable release")
+            "System display names must match the preview release")
 
 
 def prepare_release_metadata(info):
@@ -74,7 +74,7 @@ def prepare_release_metadata(info):
     require(not any(k.startswith("CSPreview") for k in info), "Demo CSPreview preferences are forbidden")
     result = dict(info, CFBundleShortVersionString="1.3.8", CFBundleVersion=BUILD,
                   CFBundleName=DISPLAY_NAME, CFBundleDisplayName=DISPLAY_NAME,
-                  CSReleaseChannel="stable", CSReleaseVersion=RELEASE, CSUpdaterProtocolVersion=1)
+                  CSReleaseChannel="preview", CSReleaseVersion=RELEASE, CSUpdaterProtocolVersion=1)
     verify_release_metadata(result)
     return result
 
@@ -176,7 +176,7 @@ def main():
         inventory(app)
         for rel in BINARIES:
             run("strip", "-S", app / rel)
-        state = dict(release=RELEASE, releaseChannel="stable", version="1.3.8", build=info["CFBundleVersion"],
+        state = dict(release=RELEASE, releaseChannel="preview", version="1.3.8", build=info["CFBundleVersion"],
                      sourceCommit=source, candidateCommit=candidate, teamID=pinned_team(),
                      architecture=run("uname", "-m").strip(),
                      bundleIdentifier=BUNDLE_ID, appPath=str(app), signing="NOT_RUN",
@@ -193,7 +193,7 @@ def main():
                 "Source HEAD differs from prepared package; resume from its original commit")
         require(not run("git", "status", "--porcelain").strip(), "Source has uncommitted changes")
         require(state["bundleIdentifier"] == BUNDLE_ID, "Manifest Bundle ID changed")
-        require(state["release"] == RELEASE and state.get("releaseChannel") == "stable",
+        require(state["release"] == RELEASE and state.get("releaseChannel") == "preview",
                 "Manifest release channel/version mismatch; prepare a new output")
         require(state["appPath"] == str(app), "Output directory was moved")
         require(state["teamID"] == pinned_team(), "Manifest team differs from candidate public Team pin")
@@ -280,7 +280,7 @@ def main():
             require(state["phase"] == "app-accepted", "App must be Accepted, stapled and assessed first")
             verify_app(app, state["teamID"], evidence)
             run("xcrun", "stapler", "validate", app)
-            stem = f"ClaudeSwitcher-{RELEASE}-{state['architecture']}"
+            stem = f"ClaudeSwitcher-{RELEASE}-{state['architecture']}-developer-id-preview"
             zip_path, dmg_path = directory / (stem + ".zip"), directory / (stem + ".dmg")
             require(not zip_path.exists() and not dmg_path.exists(), "Do not overwrite existing packages")
             # ditto's defaults preserve the stapled app's resource fork and extended attributes.
