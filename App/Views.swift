@@ -1512,7 +1512,17 @@ struct ProfileCard: View {
                         .accessibilityLabel(t("account.savedAccessibility"))
                 } else {
                     Button(action: onSwitch) {
-                        Pill(text: t("common.switch"), fg: .txt, bg: hover ? Color(hex: 0x45423C) : .stroke)
+                        Text(t("common.switch"))
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.txt)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .padding(.horizontal, 10)
+                            .frame(height: 24)
+                            .background(RoundedRectangle(cornerRadius: 7)
+                                .fill(hover ? Color(hex: 0x45423C) : Color.stroke.opacity(0.35)))
+                            .overlay(RoundedRectangle(cornerRadius: 7)
+                                .stroke(Color.stroke, lineWidth: 1))
                     }
                     .buttonStyle(.plain).disabled(busy).opacity(busy ? 0.45 : 1)
                     .help(t("account.switchHelp"))
@@ -1890,26 +1900,24 @@ struct Panel: View {
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))
             }
-            if store.cliFollowPending == store.current, protection.desktopScope == .subscription {
+            if store.canSyncDefaultCLI {
                 HStack(spacing: 8) {
                     Image(systemName: "terminal").font(.system(size: 11)).foregroundColor(.warn)
-                    Text(t("switch.followPending")).font(.system(size: 11)).foregroundColor(.warn)
-                        .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
-                    Button { Task { await store.retryDefaultCLIFollow() } } label: {
+                    Text(t(store.cliStatus == .different ? "switch.followMismatch" : "switch.followPending"))
+                        .font(.system(size: 11)).foregroundColor(.warn)
+                        .lineLimit(1).truncationMode(.tail).minimumScaleFactor(0.85)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(t(store.cliStatus == .different ? "switch.followMismatch" : "switch.followPending"))
+                    Button { Task { await store.syncDefaultCLI() } } label: {
                         Text(t("switch.retryFollow")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.claude)
+                            .lineLimit(1).fixedSize()
                             .padding(.horizontal, 9).frame(height: 24)
                             .background(RoundedRectangle(cornerRadius: 6).fill(Color.claude.opacity(0.12)))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .disabled(store.busy != nil || store.refreshing)
+                    .disabled(store.updating || store.busy != nil || store.refreshing || store.statusRefreshInProgress || store.currentCLIRecoveryRunning)
                     .help(t("switch.retryFollowHelp"))
-                    Button { store.cliFollowPending = nil } label: {
-                        Image(systemName: "xmark").font(.system(size: 10, weight: .semibold)).foregroundColor(.sub)
-                            .frame(width: 24, height: 24).contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(t("protection.dismissAccessibility"))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))

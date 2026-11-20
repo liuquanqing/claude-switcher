@@ -184,6 +184,7 @@ import SwitcherCore
         }
         cliProfile = result.profile; cliEmail = result.email; cliStatusDetail = result.detail
         cliStatus = result.status; cliStandaloneVerified = result.standaloneVerified; cliStatusCheckedAt = result.metadataOnly ? nil : Date()
+        if result.status == .matched { cliFollowPending = nil }
     }
 
     func publishLinkedDefaultCLIReport(_ identity: CLIIdentity, profile name: String) {

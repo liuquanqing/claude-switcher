@@ -232,6 +232,7 @@ final class Store: ObservableObject {
     var currentCLIBackupPending: CLIProfileIdentity?
     /// Target whose terminal login did not follow the desktop; retry from the banner.
     @Published var cliFollowPending: String?
+    @Published var defaultCLISyncNeedsReview = false
     var currentCLIBackupAttemptAt: Date?
     var currentCLIRenewalPolicy = CLIRenewalPolicy()
     var currentCLIInspectionAt: Date?
@@ -519,7 +520,7 @@ final class Store: ObservableObject {
     }
 
     func switchTo(_ target: String) async {
-        guard !updating, busy == nil, !statusRefreshInProgress else { return }
+        guard !updating, busy == nil, !statusRefreshInProgress, !currentCLIRecoveryRunning else { return }
         desktopOnlyOffer = nil
         banner = nil
         guard !refreshing else { banner = "用量正在刷新，请稍后切换账号。"; return }
@@ -587,18 +588,16 @@ func readKeychain(service: String, account: String, allowInteraction: Bool = fal
 
 func writeKeychain(service: String, account: String, json: [String: Any], ifUnchangedSince expected: Data? = nil, expectAbsent: Bool = false) throws {
     let data = try JSONSerialization.data(withJSONObject: json)
-    if expectAbsent {
-        let existing = try KeychainReadAccess.read(service: service, account: account, allowInteraction: false)
-        guard existing == nil else { throw err("钥匙串条目在写入前已由其他程序创建，未覆盖。") }
-    } else if let expected {
-        let existing = try KeychainReadAccess.read(service: service, account: account, allowInteraction: false)
-        let same = (existing.flatMap { try? CLIJSON.encode(CLIJSON.object($0)) }) == (try? CLIJSON.encode(CLIJSON.object(expected)))
-        guard same else { throw err("钥匙串登录在写入前已由其他程序更新，未覆盖。") }
+    if let expected {
+        guard let existing = try KeychainReadAccess.read(service: service, account: account, allowInteraction: false),
+              try CLIJSON.encode(CLIJSON.object(existing)) == CLIJSON.encode(CLIJSON.object(expected)) else {
+            throw err("钥匙串登录在写入前已由其他程序更新，未覆盖。")
+        }
     }
     let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: service, kSecAttrAccount as String: account]
-    var status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-    if status == errSecItemNotFound {
+    var status = expectAbsent ? errSecItemNotFound : SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
+    if status == errSecItemNotFound && expected == nil {
         var newItem = query; newItem[kSecValueData as String] = data
         status = SecItemAdd(newItem as CFDictionary, nil)
     }

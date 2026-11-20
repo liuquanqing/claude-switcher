@@ -7,6 +7,7 @@ import SwitcherCore
     private let markerURL: URL
     private let readSecret: (String, String) throws -> Data?
     private let writeSecret: (String, String, Data?) throws -> Void
+    private let writeBackupSnapshot: (String, String, Data, Data?) throws -> Void
     private let credentials: CLIStoredCredentialRouter
     private let backupPresence: (String, String) throws -> Bool
     private let audit: CredentialReadAudit
@@ -40,6 +41,17 @@ import SwitcherCore
             ? { service, account in try KeychainReadAccess.contains(service: service, account: account) }
             : { service, account in try reader(service, account) != nil }
         readSecret = reader; writeSecret = writer
+        writeBackupSnapshot = { service, account, data, expected in
+            if secretWriter == nil, secretReader == nil, interactionReader == nil {
+                try writeKeychain(service: service, account: account, json: CLIJSON.object(data),
+                                  ifUnchangedSince: expected, expectAbsent: expected == nil)
+            } else {
+                let current = try reader(service, account).map { try CLIJSON.encode(CLIJSON.object($0)) }
+                let snapshot = try expected.map { try CLIJSON.encode(CLIJSON.object($0)) }
+                guard current == snapshot else { throw SafetyError("CLI 备份已变化，未覆盖。") }
+                try writer(service, account, data)
+            }
+        }
         let account = NSUserName()
         credentials = CLIStoredCredentialRouter(readPrimary: { try reader(cliService, account) },
             writePrimary: { try writer(cliService, account, $0) },
@@ -47,8 +59,20 @@ import SwitcherCore
             writeFile: { try CLIPrivateFile.write($0, to: credentialFile) },
             writeFileIfUnchanged: { data, expected in try CLIPrivateFile.write(data, to: credentialFile, ifUnchangedSince: expected) },
             writePrimaryIfUnchanged: { data, expected, absent in
+                if secretWriter != nil || secretReader != nil || interactionReader != nil {
+                    guard let secretWriter, try reader(cliService, account) == expected else {
+                        throw SafetyError("CLI 登录已变化或只读，未覆盖。")
+                    }
+                    try secretWriter(cliService, account, data)
+                    return
+                }
                 if let data { try writeKeychain(service: cliService, account: NSUserName(), json: CLIJSON.object(data), ifUnchangedSince: expected, expectAbsent: absent) }
-                else { try writer(cliService, NSUserName(), nil) }
+                else {
+                    guard try reader(cliService, account) == expected else {
+                        throw SafetyError("默认 CLI 登录已变化，未删除。")
+                    }
+                    try writer(cliService, account, nil)
+                }
             })
     }
     private func readFile(_ path: URL) throws -> Data? {
@@ -78,7 +102,7 @@ import SwitcherCore
             guard [errSecSuccess, errSecItemNotFound].contains(status) else { throw err("CLI 还原失败（状态 \(status)）。") }
         }
     }
-    func readIdentityDocument() throws -> Data? { try readFile(identityURL) }
+    func readIdentityDocument() throws -> Data? { try CLIPrivateFile.readDocument(identityURL) }
     func writeIdentityDocument(_ data: Data?) throws { try writeFile(data, path: identityURL) }
     func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws {
         try CLIPrivateFile.writeDocument(data, to: identityURL, ifUnchangedSince: expected)
@@ -87,6 +111,9 @@ import SwitcherCore
     func containsBackup(_ profile: String) throws -> Bool { try backupPresence(switcherService, "cli-" + profile) }
     func writeBackup(_ profile: String, data: Data) throws {
         try writeSecret(switcherService, "cli-" + profile, data)
+    }
+    func writeBackup(_ profile: String, data: Data, ifUnchangedSince expected: Data?) throws {
+        try writeBackupSnapshot(switcherService, "cli-" + profile, data, expected)
     }
     func readMarker() throws -> String? {
         guard let data = try readFile(markerURL) else { return nil }

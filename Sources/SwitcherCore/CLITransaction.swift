@@ -9,11 +9,19 @@ import Foundation
     func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws
     func readBackup(_ profile: String) throws -> Data?
     func writeBackup(_ profile: String, data: Data) throws
+    func writeBackup(_ profile: String, data: Data, ifUnchangedSince expected: Data?) throws
     func readMarker() throws -> String?
     func writeMarker(_ value: String?) throws
 }
 
 @MainActor public extension CLICredentialIO {
+    func writeBackup(_ profile: String, data: Data, ifUnchangedSince expected: Data?) throws {
+        let current = try readBackup(profile).map { try CLIJSON.encode(CLIJSON.object($0)) }
+        let snapshot = try expected.map { try CLIJSON.encode(CLIJSON.object($0)) }
+        guard current == snapshot else { throw SafetyError("CLI 备份已变化，未覆盖。") }
+        try writeBackup(profile, data: data)
+    }
+
     func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws {
         guard try readIdentityDocument() == expected else { throw SafetyError("CLI 身份文件在写入前已被其他程序更新，未覆盖。") }
         try writeIdentityDocument(data)
@@ -201,7 +209,7 @@ public struct PreparedCLISwitch {
                 guard try normalized(io.readBackup(name)) == plan.sourceBackupBefore else {
                     throw SafetyError("切出账号的 CLI 备份在核验期间变化，未覆盖，请重试。")
                 }
-                try io.writeBackup(name, data: data)
+                try io.writeBackup(name, data: data, ifUnchangedSince: plan.sourceBackupBefore)
                 guard try normalized(io.readBackup(name)) == data else { throw SafetyError("CLI 备份回读未通过，未移动桌面目录。") }
             }
         }
@@ -209,7 +217,7 @@ public struct PreparedCLISwitch {
             guard try normalized(io.readBackup(plan.targetName)) == plan.targetBackupBefore else {
                 throw SafetyError("目标 CLI 备份在核验期间变化，未覆盖，请重试。")
             }
-            try io.writeBackup(plan.targetName, data: data)
+            try io.writeBackup(plan.targetName, data: data, ifUnchangedSince: plan.targetBackupBefore)
             guard try normalized(io.readBackup(plan.targetName)) == data else { throw SafetyError("目标 CLI 备份回读未通过，桌面目录未移动。") }
         }
     }
@@ -222,13 +230,15 @@ public struct PreparedCLISwitch {
     }
     public func apply(_ plan: PreparedCLISwitch, requireUsableLogin: Bool = false) throws -> CLIRestoration {
         try revalidate(plan)
-        if requireUsableLogin {
+        func checkTargetExpiry() throws {
+            guard requireUsableLogin else { return }
             let at = now()
             guard plan.restoration == .verifiedLogin, plan.desired.usableAccessToken(now: at) != nil,
                   let expiry = CLIBackupFreshness.expiry(plan.desired), expiry > at.timeIntervalSince1970 * 1000 else {
-                throw SafetyError("恢复时未能确认有效 CLI 登录，请在官方 CLI 登录后重试。")
+                throw SafetyError("无法提交有效的 CLI 登录，请先在官方 CLI 中确认登录。")
             }
         }
+        try checkTargetExpiry()
         let oldMarker = plan.originalMarker
         var credentialsAttempted = false, identityAttempted = false, markerAttempted = false
         var credentialsWerePresent = false, identityWasPresent = false
@@ -240,6 +250,7 @@ public struct PreparedCLISwitch {
             }
             let newCredentials = try CLIJSON.replacing(credentials, key: "claudeAiOauth", with: plan.desired.oauth)
             if try normalized(credentials) != newCredentials {
+                try checkTargetExpiry()
                 credentialsAttempted = true; try io.writeCredentials(newCredentials)
             }
             let document = try io.readIdentityDocument()
@@ -249,18 +260,14 @@ public struct PreparedCLISwitch {
             }
             let newDocument = try CLIJSON.replacing(document, key: "oauthAccount", with: plan.desired.metadata)
             if try normalized(document) != newDocument {
+                try checkTargetExpiry()
                 identityAttempted = true; try io.writeIdentityDocument(newDocument, ifUnchangedSince: document)
             }
             markerAttempted = true; try io.writeMarker(plan.targetName)
             guard try readOwned() == plan.desired, try io.readMarker() == plan.targetName else {
                 throw SafetyError("CLI 保存登录回读不一致。")
             }
-            if requireUsableLogin {
-                let committedAt = now()
-                guard let expiry = CLIBackupFreshness.expiry(plan.desired), expiry > committedAt.timeIntervalSince1970 * 1000 else {
-                    throw SafetyError("CLI 登录在提交期间到期，已还原；请在官方 CLI 登录后重试。")
-                }
-            }
+            try checkTargetExpiry()
             return plan.restoration
         } catch {
             if markerAttempted {

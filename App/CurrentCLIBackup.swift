@@ -4,7 +4,7 @@ import SwitcherCore
 @MainActor extension Store {
     func maintainCurrentCLIBackup(now: Date = Date(), operation: (() async throws -> Void)? = nil) async {
         guard !isDemo || operation != nil else { return }
-        guard !updating, busy == nil, !refreshing, !statusRefreshInProgress, !currentCLIRecoveryRunning,
+        guard !updating, busy == nil, !refreshing, !statusRefreshInProgress, !currentCLIRecoveryRunning, !defaultCLISyncNeedsReview,
               cliProfile == current, [.unverified, .reported, .matched].contains(cliStatus),
               let identity = active?.snapshot?.identity,
               cliObservedIdentity?.samePrincipal(as: identity) == true,

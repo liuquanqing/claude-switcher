@@ -62,7 +62,7 @@ import Foundation
         guard try contextIsCurrent(), try live() == original, try io.readBackup(target.name) == previous else {
             throw SafetyError("登录、账号或备份已变化，未覆盖备份。")
         }
-        try io.writeBackup(target.name, data: data)
+        try io.writeBackup(target.name, data: data, ifUnchangedSince: previous)
         guard try io.readBackup(target.name) == data else {
             throw SafetyError("CLI 备份回读未通过，当前登录保持原样。")
         }

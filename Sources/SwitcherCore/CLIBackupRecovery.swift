@@ -86,7 +86,7 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
             throw SafetyError("恢复的登录不比现有已核验备份更新，保留原备份与恢复资料。")
         }
         do {
-            try io.writeBackup(target.name, data: verified)
+            try io.writeBackup(target.name, data: verified, ifUnchangedSince: raw)
             guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == verified else {
                 throw SafetyError("readback")
             }

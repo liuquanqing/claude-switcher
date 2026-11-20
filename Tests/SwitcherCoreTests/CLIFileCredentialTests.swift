@@ -66,6 +66,30 @@ import XCTest
         XCTAssertNotNil(try CLIJSON.object(io.document!)["projects"])
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: io.file.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
+    func testConditionalMirrorRollbackUsesLatestBytesAndPreservesFormattingOnFailure() throws {
+        let original = try login(a)
+        let next = try login(b)
+        let object = ["claudeAiOauth": try CLIJSON.object(original.oauth!)]
+        let raw = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])
+        var primary: Data? = raw
+        var file: Data? = raw
+        var primaryWrites = 0
+        let router = CLIStoredCredentialRouter(readPrimary: { primary }, writePrimary: { _ in XCTFail() },
+            readFile: { file }, writeFile: { _ in XCTFail() }, writeFileIfUnchanged: { replacement, snapshot in
+                XCTAssertEqual(snapshot, file)
+                if file == raw { throw SafetyError("fixture denied file write") }
+                file = replacement
+            }, writePrimaryIfUnchanged: { replacement, snapshot, _ in
+                XCTAssertEqual(snapshot, primary)
+                primaryWrites += 1
+                primary = replacement
+            })
+        let initial = try router.read()
+        XCTAssertThrowsError(try router.write(CLIJSON.replacing(initial, key: "claudeAiOauth", with: next.oauth)))
+        XCTAssertEqual(primaryWrites, 2)
+        XCTAssertEqual(try CLIJSON.field(primary, key: "claudeAiOauth"), original.oauth)
+        XCTAssertEqual(file, raw)
+    }
     func testIdenticalDualStoresAreUpdatedTogetherWithoutCopyingUnrelatedFields() async throws {
         let (io, tx) = try fixture(mirrored: true), p = try await prepare(tx)
         try tx.persistOutgoing(p); _ = try tx.apply(p)

@@ -127,16 +127,15 @@ public enum CLIPrivateFile {
         self.writePrimaryIfUnchanged = writePrimaryIfUnchanged
     }
     /// Snapshots for conditional writes come from the pinned observation, not extra store reads.
-    private func writeCredentialFile(_ data: Data?) throws {
-        if let writeFileIfUnchanged { try writeFileIfUnchanged(data, observed?.file) } else { try writeFile(data) }
+    private func writeCredentialFile(_ data: Data?, expected: Data?) throws {
+        if let writeFileIfUnchanged { try writeFileIfUnchanged(data, expected) } else { try writeFile(data) }
     }
-    private func writeCredentialPrimary(_ data: Data?) throws {
-        if let writePrimaryIfUnchanged { try writePrimaryIfUnchanged(data, observed?.primary, observed?.primary == nil) } else { try writePrimary(data) }
+    private func writeCredentialPrimary(_ data: Data?, expected: Data?) throws {
+        if let writePrimaryIfUnchanged { try writePrimaryIfUnchanged(data, expected, expected == nil) } else { try writePrimary(data) }
     }
-    private func normalized(_ data: Data?) throws -> Data? { try data.map { try CLIJSON.encode(CLIJSON.object($0)) } }
     private func containers() throws -> Observation {
         // A denied/locked Keychain is not proof that the primary login is absent.
-        try Observation(primary: normalized(readPrimary()), file: normalized(readFile()))
+        try Observation(primary: readPrimary(), file: readFile())
     }
     private func oauth(_ data: Data?) throws -> Data? { try CLIJSON.field(data, key: "claudeAiOauth") }
     private func route(_ value: Observation) throws -> Kind {
@@ -167,22 +166,22 @@ public enum CLIPrivateFile {
         let desired = try oauth(data)
         func replacing(_ value: Data?) throws -> Data? { try CLIJSON.replacing(value, key: "claudeAiOauth", with: desired) }
         switch kind {
-        case .keychain: try writeCredentialPrimary(replacing(before.primary))
-        case .file: try writeCredentialFile(replacing(before.file))
+        case .keychain: try writeCredentialPrimary(replacing(before.primary), expected: before.primary)
+        case .file: try writeCredentialFile(replacing(before.file), expected: before.file)
         case .mirrored:
             var primaryAttempted = false, fileAttempted = false
             do {
-                primaryAttempted = true; try writeCredentialPrimary(replacing(before.primary))
+                primaryAttempted = true; try writeCredentialPrimary(replacing(before.primary), expected: before.primary)
                 // Do not overwrite a CLI refresh between the two store writes.
-                guard try normalized(readFile()) == before.file else { throw SafetyError("凭据文件已被其他操作修改。") }
-                fileAttempted = true; try writeCredentialFile(replacing(before.file))
+                guard try readFile() == before.file else { throw SafetyError("凭据文件已被其他操作修改。") }
+                fileAttempted = true; try writeCredentialFile(replacing(before.file), expected: before.file)
             } catch {
-                func restore(_ original: Data?, read: () throws -> Data?, write: (Data?) throws -> Void) throws {
-                    let current = try normalized(read()), field = try oauth(current), old = try oauth(original)
+                func restore(_ original: Data?, read: () throws -> Data?, write: (Data?, Data?) throws -> Void) throws {
+                    let current = try read(), field = try oauth(current), old = try oauth(original)
                     if field == old { return }
                     guard field == desired else { throw SafetyError("CLI 登录已被外部修改。") }
                     let restored = try CLIJSON.replacing(current, key: "claudeAiOauth", with: old)
-                    try write(restored ?? (original == nil ? nil : Data("{}".utf8)))
+                    try write(restored ?? (original == nil ? nil : Data("{}".utf8)), current)
                     guard try oauth(read()) == old else { throw SafetyError("CLI 登录还原回读未通过。") }
                 }
                 var restored = true

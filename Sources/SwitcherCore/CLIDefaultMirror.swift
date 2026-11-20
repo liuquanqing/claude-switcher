@@ -4,8 +4,7 @@ import Darwin
 /// The default CLI login is a view of the current account's own login: its isolated directory when
 /// one exists, otherwise the verified per-profile backup. Switching copies the owned OAuth field
 /// and `oauthAccount` into the default store through the existing transaction, so unrelated
-/// settings, MCP logins and every account's original stay untouched. Transcript links are recorded
-/// per owner and removed on the next switch; nothing is symlinked and no terminal is stopped.
+/// settings, MCP logins and directory histories remain where they are.
 @MainActor public enum CLIDefaultMirror {
     /// Credential access for an account's own directory. The official CLI may keep the login in a
     /// directory-scoped Keychain item, a private file, or both; the router decides and refuses
@@ -110,15 +109,7 @@ import Darwin
             }
         }
         guard let access = login.usableAccessToken(now: now()) else {
-            if previous == nil {
-                // Another writer may have created the slot meanwhile; never overwrite it.
-                guard try io.readBackup(target.name) == nil else { return SyncResult(observed: login, verifiedRecord: nil) }
-                let data = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login.oauth!), "oauthAccount": CLIJSON.object(login.metadata!)])
-                try io.writeBackup(target.name, data: data)
-                guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == data else {
-                    throw SafetyError("CLI 备份回读未通过，默认登录保持原样。")
-                }
-            }
+            if previous == nil { throw SafetyError("独立目录登录需要续期，请先在该目录的官方 CLI 中确认登录。") }
             return SyncResult(observed: login, verifiedRecord: nil)
         }
         let actual = try await verify(access)
@@ -129,8 +120,7 @@ import Darwin
             throw SafetyError("独立目录的 CLI 登录在核验期间变化，请重试。")
         }
         let data = try CLIBackup.verifiedData(login: login, identity: actual, now: now())
-        guard try io.readBackup(target.name) == previous else { throw SafetyError("CLI 备份在同步期间变化，请重试。") }
-        try io.writeBackup(target.name, data: data)
+        try io.writeBackup(target.name, data: data, ifUnchangedSince: previous)
         guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == data else {
             throw SafetyError("CLI 备份回读未通过，默认登录保持原样。")
         }
@@ -206,18 +196,21 @@ import Darwin
 
     /// Pure classification of `ps -axo pid=,comm=` output. `own` are the CLI helpers this app
     /// spawned for status or renewal; they are not user terminals. This never signals a process.
-    public static func terminalProcesses(psOutput: String, own: Set<Int32>) -> [Int32] {
+    public static func terminalProcesses(psOutput: String, own: Set<Int32>, nativeVersions: URL? = nil) -> [Int32] {
         psOutput.split(separator: "\n").compactMap { line in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             guard let split = trimmed.firstIndex(where: { $0 == " " || $0 == "\t" }),
                   let pid = Int32(trimmed[..<split]), !own.contains(pid) else { return nil }
             let command = trimmed[split...].trimmingCharacters(in: .whitespaces)
-            return command == "claude" || command.hasSuffix("/claude") ? pid : nil
+            let native = nativeVersions.map { command.hasPrefix($0.path + "/") } == true
+            return command == "claude" || command.hasSuffix("/claude") || native ? pid : nil
         }
     }
 
-    /// After the desktop moved: put the target's login into the default store, keep the outgoing
-    /// account's newest default login in its backup, and share the target's transcripts. A target
+    /// Single holder: while an account is current only the default store holds its live login.
+    /// After the desktop moved, the outgoing default login is first saved to its backup and then
+    /// written back into the outgoing account's own directory; only then is the target's login put
+    /// into the default store. A failed write-back stops before the default changes. A target
     /// without any saved login leaves the previous default login in place and still backs it up.
     public static func follow(transaction: CLITransaction, target: CLIProfileIdentity, profiles: [CLIProfileIdentity],
                               home: URL, repository: CLIBindingRepository,
@@ -230,7 +223,10 @@ import Darwin
                               terminalsNow: () -> [Int32] = { [] }) async throws -> Outcome {
         let before = terminalsBefore()
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
-        let source = try isolatedDirectory(identity: target.identity!, profile: target.name, home: home, repository: repository).map(storeFor)
+        guard let identity = target.identity, identity.isComplete else {
+            throw SafetyError("目标账号或组织尚未确认，未修改终端登录。")
+        }
+        let source = try isolatedDirectory(identity: identity, profile: target.name, home: home, repository: repository).map(storeFor)
         let sync = try await syncBackup(target: target, store: source, io: transaction.io, now: now, verify: remote)
         let observed = sync.observed
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
@@ -248,7 +244,9 @@ import Darwin
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         if plan.restoration == .needsLogin {
             try transaction.persistOutgoing(plan)
-            return Outcome(restoration: .needsLogin, previousTerminals: before.filter { Set(terminalsNow()).contains($0) }.count)
+            try returnOutgoingLogin(plan: plan, target: target, profiles: profiles, home: home,
+                                    repository: repository, storeFor: storeFor, io: transaction.io, now: now)
+            return Outcome(restoration: .needsLogin, previousTerminals: Set(before).intersection(terminalsNow()).count)
         }
         // The follow path promises an online-verified login; a merely stored backup is not enough.
         guard plan.restoration == .verifiedLogin, plan.desired.usableAccessToken(now: now()) != nil else {
@@ -256,6 +254,8 @@ import Darwin
             throw SafetyError("目标终端登录本次未能在线核验，默认登录保持原样；请在终端里确认登录后重试。")
         }
         try transaction.persistOutgoing(plan)
+        try returnOutgoingLogin(plan: plan, target: target, profiles: profiles, home: home,
+                                repository: repository, storeFor: storeFor, io: transaction.io, now: now)
         guard try await contextIsCurrent() else { throw SafetyError("桌面账号已变化，未修改终端登录。") }
         // Last asynchronous step is done: re-read the source once more immediately before commit.
         if let source, let expected = target.identity, try ownedLogin(in: source, expected: expected) != observed {
@@ -264,5 +264,23 @@ import Darwin
         let restoration = try transaction.apply(plan, requireUsableLogin: true)
         let alive = Set(terminalsNow())
         return Outcome(restoration: restoration, linkedTranscripts: 0, previousTerminals: before.filter { alive.contains($0) }.count)
+    }
+
+    /// Write the outgoing default login back into the outgoing account's own directory, using the
+    /// proof that `persistOutgoing` just saved for this exact credential. The directory keeps its
+    /// login when it is already the same or has the later expiry; an account without its own
+    /// directory relies on the backup alone.
+    private static func returnOutgoingLogin(plan: PreparedCLISwitch, target: CLIProfileIdentity, profiles: [CLIProfileIdentity],
+                                            home: URL, repository: CLIBindingRepository, storeFor: (URL) -> DirectoryStore,
+                                            io: CLICredentialIO, now: () -> Date) throws {
+        guard let outgoing = plan.sourceName, outgoing != target.name,
+              let identity = profiles.first(where: { $0.name == outgoing })?.identity, identity.isComplete,
+              let directory = try isolatedDirectory(identity: identity, profile: outgoing, home: home, repository: repository) else { return }
+        let verification = try io.readBackup(outgoing).flatMap { try CLIBackup(data: $0).verification }
+        do {
+            try refreshOwnDirectory(from: io, store: storeFor(directory), expected: identity, verified: verification, now: now)
+        } catch {
+            throw SafetyError("切出账号的登录未能写回它的独立目录，默认登录保持原样：\(error.localizedDescription)")
+        }
     }
 }

@@ -10,7 +10,7 @@ struct DesktopOnlySwitchOffer: Equatable {
 
 @MainActor extension Store {
     func confirmDesktopOnlySwitch() async {
-        guard busy == nil, !refreshing, let offer = desktopOnlyOffer else { return }
+        guard busy == nil, !refreshing, !currentCLIRecoveryRunning, let offer = desktopOnlyOffer else { return }
         desktopOnlyOffer = nil
         await switchDesktopOnly(from: offer.source, to: offer.target, announce: true)
     }
@@ -30,6 +30,7 @@ struct DesktopOnlySwitchOffer: Equatable {
             cliStatusDetail = nil; cliStatusCheckedAt = nil; cliStandaloneVerified = false
             cliProfile = target; cliEmail = profiles.first { $0.name == target }?.snapshot?.email
             cliStatus = cliEmail == nil ? .needsLogin : .matched
+            cliFollowPending = nil
             cliStatusCheckedAt = cliEmail == nil ? nil : Date()
             if announce { banner = "演示：桌面与默认终端登录已一起切换。" }
             return
@@ -72,16 +73,19 @@ struct DesktopOnlySwitchOffer: Equatable {
 
     /// Read-only list of user CLI processes; this app's own status/renewal helpers are excluded.
     func runningCLITerminals() -> [Int32] {
-        guard !isDemo, let output = try? LocalCommand.run("/bin/ps", ["-axo", "pid=,comm="]), output.0 == 0 else { return [] }
-        return CLIDefaultMirror.terminalProcesses(psOutput: output.1, own: BoundedCLICommand.ownProcessIDs())
+        guard !isDemo, let output = try? LocalCommand.run("/bin/ps", ["-U", NSUserName(), "-o", "pid=,comm="]), output.0 == 0 else { return [] }
+        let versions = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share/claude/versions")
+        return CLIDefaultMirror.terminalProcesses(psOutput: output.1, own: BoundedCLICommand.ownProcessIDs(), nativeVersions: versions)
     }
 
     private func followDefaultCLI(to target: String, terminalsBefore: [Int32]) async -> DefaultCLIFollow? {
+        guard !defaultCLISyncNeedsReview else {
+            return DefaultCLIFollow(restoration: .needsLogin, notice: "默认终端上次写入的还原结果待确认。")
+        }
         guard cliConfiguration().allowsSubscriptionMutation else {
             return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认 CLI 使用其他认证配置，登录保持原样。")
         }
-        busy = "正在让默认终端登录跟随账号…"
-        defer { busy = nil }
+        busy = "正在同步默认终端登录…"
         let home = FileManager.default.homeDirectoryForCurrentUser
         let io = NativeCLIStorage(allowInteraction: true)
         let repository = CLIBindingRepository(file: protection.files.directory.appendingPathComponent("cli-bindings.json"), home: home)
@@ -134,21 +138,42 @@ struct DesktopOnlySwitchOffer: Equatable {
             // A transaction whose rollback could not be confirmed must not offer an automatic retry.
             if message.contains("还原未确认") || message.contains("回滚未确认") || message.contains("停止切换") {
                 cliFollowPending = nil
-                return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认终端登录未跟随：\(message)")
+                defaultCLISyncNeedsReview = true
+                return DefaultCLIFollow(restoration: .needsLogin, notice: "默认终端登录同步未完成。\(message)")
             }
             cliFollowPending = target
-            return DefaultCLIFollow(restoration: .needsLogin, notice: "桌面已切换；默认终端登录未跟随：\(message)")
+            let remaining = Set(terminalsBefore).intersection(runningCLITerminals()).count
+            let oldTerminals = followNotice(target: target, restoration: .storedLogin, previousTerminals: remaining)
+            return DefaultCLIFollow(restoration: .needsLogin,
+                                    notice: ["默认终端登录同步未完成。\(message)", oldTerminals].compactMap { $0 }.joined(separator: " "))
         }
     }
 
-    /// Retry the terminal follow for the current desktop after a failed attempt.
-    func retryDefaultCLIFollow() async {
-        guard !isDemo, busy == nil, !refreshing, let target = cliFollowPending, target == current else { return }
+    var canSyncDefaultCLI: Bool {
+        protection.desktopScope == .subscription && !defaultCLISyncNeedsReview &&
+            (cliStatus == .different || cliFollowPending == current)
+    }
+
+    /// Correct a known mismatch or retry the sync for the current desktop.
+    func syncDefaultCLI() async {
+        guard canSyncDefaultCLI, !updating, busy == nil, !refreshing, !statusRefreshInProgress,
+              !currentCLIRecoveryRunning else { return }
+        let target = current
+        if isDemo {
+            let gate = await protection.preflight(target: .cli)
+            guard gate.allowed else { banner = gate.message; return }
+            cliFollowPending = nil
+            cliProfile = target
+            cliEmail = active?.snapshot?.email
+            cliStatus = .matched
+            return
+        }
+        defer { busy = nil }
         let before = runningCLITerminals()
         let result = await followDefaultCLI(to: target, terminalsBefore: before)
         await refreshCLI(verify: false)
         if let result { presentCLIRestoration(result.restoration, target: target, identity: active?.snapshot?.identity) }
-        banner = result?.notice ?? (cliFollowPending == nil ? "默认终端登录已跟随当前账号。" : banner)
+        banner = result?.notice ?? "默认终端登录已跟随当前账号。"
     }
 
     /// The account's own directory uses the official CLI's directory-scoped Keychain item with a
@@ -170,6 +195,9 @@ struct DesktopOnlySwitchOffer: Equatable {
             writeScopedIfUnchanged: { data, expected, absent in
                 if let data { try writeKeychain(service: service, account: account, json: CLIJSON.object(data), ifUnchangedSince: expected, expectAbsent: absent) }
                 else {
+                    guard try KeychainReadAccess.read(service: service, account: account, allowInteraction: false) == expected else {
+                        throw SafetyError("独立目录登录已变化，未删除。")
+                    }
                     let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
                     let status = SecItemDelete(query as CFDictionary)
                     guard [errSecSuccess, errSecItemNotFound].contains(status) else { throw SafetyError("独立目录登录还原失败（状态 \(status)）。") }

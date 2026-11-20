@@ -29,11 +29,15 @@ import XCTest
     var items: [String: Data] = [:]
     var denyRead = false
     var denyDocumentWrite = false
+    var denyWrite = false
     func store(_ directory: URL) -> CLIDefaultMirror.DirectoryStore {
         let key = directory.path
         return CLIDefaultMirror.DirectoryStore(directory: directory,
             readScoped: { [self] in if denyRead { throw SafetyError("fixture: keychain denied") }; return items[key] },
-            writeScoped: { [self] data in items[key] = data })
+            writeScoped: { [self] data in
+                if denyWrite { throw SafetyError("fixture: keychain write denied") }
+                items[key] = data
+            })
     }
 }
 
@@ -51,7 +55,7 @@ import XCTest
                       metadata: try CLIJSON.encode(["accountUuid": identity.accountID!, "organizationUuid": identity.organizationID!, "emailAddress": identity.email!]))
     }
     private func remote(_ token: String) async throws -> CLIIdentity {
-        if token == "access-a" || token == "access-a2" { return a }
+        if ["access-a", "access-a2", "access-a2", "access-a3"].contains(token) { return a }
         if token == "access-b" || token == "access-b2" { return b }
         throw SafetyError("fixture unknown token")
     }
@@ -190,9 +194,12 @@ import XCTest
           103 /Applications/Claude.app/Contents/MacOS/Claude
           104 /opt/homebrew/bin/node
           105 /Users/test/.local/bin/claude-helper
+          106 /Users/test/.local/share/claude/versions/2.1.328
         """
         XCTAssertEqual(CLIDefaultMirror.terminalProcesses(psOutput: output, own: [102]), [101])
         XCTAssertEqual(CLIDefaultMirror.terminalProcesses(psOutput: output, own: []), [101, 102])
+        let versions = URL(fileURLWithPath: "/Users/test/.local/share/claude/versions")
+        XCTAssertEqual(CLIDefaultMirror.terminalProcesses(psOutput: output, own: [102], nativeVersions: versions), [101, 106])
     }
 
     func testOldTerminalsAreReportedNotTerminated() async throws {
@@ -644,22 +651,27 @@ import XCTest
     func testTargetSlotChangedWhileWritingOutgoingIsNotOverwritten() async throws {
         let f = try fixture()
         // B backup is an older unverified record; the transaction would upgrade it.
-        f.io.backups["Design"] = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login(b, token: "access-b", expired: true).oauth!), "oauthAccount": CLIJSON.object(login(b, token: "access-b").metadata!)])
+        f.io.backups["Design"] = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(login(b, token: "access-b").oauth!), "oauthAccount": CLIJSON.object(login(b, token: "access-b").metadata!)])
         // No isolated source: the transaction itself upgrades the pending target slot.
         try FileManager.default.removeItem(at: f.isolatedB)
         let newerByOther = try CLIBackup.verifiedData(login: login(b, token: "access-b2", lifetime: 99999), identity: b, now: date)
         let credentials = f.io.credentials
+        var wroteConcurrentBackup = false
         // The other writer lands while the outgoing default is being verified online, i.e. after
         // prepare captured the target slot but before persistOutgoing writes it.
         do {
             _ = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: profiles[1], profiles: profiles,
                 home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home),
                 remote: { token in
-                    if token == "access-a" { f.io.backups["Design"] = newerByOther }
+                    if token == "access-a" {
+                        f.io.backups["Design"] = newerByOther
+                        wroteConcurrentBackup = true
+                    }
                     return try await self.remote(token)
                 }, now: { self.date })
             XCTFail("must stop")
         } catch {}
+        XCTAssertTrue(wroteConcurrentBackup)
         XCTAssertEqual(f.io.credentials, credentials)
         XCTAssertEqual(f.io.backups["Design"], newerByOther)
     }
@@ -691,5 +703,71 @@ import XCTest
         // Stale expectation aborts.
         do { try CLIPrivateFile.writeDocument(data, to: document, ifUnchangedSince: existing); XCTFail("stale") } catch {}
         XCTAssertEqual(try CLIPrivateFile.readDocument(document), updated)
+    }
+
+    // MARK: Single holder: the outgoing default login returns to its own directory before the switch
+
+    /// Default holds A renewed in place (later expiry); A's own directory still holds the seed.
+    private func renewedDefaultA(_ f: (home: URL, io: MirrorIO, repository: CLIBindingRepository, isolatedB: URL)) throws -> CLIOwnedLogin {
+        let renewed = try login(a, token: "access-a2", lifetime: 7200)
+        f.io.credentials = try CLIJSON.replacing(f.io.credentials, key: "claudeAiOauth", with: renewed.oauth)
+        f.io.document = try CLIJSON.replacing(f.io.document, key: "oauthAccount", with: renewed.metadata)
+        return renewed
+    }
+    private func isolatedA(_ home: URL) throws -> URL { try CLIBinding.directory(for: .isolated, identity: a, home: home) }
+
+    func testSwitchAwayWritesRenewedDefaultBackIntoOutgoingOwnDirectoryBeforeCommit() async throws {
+        let f = try fixture()
+        let ownA = try isolatedA(f.home)
+        try writeIsolated(ownA, login(a, token: "access-a"), extra: ["isolatedOnly": true])
+        let renewed = try renewedDefaultA(f)
+        _ = try await follow(f)
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(ownA), expected: a), renewed,
+                       "the outgoing account's own directory receives the renewed default login")
+        XCTAssertEqual(try CLIJSON.object(CLIPrivateFile.read(ownA.appendingPathComponent(".claude.json"))!)["isolatedOnly"] as? Bool, true,
+                       "only the owned login fields are replaced in the own directory")
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, renewed)
+        XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), try login(b, token: "access-b"))
+    }
+
+    func testFailedWriteBackStopsBeforeDefaultChanges() async throws {
+        let f = try fixture()
+        let ownA = try isolatedA(f.home)
+        try FileManager.default.createDirectory(at: ownA, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let seed = try login(a, token: "access-a")
+        secrets.items[ownA.path] = try CLIJSON.replacing(nil, key: "claudeAiOauth", with: seed.oauth)
+        try CLIPrivateFile.write(CLIJSON.encode(["oauthAccount": CLIJSON.object(seed.metadata!)]), to: ownA.appendingPathComponent(".claude.json"))
+        let renewed = try renewedDefaultA(f)
+        secrets.denyWrite = true
+        do { _ = try await follow(f); XCTFail("a failed write-back must stop the switch") }
+        catch { XCTAssertTrue(error.localizedDescription.contains("未能写回")) }
+        XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), renewed,
+                       "the default keeps the outgoing login when it could not be returned")
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(ownA), expected: a), seed)
+        XCTAssertEqual(try CLIBackup(data: f.io.backups["Personal"]!).login, renewed, "the backup is written first")
+    }
+
+    func testWriteBackKeepsOwnDirectoryWithLaterExpiry() async throws {
+        let f = try fixture()
+        let ownA = try isolatedA(f.home)
+        let newer = try login(a, token: "access-a3", lifetime: 9000)
+        try writeIsolated(ownA, newer)
+        _ = try await follow(f)
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(ownA), expected: a), newer,
+                       "an own directory renewed later is never replaced by an older default")
+        XCTAssertEqual(try CLIOwnedLogin(credentials: f.io.credentials, identityDocument: f.io.document), try login(b, token: "access-b"))
+    }
+
+    func testWriteBackAlsoRunsWhenTargetHasNoLogin() async throws {
+        let f = try fixture()
+        let ownA = try isolatedA(f.home)
+        try writeIsolated(ownA, login(a, token: "access-a"))
+        let renewed = try renewedDefaultA(f)
+        let c = CLIIdentity(accountID: "account-c", organizationID: "org-c", email: "c@example.test")
+        let all = profiles + [.init(name: "Business", identity: c)]
+        let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: f.io, now: { self.date }), target: all[2], profiles: all,
+            home: f.home, repository: f.repository, storeFor: store, journalURL: journal(f.home), remote: remote, now: { self.date })
+        XCTAssertEqual(outcome.restoration, .needsLogin)
+        XCTAssertEqual(try CLIDefaultMirror.ownedLogin(in: store(ownA), expected: a), renewed)
     }
 }

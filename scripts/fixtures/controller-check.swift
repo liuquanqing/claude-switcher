@@ -343,8 +343,20 @@ actor FixtureGuardWorker: GuardWorking {
   store.protection.disable()
   await store.confirmDesktopOnlySwitch()
   require(store.current == "Business" && store.cliProfile == "Business", "a confirmed switch still requires network and guard gate")
+  store.cliProfile = "Personal"; store.cliStatus = .different
+  require(store.canSyncDefaultCLI, "a passive mismatch offers the manual sync without changing login")
+  await store.syncDefaultCLI()
+  require(store.cliProfile == "Personal" && store.cliStatus == .different, "manual sync honors the CLI gate")
+  await store.protection.enable()
+  await store.syncDefaultCLI()
+  require(store.current == "Business" && store.cliProfile == "Business" && !store.canSyncDefaultCLI,
+          "manual sync fixes the default login without switching the desktop")
+  store.cliStatus = .different; store.defaultCLISyncNeedsReview = true
+  require(!store.canSyncDefaultCLI, "unconfirmed rollback suppresses the sync action")
+  store.defaultCLISyncNeedsReview = false; store.cliStatus = .matched
+  store.protection.disable()
   require(store.followNotice(target: "Design", restoration: .needsLogin, previousTerminals: 2)
-          == "桌面已切换；Design 还没有保存的终端登录，默认终端仍是上一个账号。请在终端里登录该账号。 还有 2 个终端进程在运行，未被关闭；它们仍用启动时的登录。",
+          == "桌面已切换；Design 还没有保存的终端登录，默认终端仍是上一个账号。请在终端里登录该账号。 还有 2 个终端进程在运行，未被关闭。",
           "switch notice names the account without a saved login and reports old terminals without closing them")
   require(AppLocalization.text("switch.followOldTerminals", language: "en", arguments: ["count": "2", "target": "Design"]).contains("were not closed"),
           "old-terminal notice is localized")
