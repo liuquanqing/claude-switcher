@@ -23,7 +23,7 @@ import Foundation
             guard try backup.login.identity?.samePrincipal(as: expected) == true else {
                 throw SafetyError("现有 CLI 备份属于其他账号或组织，未覆盖。")
             }
-            if backup.login == original {
+            if backup.login == original, backup.verification != nil || verify == nil {
                 guard try contextIsCurrent(), try live() == original,
                       try io.readBackup(target.name) == previous else {
                     throw SafetyError("登录或备份已变化，请重新检查。")
@@ -43,17 +43,26 @@ import Foundation
             guard actual.isComplete, actual.samePrincipal(as: expected) else {
                 throw SafetyError("CLI 远端身份与当前账号不符，未更新备份。")
             }
+            if let previous, let backup = try? CLIBackup(data: previous), backup.login != original,
+               !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
+                return .upToDate
+            }
             data = try CLIBackup.verifiedData(login: original, identity: actual, now: now())
         } else {
             guard let oauth = original.oauth, let metadata = original.metadata else {
                 throw SafetyError("当前 CLI 登录不完整，未更新备份。")
+            }
+            // Without an online check a verified backup is never replaced: the local identity block
+            // can lag a new OAuth during an external sign-in. The next gated verification decides.
+            if let previous, let backup = try? CLIBackup(data: previous), backup.verification != nil {
+                return .upToDate
             }
             data = try CLIJSON.encode(["claudeAiOauth": CLIJSON.object(oauth), "oauthAccount": CLIJSON.object(metadata)])
         }
         guard try contextIsCurrent(), try live() == original, try io.readBackup(target.name) == previous else {
             throw SafetyError("登录、账号或备份已变化，未覆盖备份。")
         }
-        try io.writeBackup(target.name, data: data)
+        try io.writeBackup(target.name, data: data, ifUnchangedSince: previous)
         guard try io.readBackup(target.name) == data else {
             throw SafetyError("CLI 备份回读未通过，当前登录保持原样。")
         }

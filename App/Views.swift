@@ -1900,6 +1900,28 @@ struct Panel: View {
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))
             }
+            if store.canSyncDefaultCLI {
+                HStack(spacing: 8) {
+                    Image(systemName: "terminal").font(.system(size: 11)).foregroundColor(.warn)
+                    Text(t(store.cliStatus == .different ? "switch.followMismatch" : "switch.followPending"))
+                        .font(.system(size: 11)).foregroundColor(.warn)
+                        .lineLimit(1).truncationMode(.tail).minimumScaleFactor(0.85)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .help(t(store.cliStatus == .different ? "switch.followMismatch" : "switch.followPending"))
+                    Button { Task { await store.syncDefaultCLI() } } label: {
+                        Text(t("switch.retryFollow")).font(.system(size: 10.5, weight: .semibold)).foregroundColor(.claude)
+                            .lineLimit(1).fixedSize()
+                            .padding(.horizontal, 9).frame(height: 24)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.claude.opacity(0.12)))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(store.updating || store.busy != nil || store.refreshing || store.statusRefreshInProgress || store.currentCLIRecoveryRunning)
+                    .help(t("switch.retryFollowHelp"))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(RoundedRectangle(cornerRadius: 9).fill(Color.warn.opacity(0.1)))
+            }
             if let offer = store.desktopOnlyOffer {
                 VStack(alignment: .leading, spacing: 7) {
                     HStack(alignment: .top, spacing: 8) {

@@ -38,11 +38,20 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
                                remote: (String) async throws -> CLIIdentity) async throws -> Outcome {
         let original = try CLIOwnedLogin(credentials: io.readCredentials(), identityDocument: io.readIdentityDocument())
         guard let expected = target.identity, expected.isComplete else { return .notNeeded }
-        if original.hasSecrets, try original.identity?.samePrincipal(as: expected) == true {
-            if requireUsableLogin, original.usableAccessToken(now: now()) == nil {
-                throw SafetyError("当前默认 CLI 仍保留该账号的凭据。请在官方 CLI 中更新登录，再核对状态。")
+        let sameAccountDefault = original.hasSecrets && (try? original.identity?.samePrincipal(as: expected)) == true
+        if sameAccountDefault {
+            // A newer verified backup of the same account (renewed in its own directory) wins over
+            // an older or expired default; the transaction verifies it online this round.
+            if let raw = try io.readBackup(target.name), let backup = try? CLIBackup(data: raw),
+               backup.login.hasSecrets, (try? backup.login.identity?.samePrincipal(as: expected)) == true,
+               !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
+                if backup.login.usableAccessToken(now: now()) != nil { return .notNeeded }
+            } else {
+                if requireUsableLogin, original.usableAccessToken(now: now()) == nil {
+                    throw SafetyError("当前默认 CLI 仍保留该账号的凭据。请在官方 CLI 中更新登录，再核对状态。")
+                }
+                return .notNeeded
             }
-            return .notNeeded
         }
         guard let raw = try io.readBackup(target.name) else { return .notNeeded }
         let backup = try CLIBackup(data: raw)
@@ -73,8 +82,11 @@ public struct CLIRecoveryPersistenceFailure: Error, LocalizedError, Sendable {
             throw SafetyError("登录或备份在恢复期间变化，恢复资料已保留；请重新检查。")
         }
         let verified = try CLIBackup.verifiedData(login: recovered.login, identity: actual, now: now())
+        guard CLIBackupFreshness.mayReplace(recovered.login, verifiedBackup: backup) else {
+            throw SafetyError("恢复的登录不比现有已核验备份更新，保留原备份与恢复资料。")
+        }
         do {
-            try io.writeBackup(target.name, data: verified)
+            try io.writeBackup(target.name, data: verified, ifUnchangedSince: raw)
             guard try io.readBackup(target.name).map({ try CLIJSON.encode(CLIJSON.object($0)) }) == verified else {
                 throw SafetyError("readback")
             }

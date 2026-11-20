@@ -43,6 +43,8 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     @Published private(set) var checkedAt: Date?
     @Published private(set) var localRecord: CLILocalRecord = .unconfirmed
     @Published private(set) var legacyBackupAvailable = false
+    /// A restore whose rollback could not be confirmed stays unavailable until a fresh login check.
+    private var restoreBlockedFor: Set<String> = []
     var isBusy: Bool { phase == .checking || phase == .opening }
     private let operations: CLIConnectionOperations
     private var binding: CLIBinding?
@@ -131,8 +133,9 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             guard stillCurrent(context, generation: generation) else { return }
             let defaultRecord = operations.localRecord(context.identity, defaultBinding)
             defaultMatches = defaultStatus == .matched
+            if defaultMatches { restoreBlockedFor.remove(context.profile) }
             defaultLoginAvailable = defaultMatches || (defaultStatus == .notLoggedIn && defaultRecord != .differentAccount)
-            if showLoginChoices, !defaultMatches {
+            if showLoginChoices, !defaultMatches, !restoreBlockedFor.contains(context.profile) {
                 do { legacyBackupAvailable = try operations.hasRecoverableBackup(context) }
                 catch is CLIInteractionRequired { detail = "旧 CLI 备份暂无法检查。" }
                 catch { detail = error.localizedDescription }
@@ -153,6 +156,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             && operations.localRecord(context.identity, candidate) == .differentAccount)
         if candidate.choice == .defaultLogin {
             defaultMatches = status == .matched
+            if defaultMatches { restoreBlockedFor.remove(context.profile) }
             defaultLoginAvailable = !differs && (defaultMatches || status == .notLoggedIn)
         }
         guard !differs, status == .matched || status == .notLoggedIn else {
@@ -189,7 +193,12 @@ enum CLITerminalIntent: Equatable { case open, signIn }
         } catch {
             guard stillCurrent(expected, generation: generation) else { return }
             detail = error.localizedDescription
-            phase = .choosing
+            let message = error.localizedDescription
+            if message.contains("还原未确认") || message.contains("回滚未确认") || message.contains("停止切换") {
+                legacyBackupAvailable = false
+                restoreBlockedFor.insert(expected.profile)
+                phase = .unconfirmed
+            } else { phase = .choosing }
         }
     }
     func choose(_ selected: CLIBindingChoice) async {
@@ -215,6 +224,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     private func complete(_ status: CLIBindingStatus, binding: CLIBinding, access: CLIConnectionAccess,
                           context: CLIConnectionContext, generation: Int) async throws {
         if status == .matched, binding.choice == .defaultLogin {
+            restoreBlockedFor.remove(context.profile)
             await backupDefaultLogin(context, generation: generation)
             guard stillCurrent(context, generation: generation) else { return }
         }
@@ -247,6 +257,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
             checkedAt = Date()
             switch status {
             case .matched:
+                if binding.choice == .defaultLogin { restoreBlockedFor.remove(context.profile) }
                 if binding.choice == .defaultLogin {
                     await backupDefaultLogin(context, generation: generation)
                     guard stillCurrent(context, generation: generation) else { return }

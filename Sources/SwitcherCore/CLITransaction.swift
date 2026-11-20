@@ -5,10 +5,27 @@ import Foundation
     func writeCredentials(_ data: Data?) throws
     func readIdentityDocument() throws -> Data?
     func writeIdentityDocument(_ data: Data?) throws
+    /// Replace the identity document only if it still equals the snapshot read this round.
+    func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws
     func readBackup(_ profile: String) throws -> Data?
     func writeBackup(_ profile: String, data: Data) throws
+    func writeBackup(_ profile: String, data: Data, ifUnchangedSince expected: Data?) throws
     func readMarker() throws -> String?
     func writeMarker(_ value: String?) throws
+}
+
+@MainActor public extension CLICredentialIO {
+    func writeBackup(_ profile: String, data: Data, ifUnchangedSince expected: Data?) throws {
+        let current = try readBackup(profile).map { try CLIJSON.encode(CLIJSON.object($0)) }
+        let snapshot = try expected.map { try CLIJSON.encode(CLIJSON.object($0)) }
+        guard current == snapshot else { throw SafetyError("CLI 备份已变化，未覆盖。") }
+        try writeBackup(profile, data: data)
+    }
+
+    func writeIdentityDocument(_ data: Data?, ifUnchangedSince expected: Data?) throws {
+        guard try readIdentityDocument() == expected else { throw SafetyError("CLI 身份文件在写入前已被其他程序更新，未覆盖。") }
+        try writeIdentityDocument(data)
+    }
 }
 
 public enum CLIRestoration: Equatable, Sendable { case needsLogin, storedLogin, verifiedLogin }
@@ -24,6 +41,7 @@ public struct CLIPreparationFailure: Error, LocalizedError, Sendable {
 public struct PreparedCLISwitch {
     let original: CLIOwnedLogin
     let originalMarker: String?
+    let sourceBackupBefore: Data?
     let targetName: String
     let targetBackupBefore: Data?
     let targetBackupAfter: Data?
@@ -35,7 +53,7 @@ public struct PreparedCLISwitch {
 }
 
 @MainActor public final class CLITransaction {
-    private let io: CLICredentialIO
+    public let io: CLICredentialIO
     private let now: () -> Date
     public init(io: CLICredentialIO, now: @escaping () -> Date = Date.init) { self.io = io; self.now = now }
     public func readOwned() throws -> CLIOwnedLogin {
@@ -71,12 +89,15 @@ public struct PreparedCLISwitch {
         throw SafetyError("\(context) CLI 登录需要刷新或重新确认；旧备份保留，目录未移动。可先用原切换器切到对应档案，在 CLI 登录后再回来重试。")
     }
 
+    /// Records already written and verified this round (profile -> backup data). The transaction
+    /// reuses them instead of writing the same slot twice with a new timestamp.
+    public var preverified: [String: Data] = [:]
     public func prepare(target: CLIProfileIdentity, profiles: [CLIProfileIdentity], requiresTargetLogin: Bool = false,
                         remote: (String) async throws -> CLIIdentity) async throws -> PreparedCLISwitch {
         let original = try readOwned()
         let originalMarker = try io.readMarker()
         let targetRaw = try normalized(io.readBackup(target.name))
-        var sourceName: String?, sourceData: Data?
+        var sourceName: String?, sourceData: Data?, sourceRaw: Data?
         var sourceIdentity: CLIIdentity?, sourceRemote = false
         if original.hasSecrets {
             guard let metadata = try original.identity, metadata.isComplete else {
@@ -86,7 +107,16 @@ public struct PreparedCLISwitch {
             guard candidates.count == 1, let source = candidates.first else {
                 throw SafetyError("当前 CLI 登录不能唯一关联到桌面档案，未修改账号；请先刷新档案身份。")
             }
+            sourceRaw = try normalized(io.readBackup(source.name))
             let prior = try io.readBackup(source.name).map(CLIBackup.init(data:))
+            // An expired outgoing default need not be verified online when a newer verified backup
+            // of the same account already exists; that backup is kept and becomes the candidate.
+            if let prior, prior.login.hasSecrets, original.usableAccessToken(now: now()) == nil,
+               let priorIdentity = try prior.login.identity, let expected = source.identity, priorIdentity.samePrincipal(as: expected),
+               let trusted = try prior.trustedIdentity(), !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
+                sourceName = source.name; sourceIdentity = trusted; sourceRemote = false
+                sourceData = nil
+            } else {
             let checked = try await verify(original, trusted: prior, context: "当前", expected: source.identity, remote: remote)
             if let prior, prior.login.hasSecrets {
                 guard let priorIdentity = try prior.login.identity, priorIdentity.samePrincipal(as: checked.0) else {
@@ -95,21 +125,59 @@ public struct PreparedCLISwitch {
             }
             sourceName = source.name; sourceIdentity = checked.0; sourceRemote = checked.1
             let checkedAt = checked.1 ? now() : (prior?.verification?.checkedAt ?? now())
-            sourceData = try CLIBackup.verifiedData(login: original, identity: checked.0, now: checkedAt)
+            // The outgoing default may be older than a renewal already saved from the account's own
+            // directory; a newer verified backup is never written back to an older login.
+            if let prior, prior.login.hasSecrets, !CLIBackupFreshness.mayReplace(original, verifiedBackup: prior) {
+                sourceData = nil
+            } else {
+                sourceData = try CLIBackup.verifiedData(login: original, identity: checked.0, now: checkedAt)
+            }
+            }
         }
         let desired: CLIOwnedLogin, restoration: CLIRestoration
         var targetUpgrade: Data?
+        var sameAccountWinningBackup: Data?
         if sourceName == target.name, sourceIdentity != nil {
-            desired = original; restoration = sourceRemote ? .verifiedLogin : .storedLogin
+            // Same account: a newer verified backup (renewed in the account's own directory) wins
+            // over an older default login, and must itself pass this round's online check. The
+            // winning record is written once and is also the commit expectation for this slot.
+            if let targetRaw, let backup = try? CLIBackup(data: targetRaw), backup.login.hasSecrets,
+               try backup.login.identity?.samePrincipal(as: sourceIdentity!) == true,
+               !CLIBackupFreshness.mayReplace(original, verifiedBackup: backup) {
+                if let already = preverified[target.name], let parsed = try? CLIBackup(data: already), parsed.login == backup.login,
+                   let proof = parsed.verification, proof.digest == backup.login.digest {
+                    desired = backup.login; restoration = .verifiedLogin
+                    sameAccountWinningBackup = already; sourceData = nil
+                } else {
+                    let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: sourceIdentity, remote: remote)
+                    desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
+                    // Same login, same expiry: keep the slot bytes; this round's proof lives in the plan.
+                    if CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) {
+                        let record = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checked.1 ? now() : (backup.verification?.checkedAt ?? now()))
+                        sameAccountWinningBackup = record; sourceData = record
+                    } else {
+                        sameAccountWinningBackup = targetRaw; sourceData = nil
+                    }
+                }
+            } else {
+                desired = original; restoration = sourceRemote ? .verifiedLogin : .storedLogin
+            }
         } else if let targetRaw {
             let backup = try CLIBackup(data: targetRaw)
             guard let expected = target.identity, expected.isComplete else {
                 throw SafetyError("目标桌面身份未确认，未恢复 CLI 登录；请先刷新目标档案。")
             }
-            let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: expected, remote: remote)
-            desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
-            let checkedAt = checked.1 ? now() : (backup.verification?.checkedAt ?? now())
-            targetUpgrade = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
+            if let already = preverified[target.name], let parsed = try? CLIBackup(data: already), parsed.login == backup.login,
+               let proof = parsed.verification, proof.digest == backup.login.digest, already == targetRaw {
+                desired = backup.login; restoration = .verifiedLogin; targetUpgrade = nil
+            } else {
+                let checked = try await verify(backup.login, trusted: backup, context: "目标", expected: expected, remote: remote)
+                desired = backup.login; restoration = checked.1 ? .verifiedLogin : .storedLogin
+                let checkedAt = checked.1 ? now() : (backup.verification?.checkedAt ?? now())
+                let upgraded = try CLIBackup.verifiedData(login: desired, identity: checked.0, now: checkedAt)
+                // Unchanged record: keep the read-back data as the commit expectation, write nothing.
+                targetUpgrade = CLIBackupFreshness.mayReplace(desired, verifiedBackup: backup) && upgraded != targetRaw ? upgraded : nil
+            }
         } else {
             guard !requiresTargetLogin else {
                 throw SafetyError("桌面目标还没有保存的 CLI 登录；本次未同步、未清空原登录。请先在官方 CLI 登录该账号，再检查关联。")
@@ -120,8 +188,9 @@ public struct PreparedCLISwitch {
               try io.readMarker() == originalMarker else {
             throw SafetyError("CLI 登录或备份在核验期间变化，未修改账号，请重试。")
         }
-        return PreparedCLISwitch(original: original, originalMarker: originalMarker, targetName: target.name, targetBackupBefore: targetRaw,
-                                 targetBackupAfter: sourceName == target.name ? sourceData : (targetUpgrade ?? targetRaw),
+        return PreparedCLISwitch(original: original, originalMarker: originalMarker, sourceBackupBefore: sourceRaw,
+                                 targetName: target.name, targetBackupBefore: targetRaw,
+                                 targetBackupAfter: sourceName == target.name ? (sameAccountWinningBackup ?? sourceData) : (targetUpgrade ?? targetRaw),
                                  sourceName: sourceName, sourceBackup: sourceData, targetUpgrade: targetUpgrade,
                                  desired: desired, restoration: restoration)
     }
@@ -134,11 +203,21 @@ public struct PreparedCLISwitch {
             throw SafetyError("CLI 登录在准备期间变化，未修改账号。")
         }
         if let name = plan.sourceName, let data = plan.sourceBackup {
-            try io.writeBackup(name, data: data)
-            guard try normalized(io.readBackup(name)) == data else { throw SafetyError("CLI 备份回读未通过，未移动桌面目录。") }
+            if preverified[name] == data, try normalized(io.readBackup(name)) == data { /* already written and read back this round */ }
+            else {
+                // Another writer may have saved a newer renewal into the outgoing slot meanwhile.
+                guard try normalized(io.readBackup(name)) == plan.sourceBackupBefore else {
+                    throw SafetyError("切出账号的 CLI 备份在核验期间变化，未覆盖，请重试。")
+                }
+                try io.writeBackup(name, data: data, ifUnchangedSince: plan.sourceBackupBefore)
+                guard try normalized(io.readBackup(name)) == data else { throw SafetyError("CLI 备份回读未通过，未移动桌面目录。") }
+            }
         }
-        if let data = plan.targetUpgrade {
-            try io.writeBackup(plan.targetName, data: data)
+        if let data = plan.targetUpgrade, plan.sourceName != plan.targetName {
+            guard try normalized(io.readBackup(plan.targetName)) == plan.targetBackupBefore else {
+                throw SafetyError("目标 CLI 备份在核验期间变化，未覆盖，请重试。")
+            }
+            try io.writeBackup(plan.targetName, data: data, ifUnchangedSince: plan.targetBackupBefore)
             guard try normalized(io.readBackup(plan.targetName)) == data else { throw SafetyError("目标 CLI 备份回读未通过，桌面目录未移动。") }
         }
     }
@@ -151,9 +230,15 @@ public struct PreparedCLISwitch {
     }
     public func apply(_ plan: PreparedCLISwitch, requireUsableLogin: Bool = false) throws -> CLIRestoration {
         try revalidate(plan)
-        if requireUsableLogin, plan.restoration != .verifiedLogin || plan.desired.usableAccessToken(now: now()) == nil {
-            throw SafetyError("恢复时未能确认有效 CLI 登录，请在官方 CLI 登录后重试。")
+        func checkTargetExpiry() throws {
+            guard requireUsableLogin else { return }
+            let at = now()
+            guard plan.restoration == .verifiedLogin, plan.desired.usableAccessToken(now: at) != nil,
+                  let expiry = CLIBackupFreshness.expiry(plan.desired), expiry > at.timeIntervalSince1970 * 1000 else {
+                throw SafetyError("无法提交有效的 CLI 登录，请先在官方 CLI 中确认登录。")
+            }
         }
+        try checkTargetExpiry()
         let oldMarker = plan.originalMarker
         var credentialsAttempted = false, identityAttempted = false, markerAttempted = false
         var credentialsWerePresent = false, identityWasPresent = false
@@ -165,6 +250,7 @@ public struct PreparedCLISwitch {
             }
             let newCredentials = try CLIJSON.replacing(credentials, key: "claudeAiOauth", with: plan.desired.oauth)
             if try normalized(credentials) != newCredentials {
+                try checkTargetExpiry()
                 credentialsAttempted = true; try io.writeCredentials(newCredentials)
             }
             let document = try io.readIdentityDocument()
@@ -174,12 +260,14 @@ public struct PreparedCLISwitch {
             }
             let newDocument = try CLIJSON.replacing(document, key: "oauthAccount", with: plan.desired.metadata)
             if try normalized(document) != newDocument {
-                identityAttempted = true; try io.writeIdentityDocument(newDocument)
+                try checkTargetExpiry()
+                identityAttempted = true; try io.writeIdentityDocument(newDocument, ifUnchangedSince: document)
             }
             markerAttempted = true; try io.writeMarker(plan.targetName)
             guard try readOwned() == plan.desired, try io.readMarker() == plan.targetName else {
                 throw SafetyError("CLI 保存登录回读不一致。")
             }
+            try checkTargetExpiry()
             return plan.restoration
         } catch {
             if markerAttempted {
@@ -212,7 +300,7 @@ public struct PreparedCLISwitch {
                     if field != plan.original.metadata {
                         guard field == plan.desired.metadata else { throw SafetyError("CLI 身份已被外部修改。") }
                         let restoredValue = try CLIJSON.replacing(current, key: "oauthAccount", with: plan.original.metadata)
-                        try io.writeIdentityDocument(restoredValue ?? (identityWasPresent ? Data("{}".utf8) : nil))
+                        try io.writeIdentityDocument(restoredValue ?? (identityWasPresent ? Data("{}".utf8) : nil), ifUnchangedSince: current)
                     }
                 } catch { restored = false }
             }

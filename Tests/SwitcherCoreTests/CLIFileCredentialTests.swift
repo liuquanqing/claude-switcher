@@ -66,6 +66,30 @@ import XCTest
         XCTAssertNotNil(try CLIJSON.object(io.document!)["projects"])
         XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: io.file.path)[.posixPermissions] as? NSNumber)?.intValue, 0o600)
     }
+    func testConditionalMirrorRollbackUsesLatestBytesAndPreservesFormattingOnFailure() throws {
+        let original = try login(a)
+        let next = try login(b)
+        let object = ["claudeAiOauth": try CLIJSON.object(original.oauth!)]
+        let raw = try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted])
+        var primary: Data? = raw
+        var file: Data? = raw
+        var primaryWrites = 0
+        let router = CLIStoredCredentialRouter(readPrimary: { primary }, writePrimary: { _ in XCTFail() },
+            readFile: { file }, writeFile: { _ in XCTFail() }, writeFileIfUnchanged: { replacement, snapshot in
+                XCTAssertEqual(snapshot, file)
+                if file == raw { throw SafetyError("fixture denied file write") }
+                file = replacement
+            }, writePrimaryIfUnchanged: { replacement, snapshot, _ in
+                XCTAssertEqual(snapshot, primary)
+                primaryWrites += 1
+                primary = replacement
+            })
+        let initial = try router.read()
+        XCTAssertThrowsError(try router.write(CLIJSON.replacing(initial, key: "claudeAiOauth", with: next.oauth)))
+        XCTAssertEqual(primaryWrites, 2)
+        XCTAssertEqual(try CLIJSON.field(primary, key: "claudeAiOauth"), original.oauth)
+        XCTAssertEqual(file, raw)
+    }
     func testIdenticalDualStoresAreUpdatedTogetherWithoutCopyingUnrelatedFields() async throws {
         let (io, tx) = try fixture(mirrored: true), p = try await prepare(tx)
         try tx.persistOutgoing(p); _ = try tx.apply(p)
@@ -160,5 +184,24 @@ import XCTest
         try FileManager.default.createSymbolicLink(at: parentLink, withDestinationURL: dir)
         XCTAssertThrowsError(try CLIPrivateFile.read(parentLink.appendingPathComponent("target")))
         XCTAssertEqual(try CLIPrivateFile.read(destination), Data("{}".utf8))
+    }
+
+    func testCredentialFileCommitAbortsWhenTerminalRenewsDuringStage() async throws {
+        let file = try directory("fake-home/.claude").appendingPathComponent(".credentials.json")
+        let original = try CLIJSON.encode(["claudeAiOauth": ["accessToken": "old", "refreshToken": "r"]])
+        try CLIPrivateFile.write(original, to: file)
+        // Simulate the terminal saving a renewal after the snapshot was read: CAS must abort.
+        let renewal = try CLIJSON.encode(["claudeAiOauth": ["accessToken": "renewed", "refreshToken": "r2"]])
+        try CLIPrivateFile.write(renewal, to: file)
+        do { try CLIPrivateFile.write(original, to: file, ifUnchangedSince: original); XCTFail("stale") } catch {}
+        XCTAssertEqual(try CLIPrivateFile.read(file), renewal)
+    }
+    func testExclusiveDocumentCreationNeverReplacesConcurrentFile() throws {
+        let dir = try directory("fake-home/.claude")
+        let document = dir.appendingPathComponent(".claude.json")
+        // A concurrent writer creates the file; exclusive commit must fail and keep it.
+        try Data("concurrent".utf8).write(to: document)
+        do { try CLIPrivateFile.writeDocument(Data("ours".utf8), to: document, ifUnchangedSince: nil); XCTFail("must not replace") } catch {}
+        XCTAssertEqual(try Data(contentsOf: document), Data("concurrent".utf8))
     }
 }

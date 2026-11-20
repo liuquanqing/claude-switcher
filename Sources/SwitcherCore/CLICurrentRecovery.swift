@@ -103,7 +103,7 @@ public struct CLIInteractionRequired: Error, LocalizedError, Sendable {
             }
             let data = try CLIBackup.verifiedData(login: recovered, identity: actual, now: now())
             guard try contextIsCurrent(), try live() == recovered, try io.readBackup(target.name) == old else { return .contextChanged }
-            try io.writeBackup(target.name, data: data)
+            try io.writeBackup(target.name, data: data, ifUnchangedSince: old)
             guard try io.readBackup(target.name) == data else { return .backupPending }
         } catch { return .backupPending }
         return .renewed
