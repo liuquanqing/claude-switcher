@@ -59,18 +59,18 @@ struct AppSettingsMenu: View {
             Button {
                 store.checkApplicationUpdates()
             } label: {
-                Label(checkTitle, systemImage: "arrow.triangle.2.circlepath")
+                Label(checkTitle, systemImage: "arrow.down.circle")
             }
             .disabled(updatePresentation.isChecking)
             Toggle(isOn: prereleaseBinding) {
-                Label(t("settings.includePrereleases"), systemImage: "sparkles")
+                Label(t("settings.includePrereleases"), systemImage: "testtube.2")
             }
                 .toggleStyle(.checkbox)
                 .disabled(installationInProgress)
                 .help(t(installationInProgress ? "settings.updateChannelLockedHelp" : "settings.includePrereleasesHelp"))
             Divider()
             Toggle(isOn: openAtLoginBinding) {
-                Label(t("settings.openAtLogin"), systemImage: "power")
+                Label(t("settings.openAtLogin"), systemImage: "arrow.up.forward.app")
             }
                 .toggleStyle(.checkbox)
                 .help(t("settings.openAtLoginHelp"))

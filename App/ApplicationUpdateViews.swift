@@ -170,7 +170,7 @@ struct ApplicationUpdateView: View {
                     .foregroundColor(.sub)
                     ProgressView(value: downloadProgress, total: 1)
                         .progressViewStyle(.linear)
-                        .tint(.accentColor)
+                        .tint(.claude)
                         .accessibilityLabel(t("download.progress"))
                         .accessibilityValue(downloadProgressText)
                 }
@@ -260,7 +260,7 @@ struct ApplicationUpdateView: View {
         Button(title, action: action)
             .buttonStyle(.borderedProminent)
             .keyboardShortcut(.defaultAction)
-            .tint(.accentColor)
+            .tint(.claude)
             .controlSize(.regular)
             .font(.system(.callout, weight: .semibold))
             .help(help)

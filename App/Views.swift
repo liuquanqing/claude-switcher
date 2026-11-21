@@ -9,16 +9,18 @@ extension Color {
         self.init(.sRGB, red: Double((hex >> 16) & 0xff) / 255, green: Double((hex >> 8) & 0xff) / 255,
                   blue: Double(hex & 0xff) / 255, opacity: a)
     }
-    static let bg = Color(hex: 0x1C1B19)
-    static let card = Color(hex: 0x262522)
-    static let cardHi = Color(hex: 0x2D2A26)
-    static let stroke = Color(hex: 0x3A3833)
-    static let txt = Color(hex: 0xF2EFE8)
-    static let sub = Color(hex: 0xA39D92)
+    static let bg = Color(hex: 0x161614)
+    static let card = Color(hex: 0x21201D)
+    static let cardHi = Color(hex: 0x282622)
+    static let stroke = Color(hex: 0x35332E)
+    static let hairline = Color.white.opacity(0.07)
+    static let hairlineStrong = Color.white.opacity(0.14)
+    static let txt = Color(hex: 0xF4F1EA)
+    static let sub = Color(hex: 0x9B958B)
     static let claude = Color(hex: 0xD97757)
-    static let good = Color(hex: 0x6CC57C)
+    static let good = Color(hex: 0x4CC38A)
     static let warn = Color(hex: 0xE5B454)
-    static let bad = Color(hex: 0xE5675A)
+    static let bad = Color(hex: 0xF0626E)
 }
 
 func levelColor(_ left: Double?) -> Color {
@@ -114,11 +116,16 @@ struct Bar: View {
     let value: Double?; let color: Color; var height: CGFloat = 4
     var body: some View {
         GeometryReader { g in
+            let ratio = CGFloat(min(max((value ?? 0) / 100, 0), 1))
+            let fillWidth = ratio > 0 ? max(height, g.size.width * ratio) : 0
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.stroke.opacity(0.72))
-                Capsule().fill(color)
-                    .frame(width: g.size.width * CGFloat(min(max((value ?? 0) / 100, 0), 1)))
+                Capsule().fill(Color.white.opacity(0.09))
+                if fillWidth > 0 {
+                    Capsule().fill(color)
+                        .frame(width: min(g.size.width, fillWidth))
+                }
             }
+            .animation(.easeOut(duration: 0.25), value: value)
         }.frame(height: height)
     }
 }
@@ -232,36 +239,39 @@ struct Header: View {
     }
 
     private var terminalControl: some View {
-        VStack(spacing: 1) {
         Button { Task { await store.openTerminalFromHeader() } } label: {
-            ZStack(alignment: .topTrailing) {
-                Image(systemName: "terminal").font(.system(size: 13, weight: .medium))
-                    .foregroundColor(terminalHover ? .txt : .sub)
-                    .frame(width: 32, height: 32)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(terminalHover ? 0.07 : 0)))
-                if terminalNeedsAttention {
-                    Circle().fill(connection.phase == .failed ? Color.bad : Color.warn).frame(width: 7, height: 7)
-                        .overlay(Circle().stroke(Color.card, lineWidth: 2))
-                        .offset(x: -3, y: 3)
+            HStack(spacing: 5) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "terminal").font(.system(size: 12, weight: .medium))
+                        .foregroundColor(terminalHover ? .txt : .sub)
+                    if terminalNeedsAttention {
+                        Circle().fill(connection.phase == .failed ? Color.bad : Color.warn).frame(width: 6, height: 6)
+                            .overlay(Circle().stroke(Color.card, lineWidth: 1.5))
+                            .offset(x: 3, y: -3)
+                    }
+                }
+                if let terminalCaption, !compact {
+                    Text(terminalCaption.text)
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundColor(terminalHover ? .txt : terminalCaption.color)
+                        .lineLimit(1).fixedSize()
+                        .accessibilityHidden(true)
                 }
             }
-            .frame(width: 32, height: 32)
-            .contentShape(Rectangle())
+            .padding(.horizontal, compact || terminalCaption == nil ? 9 : 10)
+            .frame(height: 32)
+            .background(RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(terminalHover ? 0.09 : 0.04)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(terminalHover ? Color.hairlineStrong : Color.hairline, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
         .disabled(controlLocked || connection.isBusy)
         .opacity(controlLocked || connection.isBusy ? 0.45 : 1)
         .onHover { terminalHover = $0 }
+        .animation(.easeOut(duration: 0.12), value: terminalHover)
         .help(terminalHelp)
         .accessibilityLabel(appText("cli.openTerminal", language: language))
         .accessibilityHint(terminalHelp)
-            if let terminalCaption {
-                Text(terminalCaption.text).font(.system(size: 9, weight: .medium)).foregroundColor(terminalCaption.color)
-                    .lineLimit(1).fixedSize()
-                    .accessibilityHidden(true)
-            }
-        }
-        .frame(width: 36)
     }
 
     private var desktopHelp: String {
@@ -444,9 +454,10 @@ struct Header: View {
                             .lineLimit(1).truncationMode(.tail).help(store.current).layoutPriority(-1)
                         if let plan = s?.plan {
                             Text(plan).font(.system(size: 9.5, weight: .semibold))
-                                .padding(.horizontal, 5).padding(.vertical, 2).fixedSize()
+                                .padding(.horizontal, 6).padding(.vertical, 2).fixedSize()
                                 .foregroundColor(.sub)
-                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(0.06)))
+                                .background(RoundedRectangle(cornerRadius: 4.5).fill(Color.white.opacity(0.06)))
+                                .overlay(RoundedRectangle(cornerRadius: 4.5).stroke(Color.hairline, lineWidth: 0.75))
                         }
                     }
                     Text(accountLine(a, language: language) ?? "")
@@ -1412,17 +1423,27 @@ struct UsageMetric: View {
     var prominent = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(pct(value)).font(.system(size: prominent ? 28 : 22, weight: .bold, design: .rounded))
+        let color = levelColor(value)
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.sub)
+                .lineLimit(1)
+            HStack(alignment: .firstTextBaseline, spacing: 1.5) {
+                Text(pct(value))
+                    .font(.system(size: prominent ? 26 : 23, weight: .bold, design: .rounded).monospacedDigit())
+                    .foregroundColor(color)
                 if value != nil {
-                    Text("%").font(.system(size: prominent ? 12 : 11, weight: .semibold, design: .rounded))
+                    Text("%")
+                        .font(.system(size: prominent ? 11.5 : 10.5, weight: .semibold, design: .rounded))
+                        .foregroundColor(color.opacity(0.7))
                 }
             }
-            .foregroundColor(levelColor(value))
-            Bar(value: value, color: levelColor(value), height: 3)
-            Text(reset).font(.system(size: 10)).foregroundColor(.sub)
+            .frame(height: 30, alignment: .bottomLeading)
+            Bar(value: value, color: color, height: 3.5)
+            Text(reset)
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundColor(.sub.opacity(0.85))
                 .lineLimit(1).minimumScaleFactor(0.82)
                 .help(resetHelp)
                 .accessibilityHint(resetHelp)
@@ -1441,6 +1462,7 @@ struct ProfileCard: View {
     let onSwitch: () -> Void
     @Environment(\.appLanguage) private var language
     @State private var hover = false
+    @State private var cardHover = false
 
     /// Every account card shares one height, so empty / loading / failed cards sit on the same
     /// row rhythm as data cards instead of floating at their own height.
@@ -1475,17 +1497,18 @@ struct ProfileCard: View {
 
     var body: some View {
         let s = p.snapshot
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(p.name).font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.txt).lineLimit(1)
                     HStack(spacing: 5) {
                         if let plan = s?.plan {
-                            Text(plan).font(.system(size: 9, weight: .medium))
+                            Text(plan).font(.system(size: 9, weight: .semibold))
                                 .padding(.horizontal, 5).padding(.vertical, 2).fixedSize()
                                 .foregroundColor(.sub)
-                                .background(RoundedRectangle(cornerRadius: 4).fill(Color.stroke.opacity(0.7)))
+                                .background(RoundedRectangle(cornerRadius: 4.5).fill(Color.white.opacity(0.06)))
+                                .overlay(RoundedRectangle(cornerRadius: 4.5).stroke(Color.hairline, lineWidth: 0.75))
                         }
                         Text(accountLine(p, language: language) ?? "")
                             .font(.system(size: 10)).foregroundColor(.sub)
@@ -1501,32 +1524,38 @@ struct ProfileCard: View {
                         Text(t("common.current")).font(.system(size: 10, weight: .semibold))
                     }
                     .foregroundColor(.claude)
-                    .padding(.vertical, 4)
+                    .padding(.horizontal, 7).frame(height: 22)
+                    .background(Capsule().fill(Color.claude.opacity(0.12)))
+                    .overlay(Capsule().stroke(Color.claude.opacity(0.24), lineWidth: 0.75))
                     .help(t("account.currentHelp"))
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(t("account.current"))
                 } else if savedOnly {
                     Text(t("common.saved")).font(.system(size: 10, weight: .medium)).foregroundColor(.sub)
-                        .padding(.vertical, 4)
+                        .padding(.horizontal, 7).frame(height: 22)
+                        .background(Capsule().fill(Color.white.opacity(0.05)))
+                        .overlay(Capsule().stroke(Color.hairline, lineWidth: 0.75))
                         .help(t("account.savedHelp"))
                         .accessibilityLabel(t("account.savedAccessibility"))
                 } else {
                     Button(action: onSwitch) {
                         Text(t("common.switch"))
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.txt)
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(hover ? .txt : .txt.opacity(0.9))
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10)
                             .frame(height: 24)
-                            .background(RoundedRectangle(cornerRadius: 7)
-                                .fill(hover ? Color(hex: 0x45423C) : Color.stroke.opacity(0.35)))
-                            .overlay(RoundedRectangle(cornerRadius: 7)
-                                .stroke(Color.stroke, lineWidth: 1))
+                            .background(RoundedRectangle(cornerRadius: 6.5)
+                                .fill(Color.white.opacity(hover ? 0.13 : 0.06)))
+                            .overlay(RoundedRectangle(cornerRadius: 6.5)
+                                .stroke(hover ? Color.hairlineStrong : Color.hairline, lineWidth: 1))
+                            .contentShape(RoundedRectangle(cornerRadius: 6.5))
                     }
                     .buttonStyle(.plain).disabled(busy).opacity(busy ? 0.45 : 1)
                     .help(t("account.switchHelp"))
                     .onHover { hover = $0 }
+                    .animation(.easeOut(duration: 0.12), value: hover)
                 }
             }
 
@@ -1539,13 +1568,18 @@ struct ProfileCard: View {
                         ("usage.sonnetWeekly", snapshot.weeklySonnet), ("usage.opusWeekly", snapshot.weeklyOpus)
                     ].filter { $0.1 != nil }
                     let metrics = snapshot.session == nil ? weeklyMetrics : [("usage.fiveHours", snapshot.session)] + weeklyMetrics
-                    VStack(alignment: .leading, spacing: 8) {
+                    let shown = Array(metrics.prefix(2))
+                    VStack(alignment: .leading, spacing: 0) {
+                        Spacer(minLength: 0)
                         HStack(alignment: .top, spacing: 12) {
-                            ForEach(Array(metrics.prefix(2)), id: \.0) { key, window in
+                            ForEach(shown, id: \.0) { key, window in
                                 let shortWindow = key == "usage.fiveHours"
                                 let expired = window?.resetsAt.map { $0 <= context.date } ?? false
-                                if key != metrics.first?.0 {
-                                    Rectangle().fill(Color.stroke.opacity(0.8)).frame(width: 1, height: 58)
+                                if key != shown.first?.0 {
+                                    Rectangle()
+                                        .fill(Color.hairline)
+                                        .frame(width: 1)
+                                        .padding(.vertical, 2)
                                 }
                                 UsageMetric(title: t(key), value: left(window),
                                             reset: recordedReset(window?.resetsAt, language: language, now: context.date),
@@ -1553,23 +1587,23 @@ struct ProfileCard: View {
                                                 ? "usage.weeklyResetHelp" : "usage.modelWeeklyResetHelp", arguments: [
                                                     "reset": fullDateTime(window?.resetsAt, language: language), "sampled": sampled
                                                 ]) + (expired ? "\n" + t("usage.resetDueCachedHelp") : ""),
-                                            prominent: key == metrics.first?.0)
+                                            prominent: shown.count == 1)
                             }
                         }
-                        Spacer(minLength: 0)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                 }
             } else {
                 let ph = placeholder
                 Spacer(minLength: 0)
-                VStack(spacing: 5) {
+                VStack(spacing: 6) {
                     if ph.spinner {
                         ProgressView().controlSize(.small)
                     } else {
-                        Image(systemName: ph.icon).font(.system(size: 16, weight: .light)).foregroundColor(.sub)
+                        Image(systemName: ph.icon).font(.system(size: 16, weight: .light)).foregroundColor(ph.color.opacity(0.85))
                     }
-                    Text(ph.title).font(.system(size: 10.5, weight: .regular)).foregroundColor(.sub)
+                    Text(ph.title).font(.system(size: 10.5, weight: .regular)).foregroundColor(ph.color)
                     if let detail = ph.detail {
                         Text(detail).font(.system(size: 9.5)).foregroundColor(.sub)
                             .multilineTextAlignment(.center).lineLimit(2).help(detail)
@@ -1580,19 +1614,21 @@ struct ProfileCard: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(12)
+        .padding(13)
         .frame(height: Self.height)
         // Current card: one warm hairline and a slightly lifted surface; the mark above names it.
-        .background(RoundedRectangle(cornerRadius: 14).fill(active ? Color.cardHi : Color.card))
-        .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(active ? Color.claude.opacity(0.5) : Color.stroke.opacity(0.32), lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: 13).fill(active ? Color.cardHi : Color.card))
+        .overlay(RoundedRectangle(cornerRadius: 13)
+            .stroke(active ? Color.claude.opacity(0.45) : (cardHover && !savedOnly ? Color.hairlineStrong : Color.hairline), lineWidth: 1))
         .overlay(alignment: .top) {
             if active {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(LinearGradient(colors: [Color.white.opacity(0.035), .clear], startPoint: .top, endPoint: .bottom))
-                    .frame(height: 40).allowsHitTesting(false)
+                RoundedRectangle(cornerRadius: 13)
+                    .fill(LinearGradient(colors: [Color.claude.opacity(0.07), .clear], startPoint: .top, endPoint: .bottom))
+                    .frame(height: 44).allowsHitTesting(false)
             }
         }
+        .onHover { cardHover = $0 }
+        .animation(.easeOut(duration: 0.14), value: cardHover)
     }
 }
 
@@ -1600,13 +1636,22 @@ struct ProfileCard: View {
 /// compact card height, whatever the account count. Idle it is one button; editing it holds the name
 /// field, Return adds, Esc or 取消 leaves without adding.
 struct AddAccountEntry: View {
+    var existingNames: [String] = []
     let onAdd: (String) -> Void
     @Environment(\.appLanguage) private var language
     @State private var editing = false
     @State private var name = ""
     @State private var hover = false
     @FocusState private var focused: Bool
-    private var valid: Bool { !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/", with: "-")
+    }
+    private var isDuplicate: Bool {
+        !trimmedName.isEmpty && existingNames.contains { $0.caseInsensitiveCompare(trimmedName) == .orderedSame }
+    }
+    private var valid: Bool {
+        ProfileTransaction.validName(trimmedName) && !isDuplicate
+    }
 
     private func t(_ key: String) -> String { appText(key, language: language) }
 
@@ -1616,20 +1661,25 @@ struct AddAccountEntry: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: ProfileCard.height)
-        .background(RoundedRectangle(cornerRadius: 14)
-            .fill(Color.card.opacity(editing || hover ? 1 : 0.55)))
-        .overlay(RoundedRectangle(cornerRadius: 14)
-            .stroke(Color.stroke.opacity(editing ? 0.6 : 1),
-                    style: StrokeStyle(lineWidth: 1, dash: editing ? [] : [4, 3])))
+        .background(RoundedRectangle(cornerRadius: 13)
+            .fill(editing ? Color.card : Color.card.opacity(hover ? 0.72 : 0.24)))
+        .overlay(RoundedRectangle(cornerRadius: 13)
+            .stroke(editing ? Color.claude.opacity(0.45) : Color.white.opacity(hover ? 0.2 : 0.09),
+                    style: StrokeStyle(lineWidth: 1, dash: editing ? [] : [5, 4])))
+        .animation(.easeOut(duration: 0.14), value: hover)
+        .animation(.easeInOut(duration: 0.16), value: editing)
     }
 
     private var idle: some View {
         Button { editing = true } label: {
             VStack(spacing: 7) {
-                Image(systemName: "plus").font(.system(size: 15, weight: .light))
-                Text(t("account.add")).font(.system(size: 11, weight: .regular))
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(Color.white.opacity(hover ? 0.08 : 0.04)))
+                Text(t("account.add")).font(.system(size: 11, weight: .medium))
             }
-            .foregroundColor(hover ? .txt : .sub)
+            .foregroundColor(hover ? .txt : .sub.opacity(0.85))
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
         }
@@ -1644,9 +1694,10 @@ struct AddAccountEntry: View {
             .focused($focused)
             .onSubmit(commit)
             .onExitCommand(perform: reset)
-            .padding(.horizontal, 9).frame(height: 26)
+            .padding(.horizontal, 9).frame(height: 28)
             .background(RoundedRectangle(cornerRadius: 7).fill(Color.bg))
-            .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: 7)
+                .stroke(isDuplicate ? Color.warn.opacity(0.8) : focused ? Color.claude.opacity(0.65) : Color.hairline, lineWidth: 1))
             .onAppear { DispatchQueue.main.async { focused = true } }
             .accessibilityLabel(t("account.newName"))
     }
@@ -1659,7 +1710,7 @@ struct AddAccountEntry: View {
                 .font(.system(size: 10.5, weight: .semibold))
                 .foregroundColor(valid ? .white : .sub)
                 .padding(.horizontal, 11).frame(height: 24)
-                .background(RoundedRectangle(cornerRadius: 6).fill(valid ? Color.claude : Color.stroke))
+                .background(RoundedRectangle(cornerRadius: 6).fill(valid ? Color.claude : Color.white.opacity(0.06)))
                 .disabled(!valid)
         }
     }
@@ -1716,7 +1767,8 @@ struct FooterIcon: View {
             }
         }
         .frame(width: 28, height: 28)
-        .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.stroke : .clear))
+        .background(RoundedRectangle(cornerRadius: 7).fill(hover ? Color.white.opacity(0.08) : .clear))
+        .animation(.easeOut(duration: 0.12), value: hover)
     }
 }
 
@@ -1865,11 +1917,13 @@ struct Panel: View {
                     Task { await store.switchTo(p.name) }
                 }
             }
-            AddAccountEntry { store.addProfile($0) }
+            AddAccountEntry(existingNames: store.profiles.map(\.name)) { store.addProfile($0) }
         }
     }
 
     var body: some View {
+        let refreshLocked = store.updating || store.busy != nil || store.refreshing || store.statusRefreshInProgress
+        let quitLocked = store.busy != nil || protection.working || store.cliConnection.isBusy
         VStack(spacing: 10) {
             VStack(spacing: 0) {
                 Header(store: store, protection: protection, compact: width < 460) {
@@ -1877,8 +1931,9 @@ struct Panel: View {
                 }
                 TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)
             }
-            .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .background(RoundedRectangle(cornerRadius: 13).fill(Color.card))
+            .clipShape(RoundedRectangle(cornerRadius: 13))
+            .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color.hairline, lineWidth: 1))
             if let b = store.banner ?? store.displayedCLIBackupNotice {
                 HStack(spacing: 8) {
                     Label(store.banner == nil ? generated(b) : t("banner.lastOperation", arguments: ["message": generated(b)]),
@@ -1982,7 +2037,7 @@ struct Panel: View {
                 if store.sessionMigrationEnabled {
                     FooterButton(icon: "doc.on.doc", help: t("footer.import")) { CopyWindow.show(store) }
                 }
-                Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
+                Rectangle().fill(Color.hairline).frame(width: 1, height: 16)
                 if let b = store.busy {
                     ProgressView().controlSize(.small)
                     Text(generated(b)).font(.system(size: 11, weight: .medium)).foregroundColor(.claude)
@@ -2009,7 +2064,7 @@ struct Panel: View {
                     TimelineView(.periodic(from: .now, by: 60)) { context in
                         let summary = refreshSummary(now: context.date)
                         Label(summary.text, systemImage: "clock")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
                             .lineLimit(1).minimumScaleFactor(0.85)
                             .foregroundColor(summary.color)
                             .help(summary.help + "\n" + t("refresh.officialCLIHelp")
@@ -2025,27 +2080,32 @@ struct Panel: View {
                 ) {
                     Task { await store.refreshAllStatuses() }
                 }
+                .disabled(refreshLocked)
+                .opacity(refreshLocked ? 0.4 : 1)
                 AppSettingsMenu(store: store)
-                Rectangle().fill(Color.stroke).frame(width: 1, height: 18)
+                Rectangle().fill(Color.hairline).frame(width: 1, height: 16)
                 Button { NSApp.terminate(nil) } label: {
                     HStack(spacing: 5) {
                         Image(systemName: "power").font(.system(size: 11, weight: .medium))
                         Text(t("footer.quit")).font(.system(size: 11, weight: .medium))
                     }
                     .fixedSize()
-                    .foregroundColor(quitHover ? .txt : .sub)
-                    .padding(.horizontal, 9).padding(.vertical, 6)
+                    .foregroundColor(quitHover && !quitLocked ? .bad : .sub)
+                    .padding(.horizontal, 8).frame(height: 28)
                     .background(RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.stroke.opacity(quitHover ? 0.7 : 0.35)))
-                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(Color.stroke, lineWidth: 1))
+                        .fill(quitHover && !quitLocked ? Color.bad.opacity(0.12) : .clear))
+                    .contentShape(RoundedRectangle(cornerRadius: 7))
                 }
                 .buttonStyle(.plain)
                 .help(t("footer.quitHelp"))
-                .disabled(store.busy != nil || protection.working)
+                .disabled(quitLocked)
+                .opacity(quitLocked ? 0.4 : 1)
                 .onHover { quitHover = $0 }
+                .animation(.easeOut(duration: 0.12), value: quitHover)
             }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(RoundedRectangle(cornerRadius: 12).fill(Color.card))
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 11).fill(Color.card.opacity(0.72)))
+            .overlay(RoundedRectangle(cornerRadius: 11).stroke(Color.hairline, lineWidth: 1))
             .onAppear(perform: dismissUpdateNoticeAfterDelay)
             .onChange(of: store.applicationUpdateNotice) { _ in dismissUpdateNoticeAfterDelay() }
         }

@@ -295,7 +295,7 @@ final class ProtectionController: ObservableObject {
         if demo && Bundle.main.object(forInfoDictionaryKey: "CSPreviewSlowNetworkCheck") as? Bool == true {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
         }
-        let observation = demo ? demoNetwork : await NetworkProbe().observe(mode: config.proxyMode)
+        let observation = demo ? demoNetwork : await observeNetwork(config.proxyMode)
         let decision = SafetyPolicy.evaluate(config, observation)
         let route = observation.routesDisagree ? "各域名国家不一致" : (observation.country ?? "未知")
         lastCheckSummary = "\(decision.allowed ? "网络检测通过" : "网络检测未通过") · 本次目标 \(config.expectedCountry)\n"
