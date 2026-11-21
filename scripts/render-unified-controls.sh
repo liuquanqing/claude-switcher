@@ -33,14 +33,19 @@ help_entry = """    var fixtureHelpOnly = false
             if needsRow { terminalRow }"""
 views = views.replace(help_body, help_entry)
 # V5: the hero card is Header + guard line + terminal row; render that composition as one card.
-panel_old = """                Header(store: store, protection: protection, compact: width < 460) {
+panel_old = """            VStack(spacing: 0) {
+                Header(store: store, protection: protection, compact: width < 460) {
                     Task { await store.openProtectedClaude() }
                 }
-                TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)"""
+                TerminalProtectionCard(store: store, controller: protection, busy: store.busy != nil || store.statusRefreshInProgress)
+            }
+            .background(RoundedRectangle(cornerRadius: 13).fill(Color.card))
+            .clipShape(RoundedRectangle(cornerRadius: 13))
+            .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color.hairline, lineWidth: 1))"""
 assert views.count(panel_old) == 1
-views = views.replace(panel_old, """                HeroCard(store: store, protection: protection, busy: store.busy != nil || store.statusRefreshInProgress, compact: width < 460) {
-                    Task { await store.openProtectedClaude() }
-                }""")
+views = views.replace(panel_old, """            HeroCard(store: store, protection: protection, busy: store.busy != nil || store.statusRefreshInProgress, compact: width < 460) {
+                Task { await store.openProtectedClaude() }
+            }""")
 hero = """
 /// Test-only composition matching Panel's hero card.
 struct HeroCard: View {
@@ -54,8 +59,9 @@ struct HeroCard: View {
             Header(store: store, protection: protection, compact: compact, openClaude: openClaude)
             TerminalProtectionCard(store: store, controller: protection, busy: busy)
         }
-        .background(RoundedRectangle(cornerRadius: 14).fill(Color.card))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(RoundedRectangle(cornerRadius: 13).fill(Color.card))
+        .clipShape(RoundedRectangle(cornerRadius: 13))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(Color.hairline, lineWidth: 1))
     }
 }
 

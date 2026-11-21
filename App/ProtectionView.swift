@@ -716,6 +716,7 @@ struct TerminalProtectionCard: View {
         if controller.working { return statusTitle }
         if offerDesktopProtection { return t("guard.unmanagedShort") }
         if !controller.enabled { return t("guard.pausedShort") }
+        if !controller.guardOnline || controller.lastDecision.reason == .terminationFailed { return statusTitle }
         if !controller.lastDecision.allowed { return statusTitle }
         if !store.claudeRunning { return t("guard.readyShort") }
         return statusTitle
@@ -748,15 +749,6 @@ struct TerminalProtectionCard: View {
     private func runDiagnostic() {
         guard !diagnosticLocked else { return }
         Task { await controller.checkNow() }
-    }
-
-    private func submitCountryField() {
-        if controller.enabled && controller.hasUnsavedChanges {
-            guard !operationLocked, !controller.working else { return }
-            Task { await controller.enable() }
-        } else {
-            runDiagnostic()
-        }
     }
 
     private var proxyModeMenu: some View {
@@ -836,7 +828,7 @@ struct TerminalProtectionCard: View {
                     TextField("SG", text: $controller.country)
                         .textFieldStyle(.plain)
                         .focused($countryFocused)
-                        .onSubmit(submitCountryField)
+                        .onSubmit(runDiagnostic)
                         .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         .multilineTextAlignment(.center).foregroundColor(.txt)
                         .frame(width: 42, height: 28)
@@ -887,8 +879,8 @@ struct TerminalProtectionCard: View {
                     .foregroundColor(.white)
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color.claude.opacity(saveHover ? 1 : 0.88)))
                     .onHover { saveHover = $0 }
-                    .disabled(operationLocked || controller.working)
-                    .opacity(operationLocked || controller.working ? 0.5 : 1)
+                    .disabled(diagnosticLocked)
+                    .opacity(diagnosticLocked ? 0.5 : 1)
                     .help(t("protection.saveHelp"))
                 } else {
                     Link(destination: URL(string: "https://ip.net.coffee/claude/")!) {
