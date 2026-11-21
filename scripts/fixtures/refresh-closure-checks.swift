@@ -8,36 +8,48 @@ import SwitcherCore
     let root=FileManager.default.temporaryDirectory.appendingPathComponent("rc2-refresh-fixture-"+UUID().uuidString)
     try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
     defer {try? FileManager.default.removeItem(at:root)}
-    let now=Date(),store=Store(demo:true),identity=Store(demo:true).active!.snapshot!.identity
-    func cache(at date:Date) throws -> OfficialCLIUsageCache {
-        let data=try CLIJSON.encode(["oauthAccount":["accountUuid":identity.accountID!,"organizationUuid":identity.organizationID!,"emailAddress":identity.email!],
-            "cachedUsageUtilization":["accountUuid":identity.accountID!,"fetchedAtMs":date.timeIntervalSince1970*1000,
-            "utilization":["seven_day":["utilization":49]]]])
-        return try OfficialCLIUsageCache.read(data)!
-    }
-    let recent = try cache(at: now.addingTimeInterval(-1))
-    store.profiles[0].snapshot!.fetchedAt = now.addingTimeInterval(-300)
-    await store.refreshAllStatuses(operations: .init(observe: {}, readCache: { recent }))
-    require(store.lastRefresh == recent.fetchedAt, "footer adopts the actual time of a matching native sample")
-    require(store.lastRefreshDiagnostics?.nativeHelperRuns == 0 && !store.statusRefreshInProgress,
-            "cache refresh does not run a native helper and releases its operation slot")
-    let prior = store.active?.snapshot?.weekly?.used
-    await store.refreshAllStatuses(operations: .init(observe: {}, readCache: { nil }))
-    require(store.lastRefresh == recent.fetchedAt && store.active?.snapshot?.weekly?.used == prior && store.usageNotice != nil,
-            "missing native cache preserves existing quota and its timestamp")
-    var finish: CheckedContinuation<OfficialCLIUsageCache?, Never>?
-    var reads = 0
-    let heldRead = StatusRefreshOperations(observe: {}, readCache: {
-        reads += 1
-        return await withCheckedContinuation { finish = $0 }
+    let now = Date()
+    let identity = Store(demo: true).active!.snapshot!.identity
+    let store = Store(demo: true, demoScope: .api)
+    let profilesBefore = store.profiles
+    let selected = store.current
+    let parked = store.profiles.first { $0.signedIn && $0.name != selected }!.name
+    let selectedSample = store.active?.snapshot?.fetchedAt
+    store.cliStatus = .needsLogin
+    var queried: [String] = []
+    var finish: CheckedContinuation<Void, Never>?
+    let operations = StatusRefreshOperations(observe: {}, desktop: { name in
+        let account = profilesBefore.first { $0.name == name }!.snapshot!.identity
+        return DesktopUsageOperations(context: {
+            .init(profile: name, account: account.accountID, loginRevision: "fixture revision")
+        }, authorizeRoute: {}, readAccess: {
+            name == selected ? nil : "fixture-desktop"
+        }, get: { endpoint, _ in
+            if endpoint == .profile {
+                return try CLIJSON.encode(["account": ["uuid": account.accountID!],
+                                           "organization": ["uuid": account.organizationID!]])
+            }
+            queried.append(name)
+            await withCheckedContinuation { finish = $0 }
+            return try CLIJSON.encode(["seven_day": ["utilization": 49]])
+        })
     })
-    let first = Task { @MainActor in await store.refreshAllStatuses(operations: heldRead) }
+    let first = Task { @MainActor in await store.refreshAllStatuses(operations: operations) }
     while finish == nil { await Task.yield() }
-    await store.refreshAllStatuses(operations: heldRead)
-    await store.switchTo("Business")
-    require(store.current == "Personal" && reads == 1, "overlapping refresh or switch does not start a second operation")
-    finish!.resume(returning: recent)
+    await store.refreshAllStatuses(operations: operations)
+    await store.switchTo(parked)
+    require(store.current == selected && queried == [parked],
+            "overlapping refresh or switch does not start a second desktop query")
+    finish!.resume()
     await first.value
+    require(store.protection.desktopScope == .api && store.cliStatus == .needsLogin
+            && store.profiles.first { $0.name == parked }?.snapshot?.weekly?.used == 49,
+            "the API desktop can refresh a saved subscription quota even when Claude Code needs login")
+    require(store.lastRefreshDiagnostics?.nativeHelperRuns == 0 && store.currentCLIBackupPending == nil && !store.statusRefreshInProgress,
+            "footer quota refresh does not start native CLI or schedule a backup")
+    require(store.active?.snapshot?.fetchedAt == selectedSample
+            && store.linkedUsageDetails?.contains(selected) == true && store.lastRefreshDiagnostics?.outcome == "partial",
+            "expired desktop credentials preserve that profile's quota timestamp and explain partial results")
 
     let home=root.appendingPathComponent("home"),document=home.appendingPathComponent(".claude.json")
     try FileManager.default.createDirectory(at:home.appendingPathComponent(".claude"),withIntermediateDirectories:true)

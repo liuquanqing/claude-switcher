@@ -1837,6 +1837,8 @@ struct Panel: View {
         if let last = samples.map(\.1).max() {
             var help = samples.map { "\($0.0)：\(fullDateTime($0.1, language: language))" }.joined(separator: "\n")
             if let detail = store.usageNotice ?? store.linkedUsageDetails { help += "\n" + generated(detail) }
+            if store.usageNotice != nil { return (t("refresh.usingSavedQuota"), .warn, help) }
+            if store.linkedUsageDetails != nil { return (t("refresh.partialQuota"), .warn, help) }
             return (ago(last, language: language, now: now), .sub, help)
         }
         let detail = store.usageNotice ?? store.linkedUsageDetails
@@ -2012,6 +2014,7 @@ struct Panel: View {
                             .foregroundColor(summary.color)
                             .help(summary.help + "\n" + t("refresh.officialCLIHelp")
                                 + (protection.desktopScope == .api ? "\n" + t("api.subscriptionUsageHelp") : ""))
+                            .accessibilityHint(summary.help)
                     }
                 }
                 Spacer(minLength: 4)

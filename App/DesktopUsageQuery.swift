@@ -68,6 +68,28 @@ struct DesktopUsageContext: Equatable {
     let profile: String
     let account: String?
     let loginRevision: String
+
+    static func read(profile: String, directory path: URL) throws -> Self {
+        let directory = try path.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard directory.isDirectory == true, directory.isSymbolicLink != true,
+              path.resolvingSymlinksInPath().path == path.standardizedFileURL.path else {
+            throw SafetyError("桌面档案路径不是普通目录，未读取登录。")
+        }
+        let modeFile = path.appendingPathComponent("claude_desktop_config.json")
+        let modeDocuments = try CLIPrivateFile.readDocument(modeFile).map { [$0] } ?? []
+        guard DesktopModeInspector.classify(modeDocuments) == .subscription else {
+            throw SafetyError("此档案未确认为桌面订阅模式，保留原额度。")
+        }
+        guard let metadata = try CLIPrivateFile.readDocument(path.appendingPathComponent("config.json")) else {
+            throw SafetyError("没有可用的桌面订阅登录，保留原额度。")
+        }
+        let object = try CLIJSON.object(metadata)
+        guard let encrypted = object["oauth:tokenCacheV2"] as? String, !encrypted.isEmpty else {
+            throw SafetyError("没有可用的桌面订阅登录，保留原额度。")
+        }
+        return Self(profile: profile, account: object["lastKnownAccountUuid"] as? String,
+                    loginRevision: desktopTokenDigest(encrypted))
+    }
 }
 
 @MainActor struct DesktopUsageOperations {
@@ -78,7 +100,10 @@ struct DesktopUsageContext: Equatable {
 }
 
 @MainActor extension Store {
-    private func desktopUsageOperations(name: String, allowInteraction: Bool) async throws -> DesktopUsageOperations {
+    private func desktopUsageOperations(name: String, selected: String, scope: DesktopProtectionScope,
+                                        allowInteraction: Bool) async throws -> DesktopUsageOperations {
+        guard ProfileTransaction.validName(name) else { throw SafetyError("桌面档案名称无效。") }
+        let path = name == selected ? liveDir : parkDir.appendingPathComponent(name, isDirectory: true)
         let decision = await protection.preflight(target: .subscriptionUsage)
         guard decision.allowed else { throw SafetyError(decision.message) }
         let files = protection.files
@@ -95,20 +120,11 @@ struct DesktopUsageContext: Equatable {
             }
         }
         return .init(context: {
-            guard self.current == name, try confirmedCurrentProfile() == name,
-                  DesktopModeInspector.read(support: support) == .subscription else {
+            guard self.current == selected, try confirmedCurrentProfile() == selected,
+                  DesktopModeInspector.read(support: support) == scope else {
                 throw SafetyError("查询期间订阅账号已变化，未采纳旧额度。")
             }
-            let directory = try liveDir.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            guard directory.isDirectory == true, directory.isSymbolicLink != true else {
-                throw SafetyError("桌面档案路径不是普通目录，未读取登录。")
-            }
-            let object = try CLIJSON.object(Data(contentsOf: liveDir.appendingPathComponent("config.json")))
-            guard let encrypted = object["oauth:tokenCacheV2"] as? String, !encrypted.isEmpty else {
-                throw SafetyError("没有可用的桌面订阅登录，保留原额度。")
-            }
-            return DesktopUsageContext(profile: name, account: object["lastKnownAccountUuid"] as? String,
-                                       loginRevision: desktopTokenDigest(encrypted))
+            return try DesktopUsageContext.read(profile: name, directory: path)
         }, authorizeRoute: {
             for endpoint in NetworkProbe.traceEndpoints {
                 let trace = try await DesktopUsageHTTP.run(["--fail", endpoint], proxy: proxy, home: home)
@@ -118,24 +134,32 @@ struct DesktopUsageContext: Equatable {
             }
             try routeStillApproved()
         }, readAccess: {
-            try await token(for: liveDir, allowInteraction: allowInteraction)
+            try await token(for: path, allowInteraction: allowInteraction)
         }, get: { endpoint, access in
             try routeStillApproved()
             return try await DesktopUsageHTTP.get(endpoint, access: access, proxy: proxy, home: home)
         })
     }
 
-    /// Never uses CLI login or a parked profile's desktop token.
     func refreshCurrentDesktopUsage(allowInteraction: Bool = true, operations supplied: DesktopUsageOperations? = nil) async throws -> Date {
-        guard !isDemo || supplied != nil else { throw SafetyError("演示模式不读取真实登录。") }
-        let name = current
         guard protection.desktopScope == .subscription else { throw SafetyError("当前模式尚未确认，未查询额度。") }
+        return try await refreshDesktopUsage(for: current, allowInteraction: allowInteraction, operations: supplied)
+    }
+
+    func refreshDesktopUsage(for name: String, allowInteraction: Bool = true,
+                             operations supplied: DesktopUsageOperations? = nil) async throws -> Date {
+        guard !isDemo || supplied != nil else { throw SafetyError("演示模式不读取真实登录。") }
+        let selected = current, scope = protection.desktopScope
+        guard scope != .unknown, profiles.contains(where: { $0.name == name }) else {
+            throw SafetyError("当前模式尚未确认，未查询额度。")
+        }
         let ops: DesktopUsageOperations
         if let supplied { ops = supplied }
-        else { ops = try await desktopUsageOperations(name: name, allowInteraction: allowInteraction) }
+        else { ops = try await desktopUsageOperations(name: name, selected: selected, scope: scope, allowInteraction: allowInteraction) }
         let before = try ops.context()
         func assertCurrent() throws {
-            guard before.profile == name, current == name, protection.desktopScope == .subscription,
+            guard before.profile == name, current == selected, protection.desktopScope == scope,
+                  !Task.isCancelled,
                   try ops.context() == before else {
                 throw SafetyError("查询期间订阅账号已变化，未采纳旧额度。")
             }
@@ -148,7 +172,7 @@ struct DesktopUsageContext: Equatable {
         }
         try assertCurrent()
         let digest = desktopTokenDigest(access)
-        let saved = active?.snapshot
+        let saved = profiles.first(where: { $0.name == name })?.snapshot
         let identity: CLIIdentity
         var plan = saved?.plan
         if let saved, saved.identity.isComplete, saved.identityTokenDigest == digest {
@@ -189,7 +213,7 @@ struct DesktopUsageContext: Equatable {
         snapshot.weeklyFable = window(sample.weeklyFable)
         snapshot.fetchedAt = time
         acceptSubscriptionUsageResult(.success(snapshot), for: name, contextUnchanged: true)
-        cliConnection.contextDidChange()
+        if name == selected && scope == .subscription { cliConnection.contextDidChange() }
         lastRefreshDiagnostics?.desktopUsageStages.append("desktopSampleAdopted")
         return time
     }

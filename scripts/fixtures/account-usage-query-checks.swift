@@ -149,6 +149,20 @@ import SwitcherCore
     require(blocked.profiles[0].snapshot?.fetchedAt == initial && blocked.profiles[1].snapshot?.weeklySonnet?.used == 31,
             "route failure blocks network reads but does not discard usable local cache")
     let desktop = Store(demo: true)
+    let parked = root.resolvingSymlinksInPath().appendingPathComponent("parked-desktop")
+    try FileManager.default.createDirectory(at: parked, withIntermediateDirectories: true)
+    let parkedConfig = parked.appendingPathComponent("config.json")
+    let parkedMode = parked.appendingPathComponent("claude_desktop_config.json")
+    try CLIJSON.encode(["oauth:tokenCacheV2": "fixture-encrypted-data", "lastKnownAccountUuid": "fixture-saved"])
+        .write(to: parkedConfig)
+    let storedContext = try DesktopUsageContext.read(profile: "Saved", directory: parked)
+    require(storedContext.profile == "Saved" && storedContext.account == "fixture-saved",
+            "saved desktop configuration provides a subscription identity independent of a CLI installation")
+    try CLIJSON.encode(["deploymentMode": "3p"]).write(to: parkedMode)
+    do {
+        _ = try DesktopUsageContext.read(profile: "Saved", directory: parked)
+        preconditionFailure("an API configuration with an old OAuth record must not be used")
+    } catch { checks += 1 }
     await desktop.updateCLIStatus { .init(status: .needsLogin) }
     let owner = desktop.active!.snapshot!.identity
     await desktop.updateCLIStatus { .init(status: .unverified, identity: owner, metadataOnly: true) }
