@@ -9,13 +9,13 @@ extension Color {
         self.init(.sRGB, red: Double((hex >> 16) & 0xff) / 255, green: Double((hex >> 8) & 0xff) / 255,
                   blue: Double(hex & 0xff) / 255, opacity: a)
     }
-    static let bg = Color(hex: 0x161614)
-    static let card = Color(hex: 0x21201D)
-    static let cardHi = Color(hex: 0x282622)
+    static let bg = Color(hex: 0x1A1917)
+    static let card = Color(hex: 0x242320)
+    static let cardHi = Color(hex: 0x2B2925)
     static let stroke = Color(hex: 0x35332E)
     static let hairline = Color.white.opacity(0.07)
     static let hairlineStrong = Color.white.opacity(0.14)
-    static let txt = Color(hex: 0xF4F1EA)
+    static let txt = Color(hex: 0xECE8DF)
     static let sub = Color(hex: 0x9B958B)
     static let claude = Color(hex: 0xD97757)
     static let good = Color(hex: 0x6EC287)
@@ -224,7 +224,7 @@ struct Header: View {
     private var terminalCaption: (text: String, color: Color)? {
         guard subscriptionDesktop else { return nil }
         if let choice = connection.currentBinding?.choice ?? connection.preferredChoice {
-            return (appText(choice == .isolated ? "cli.badgeIsolated" : "cli.badgeDefault", language: language), .sub.opacity(0.85))
+            return (appText(choice == .isolated ? "cli.badgeIsolated" : "cli.badgeDefault", language: language), .txt.opacity(0.72))
         }
         if connection.phase == .waitingForLogin { return (appText("cli.badgeWaiting", language: language), .warn) }
         if connection.localRecord == .notPrepared || connection.localRecord == .differentAccount {
@@ -238,7 +238,7 @@ struct Header: View {
             HStack(spacing: 5) {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "terminal").font(.system(size: 12, weight: .medium))
-                        .foregroundColor(terminalHover ? .txt : .sub)
+                        .foregroundColor(terminalHover ? .txt : .txt.opacity(0.76))
                     if terminalNeedsAttention {
                         Circle().fill(connection.phase == .failed ? Color.bad : Color.warn).frame(width: 6, height: 6)
                             .overlay(Circle().stroke(Color.card, lineWidth: 1.5))
@@ -1526,7 +1526,7 @@ struct ProfileCard: View {
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(p.name).font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.txt).lineLimit(1)
+                        .foregroundColor(active || cardHover ? .txt : p.signedIn ? .txt.opacity(0.84) : .txt.opacity(0.68)).lineLimit(1)
                     HStack(spacing: 5) {
                         if let plan = s?.plan {
                             Text(plan).font(.system(size: 9, weight: .semibold))
