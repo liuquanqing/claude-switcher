@@ -689,21 +689,24 @@ struct TerminalProtectionCard: View {
         }
     }
 
-    /// The exit is a quiet route readout rather than a competing pill; the guard icon on the left
-    /// already carries the green protected signal.
+    /// The exit is a quiet anchored route pill without a duplicate status dot; the shield on the
+    /// left already carries the green protected signal.
     private func exitTag(_ country: String) -> some View {
         HStack(spacing: 4) {
             Text(country)
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(.txt.opacity(0.74))
+                .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                .foregroundColor(.txt.opacity(0.76))
             Text("·")
                 .font(.system(size: 10))
                 .foregroundColor(.sub.opacity(0.55))
             Text("TUN")
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(.txt.opacity(0.74))
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                .foregroundColor(.txt.opacity(0.76))
                 .lineLimit(1)
         }
+        .padding(.horizontal, 8).frame(height: 20)
+        .background(Capsule().fill(Color.white.opacity(0.04)))
+        .overlay(Capsule().stroke(Color.hairline, lineWidth: 1))
         .help(t("protection.observedExit", arguments: ["country": country]))
         .accessibilityLabel(t("protection.observedExit", arguments: ["country": country]))
     }

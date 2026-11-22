@@ -21,14 +21,17 @@ private enum ApplicationUpdateLocalization {
             "detail.idle": "可检查是否有适用于此 Mac 的新版本。",
             "detail.checking": "正在检查更新…",
             "detail.current": "当前版本已是最新版。",
-            "detail.available": "下载并安装后自动重启切换器。",
-            "detail.downloading": "正在下载…",
-            "detail.ready": "已下载，可以安装并重启。",
-            "detail.installing": "正在安装并重启…",
+            "detail.available": "当前 {current} · 下载并安装后自动重启",
+            "detail.downloading": "正在下载并校验安装包…",
+            "detail.verifying": "下载完成，正在校验签名与完整性…",
+            "detail.ready": "已通过校验，可以安装并重启切换器。",
+            "detail.installing": "正在安装新版本并自动重启…",
+            "detail.installingCard": "正在替换应用并准备重启，请稍候…",
             "detail.failedCheck": "检查更新未完成，请重试。",
             "detail.failedDownload": "下载或校验未完成，请重试。",
             "detail.failedInstall": "更新未完成，可重试安装。",
             "download.progress": "下载进度",
+            "download.verifying": "正在校验",
             "failure.unknown": "未提供详细原因。",
             "action.releaseNotes": "发布说明",
             "action.later": "稍后",
@@ -57,14 +60,17 @@ private enum ApplicationUpdateLocalization {
             "detail.idle": "Check for a new version for this Mac.",
             "detail.checking": "Checking for updates…",
             "detail.current": "This version is up to date.",
-            "detail.available": "The switcher relaunches after installation.",
-            "detail.downloading": "Downloading…",
-            "detail.ready": "Downloaded. Ready to install and relaunch.",
-            "detail.installing": "Installing and relaunching…",
+            "detail.available": "Current {current} · Relaunches after installation",
+            "detail.downloading": "Downloading and verifying update package…",
+            "detail.verifying": "Downloaded. Verifying signature and integrity…",
+            "detail.ready": "Verified and ready to install and relaunch.",
+            "detail.installing": "Installing update and relaunching…",
+            "detail.installingCard": "Replacing the app and preparing to relaunch…",
             "detail.failedCheck": "The update check didn’t finish. Try again.",
             "detail.failedDownload": "The download or verification didn’t finish. Try again.",
             "detail.failedInstall": "The update didn’t finish. You can retry installation.",
             "download.progress": "Download progress",
+            "download.verifying": "Verifying package",
             "failure.unknown": "No details were provided.",
             "action.releaseNotes": "Release Notes",
             "action.later": "Later",
@@ -88,6 +94,76 @@ private enum ApplicationUpdateLocalization {
     ]
 }
 
+private struct UpdateActionButton: View {
+    let title: String
+    let prominent: Bool
+    let help: String
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: prominent ? .semibold : .medium))
+                .foregroundColor(prominent ? Color(hex: 0xFAF8F5) : (hover ? .txt : .txt.opacity(0.86)))
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, prominent ? 14 : 13)
+                .frame(height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(prominent
+                              ? Color.claude.opacity(hover ? 0.9 : 1)
+                              : Color.white.opacity(hover ? 0.11 : 0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(prominent
+                                ? Color.white.opacity(0.12)
+                                : (hover ? Color.hairlineStrong : Color.hairline), lineWidth: 1)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+        .onHover { hover = $0 }
+        .animation(.easeOut(duration: 0.12), value: hover)
+        .help(help)
+        .accessibilityLabel(title)
+        .accessibilityHint(help)
+    }
+}
+
+private struct UpdateLinkButton: View {
+    let title: String
+    let help: String
+    let action: () -> Void
+    @Environment(\.isEnabled) private var isEnabled
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 3) {
+                Text(title)
+                    .font(.system(size: 11.5, weight: .medium))
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundColor(hover ? .txt : .sub)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.45)
+        .onHover { hover = $0 }
+        .animation(.easeOut(duration: 0.12), value: hover)
+        .help(help)
+        .accessibilityLabel(title)
+        .accessibilityHint(help)
+    }
+}
+
 @MainActor
 struct ApplicationUpdateView: View {
     @ObservedObject var updater: ApplicationUpdater
@@ -100,25 +176,36 @@ struct ApplicationUpdateView: View {
 
     private var release: AppRelease? { updater.release }
 
+    private var appIcon: NSImage? {
+        guard let url = Bundle.main.resourceURL?.appendingPathComponent("AppIcon.png") else { return nil }
+        return NSImage(contentsOf: url)
+    }
+
     private var downloadProgress: Double {
         min(max(updater.progress, 0), 1)
+    }
+
+    private var isVerifyingDownload: Bool {
+        updater.phase == .downloading && downloadProgress >= 0.999
     }
 
     private var downloadProgressText: String {
         "\(Int((downloadProgress * 100).rounded()))%"
     }
 
-    private var versionText: String {
-        if updater.phase == .available, let release {
-            return t("version.available", arguments: [
-                "version": release.version,
-                "current": updater.currentVersion
-            ])
-        }
-        if let release {
-            return t("version.target", arguments: ["version": release.version])
-        }
-        return t("version.current", arguments: ["version": updater.currentVersion])
+    private var assetSizeText: String? {
+        guard let size = release?.asset.size, size > 0 else { return nil }
+        return ByteCountFormatter.string(fromByteCount: size, countStyle: .file)
+    }
+
+    private var releaseSummaryLines: String? {
+        guard let raw = release?.notes else { return nil }
+        let lines = raw
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("#") && !$0.hasPrefix("Apple Silicon") }
+        guard !lines.isEmpty else { return nil }
+        return lines.prefix(2).joined(separator: "\n")
     }
 
     private var statusDetail: String {
@@ -126,8 +213,10 @@ struct ApplicationUpdateView: View {
         case .idle: return t("detail.idle")
         case .checking: return t("detail.checking")
         case .current: return t("detail.current")
-        case .available: return t("detail.available")
-        case .downloading: return t("detail.downloading")
+        case .available:
+            return t("detail.available", arguments: ["current": updater.currentVersion])
+        case .downloading:
+            return t(isVerifyingDownload ? "detail.verifying" : "detail.downloading")
         case .ready: return t("detail.ready")
         case .installing: return t("detail.installing")
         case .failed:
@@ -144,84 +233,170 @@ struct ApplicationUpdateView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(versionText)
-                    .font(.system(.headline, weight: .semibold))
-                    .foregroundColor(.txt)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(statusDetail)
-                    .font(.callout)
-                    .foregroundColor(.sub)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            header
 
-            if updater.phase == .available, release != nil {
-                releaseNotesLink
+            if updater.phase == .available, let summary = releaseSummaryLines {
+                Text(summary)
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.txt.opacity(0.76))
+                    .lineSpacing(3)
+                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.card))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.hairline, lineWidth: 1))
             }
 
             if updater.phase == .downloading {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(t("download.progress"))
-                        Spacer()
-                        Text(downloadProgressText).monospacedDigit()
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 6) {
+                        if isVerifyingDownload {
+                            ProgressView().controlSize(.mini)
+                        }
+                        Text(t(isVerifyingDownload ? "download.verifying" : "download.progress"))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.sub)
+                        if let sizeText = assetSizeText {
+                            Text("· \(sizeText)")
+                                .font(.system(size: 10.5).monospacedDigit())
+                                .foregroundColor(.sub.opacity(0.72))
+                        }
+                        Spacer(minLength: 8)
+                        Text(downloadProgressText)
+                            .font(.system(size: 11.5, weight: .semibold, design: .rounded).monospacedDigit())
+                            .foregroundColor(.txt.opacity(0.88))
                     }
-                    .font(.caption)
-                    .foregroundColor(.sub)
-                    ProgressView(value: downloadProgress, total: 1)
-                        .progressViewStyle(.linear)
-                        .tint(.claude)
+                    Bar(value: downloadProgress * 100, color: .claude, track: Color.white.opacity(0.09), height: 5)
                         .accessibilityLabel(t("download.progress"))
                         .accessibilityValue(downloadProgressText)
                 }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.card))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.hairline, lineWidth: 1))
             }
 
-            if updater.phase == .ready {
-                Button(action: updater.openDownloadedDMG) {
-                    Label(t("action.openInstaller"), systemImage: "arrow.up.right")
+            if updater.phase == .installing {
+                HStack(spacing: 9) {
+                    ProgressView().controlSize(.small)
+                    Text(t("detail.installingCard"))
+                        .font(.system(size: 11.5))
+                        .foregroundColor(.txt.opacity(0.82))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.link)
-                .font(.caption)
-                .disabled(updater.downloadedURL == nil)
-                .help(updater.downloadedURL == nil ? t("help.openUnavailable") : t("help.openInstaller"))
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.card))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.hairline, lineWidth: 1))
             }
 
             if updater.phase == .failed {
-                Text(failureMessage)
-                    .font(.callout)
-                    .foregroundColor(.warn)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.warn)
+                        .padding(.top, 1.5)
+                    Text(failureMessage)
+                        .font(.system(size: 11.5))
+                        .foregroundColor(.txt.opacity(0.88))
+                        .lineSpacing(2.5)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.warn.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.warn.opacity(0.24), lineWidth: 1))
             }
 
             actions
         }
-        .padding(18)
-        .frame(minWidth: 360, idealWidth: 400, maxWidth: 440, alignment: .topLeading)
+        .padding(.horizontal, 18)
+        .padding(.top, 14)
+        .padding(.bottom, 16)
+        .frame(minWidth: 380, idealWidth: 410, maxWidth: 440, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
         .background(Color.bg)
         .preferredColorScheme(.dark)
         .environment(\.appLanguage, AppLocalization.normalized(language))
     }
 
-    private var releaseNotesLink: some View {
-        Button(action: updater.openReleasePage) {
-            Label(t("action.releaseNotes"), systemImage: "arrow.up.right")
+    private var header: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Group {
+                if let icon = appIcon {
+                    Image(nsImage: icon)
+                        .resizable()
+                        .interpolation(.high)
+                } else {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 9.5).fill(Color.card)
+                            .overlay(RoundedRectangle(cornerRadius: 9.5).stroke(Color.hairline, lineWidth: 0.75))
+                        Image(systemName: "arrow.down.circle.fill")
+                            .font(.system(size: 20, weight: .medium))
+                            .foregroundColor(.claude)
+                    }
+                }
+            }
+            .frame(width: 42, height: 42)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 7) {
+                    Text("Claude Switcher")
+                        .font(.system(size: 14.5, weight: .semibold))
+                        .foregroundColor(.txt)
+                        .lineLimit(1)
+                    if let release {
+                        Text(release.version)
+                            .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.claude)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.claude.opacity(0.14)))
+                            .overlay(Capsule().stroke(Color.claude.opacity(0.28), lineWidth: 0.75))
+                            .lineLimit(1)
+                            .fixedSize()
+                    } else {
+                        Text(updater.currentVersion)
+                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                            .foregroundColor(.sub)
+                            .padding(.horizontal, 6.5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.white.opacity(0.06)))
+                            .overlay(Capsule().stroke(Color.hairline, lineWidth: 0.75))
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
+                }
+                Text(statusDetail)
+                    .font(.system(size: 11.5))
+                    .foregroundColor(.sub)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.link)
-        .font(.callout)
-        .help(t("help.releaseNotes"))
-        .accessibilityLabel(t("action.releaseNotes"))
-        .accessibilityHint(t("help.releaseNotes"))
     }
 
     private var actions: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
+            if updater.phase == .available, release != nil {
+                UpdateLinkButton(title: t("action.releaseNotes"), help: t("help.releaseNotes"),
+                                 action: updater.openReleasePage)
+            } else if updater.phase == .ready {
+                UpdateLinkButton(title: t("action.openInstaller"),
+                                 help: updater.downloadedURL == nil ? t("help.openUnavailable") : t("help.openInstaller"),
+                                 action: updater.openDownloadedDMG)
+                    .disabled(updater.downloadedURL == nil)
+            }
+
+            Spacer(minLength: 0)
+
             switch updater.phase {
             case .available, .ready:
                 secondaryAction(t("action.later"), help: t("help.close"), action: close)
                     .keyboardShortcut(.cancelAction)
+                primaryAction(t("action.updateAndRelaunch"), help: t("help.updateAndRelaunch"), action: updateAndRelaunch)
+                    .disabled(release == nil || (updater.phase == .ready && !updater.canInstall))
             case .downloading:
                 secondaryAction(t("action.cancelUpdate"), help: t("help.cancelUpdate")) {
                     updater.cancelDownload()
@@ -230,53 +405,33 @@ struct ApplicationUpdateView: View {
             case .installing:
                 secondaryAction(t("action.hideProgress"), help: t("help.hideProgress"), action: close)
                     .keyboardShortcut(.cancelAction)
-            case .idle, .checking, .current, .failed:
+            case .failed:
                 secondaryAction(t("action.close"), help: t("help.close"), action: close)
                     .keyboardShortcut(.cancelAction)
-            }
-            Spacer(minLength: 0)
-            switch updater.phase {
-            case .available, .ready:
-                primaryAction(t("action.updateAndRelaunch"), help: t("help.updateAndRelaunch"), action: updateAndRelaunch)
-                    .disabled(release == nil || (updater.phase == .ready && !updater.canInstall))
-            case .failed:
                 if release == nil {
                     primaryAction(t("action.retryCheck"), help: t("help.retryCheck"), action: checkForUpdates)
                 } else {
                     primaryAction(t("action.retryUpdate"), help: t("help.retryUpdate"), action: updateAndRelaunch)
                         .disabled(updater.canRetryInstall && !updater.canInstall)
                 }
-            case .installing:
-                ProgressView().controlSize(.small)
-            case .idle, .checking, .current, .downloading:
-                EmptyView()
+            case .idle, .checking, .current:
+                secondaryAction(t("action.close"), help: t("help.close"), action: close)
+                    .keyboardShortcut(.cancelAction)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.top, 2)
+        .frame(maxWidth: .infinity)
     }
 
     private func primaryAction(_ title: String, help: String,
                                action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.borderedProminent)
+        UpdateActionButton(title: title, prominent: true, help: help, action: action)
             .keyboardShortcut(.defaultAction)
-            .tint(.claude)
-            .controlSize(.regular)
-            .font(.system(.callout, weight: .semibold))
-            .help(help)
-            .accessibilityLabel(title)
-            .accessibilityHint(help)
     }
 
     private func secondaryAction(_ title: String, help: String,
                                  action: @escaping () -> Void) -> some View {
-        Button(title, action: action)
-            .buttonStyle(.bordered)
-            .controlSize(.regular)
-            .font(.system(.callout, weight: .medium))
-            .help(help)
-            .accessibilityLabel(title)
-            .accessibilityHint(help)
+        UpdateActionButton(title: title, prominent: false, help: help, action: action)
     }
 
     private func checkForUpdates() {
@@ -315,14 +470,17 @@ final class ApplicationUpdateWindowController: NSObject {
             isNewWindow = false
         } else {
             let created = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 400, height: 140),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                contentRect: NSRect(x: 0, y: 0, width: 410, height: 150),
+                styleMask: [.titled, .closable, .miniaturizable],
                 backing: .buffered,
                 defer: false
             )
             created.isReleasedWhenClosed = false
             created.appearance = NSAppearance(named: .darkAqua)
-            created.contentMinSize = NSSize(width: 360, height: 110)
+            created.titlebarAppearsTransparent = true
+            created.backgroundColor = NSColor(Color.bg)
+            created.isMovableByWindowBackground = true
+            created.contentMinSize = NSSize(width: 380, height: 110)
             created.contentMaxSize = NSSize(width: 440, height: CGFloat.greatestFiniteMagnitude)
             created.level = .normal
             created.tabbingMode = .disallowed
@@ -337,9 +495,10 @@ final class ApplicationUpdateWindowController: NSObject {
                 self?.window?.close()
             }
         )
+        hostingController.sizingOptions = .preferredContentSize
         window.contentViewController = hostingController
         let fittingHeight = hostingController.view.fittingSize.height
-        window.setContentSize(NSSize(width: 400, height: fittingHeight > 0 ? fittingHeight : 140))
+        window.setContentSize(NSSize(width: 410, height: fittingHeight > 0 ? fittingHeight : 150))
 
         if isNewWindow {
             window.center()
