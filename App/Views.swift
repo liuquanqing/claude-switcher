@@ -18,14 +18,9 @@ extension Color {
     static let txt = Color(hex: 0xF4F1EA)
     static let sub = Color(hex: 0x9B958B)
     static let claude = Color(hex: 0xD97757)
-    static let good = Color(hex: 0x4CC38A)
+    static let good = Color(hex: 0x6EC287)
     static let warn = Color(hex: 0xE5B454)
     static let bad = Color(hex: 0xF0626E)
-}
-
-func levelColor(_ left: Double?) -> Color {
-    guard let l = left else { return .sub }
-    return l > 50 ? .good : l > 20 ? .warn : .bad
 }
 
 // MARK: - Formatting
@@ -68,7 +63,7 @@ func recordedReset(_ date: Date?, language: String, now: Date) -> String {
     let formatter = DateFormatter()
     formatter.locale = AppLocalization.locale(for: language)
     formatter.timeZone = .current
-    formatter.setLocalizedDateFormatFromTemplate(Calendar.current.isDate(date, inSameDayAs: now) ? "HHmm" : "MMMdHHmm")
+    formatter.dateFormat = Calendar.current.isDate(date, inSameDayAs: now) ? "HH:mm" : "M/d HH:mm"
     return appText(date <= now ? "usage.lastRecordedReset" : "format.weeklyReset", language: language,
                    arguments: ["date": formatter.string(from: date)])
 }
@@ -113,13 +108,13 @@ struct Pill: View {
 }
 
 struct Bar: View {
-    let value: Double?; let color: Color; var height: CGFloat = 4
+    let value: Double?; let color: Color; var track: Color = Color.white.opacity(0.09); var height: CGFloat = 4
     var body: some View {
         GeometryReader { g in
             let ratio = CGFloat(min(max((value ?? 0) / 100, 0), 1))
             let fillWidth = ratio > 0 ? max(height, g.size.width * ratio) : 0
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.09))
+                Capsule().fill(track)
                 if fillWidth > 0 {
                     Capsule().fill(color)
                         .frame(width: min(g.size.width, fillWidth))
@@ -1420,31 +1415,61 @@ struct UsageMetric: View {
     let value: Double?
     let reset: String
     let resetHelp: String
+    var stale = false
     var prominent = false
+    @Environment(\.appLanguage) private var language
+
+    private var quotaColor: Color {
+        guard let value else { return .sub }
+        if stale { return .sub }
+        let remaining = value.rounded()
+        if remaining <= 20 { return .bad }
+        if remaining <= 50 { return .warn }
+        return .good
+    }
 
     var body: some View {
-        let color = levelColor(value)
+        let color = quotaColor
+        let numberColor = stale ? Color.sub.opacity(0.85) : color
+        let percentColor = stale ? Color.sub.opacity(0.6) : color.opacity(0.76)
+        let barColor = stale ? Color.sub.opacity(0.36) : color
         VStack(alignment: .leading, spacing: 5) {
-            Text(title)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.sub)
-                .lineLimit(1)
+            HStack(spacing: 3.5) {
+                Text(title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.sub)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.82)
+                if stale {
+                    Text(appText("usage.staleBadge", language: language))
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.sub.opacity(0.9))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 3.5)
+                        .padding(.vertical, 1)
+                        .background(RoundedRectangle(cornerRadius: 3.5).fill(Color.white.opacity(0.06)))
+                        .overlay(RoundedRectangle(cornerRadius: 3.5).stroke(Color.hairline, lineWidth: 0.5))
+                        .help(resetHelp)
+                }
+            }
+            .frame(height: 14, alignment: .leading)
             HStack(alignment: .firstTextBaseline, spacing: 1.5) {
                 Text(pct(value))
                     .font(.system(size: prominent ? 26 : 23, weight: .bold, design: .rounded).monospacedDigit())
-                    .foregroundColor(color)
+                    .foregroundColor(numberColor)
                 if value != nil {
                     Text("%")
                         .font(.system(size: prominent ? 11.5 : 10.5, weight: .semibold, design: .rounded))
-                        .foregroundColor(color.opacity(0.7))
+                        .foregroundColor(percentColor)
                 }
             }
             .frame(height: 30, alignment: .bottomLeading)
-            Bar(value: value, color: color, height: 3.5)
+            Bar(value: value, color: barColor, track: stale ? Color.white.opacity(0.06) : Color.white.opacity(0.09), height: 3.5)
             Text(reset)
                 .font(.system(size: 10).monospacedDigit())
-                .foregroundColor(.sub.opacity(0.85))
-                .lineLimit(1).minimumScaleFactor(0.82)
+                .foregroundColor(.sub.opacity(stale ? 0.72 : 0.85))
+                .lineLimit(1).minimumScaleFactor(0.72)
                 .help(resetHelp)
                 .accessibilityHint(resetHelp)
         }
@@ -1571,7 +1596,7 @@ struct ProfileCard: View {
                     let shown = Array(metrics.prefix(2))
                     VStack(alignment: .leading, spacing: 0) {
                         Spacer(minLength: 0)
-                        HStack(alignment: .top, spacing: 12) {
+                        HStack(alignment: .top, spacing: 9) {
                             ForEach(shown, id: \.0) { key, window in
                                 let shortWindow = key == "usage.fiveHours"
                                 let expired = window?.resetsAt.map { $0 <= context.date } ?? false
@@ -1587,6 +1612,7 @@ struct ProfileCard: View {
                                                 ? "usage.weeklyResetHelp" : "usage.modelWeeklyResetHelp", arguments: [
                                                     "reset": fullDateTime(window?.resetsAt, language: language), "sampled": sampled
                                                 ]) + (expired ? "\n" + t("usage.resetDueCachedHelp") : ""),
+                                            stale: expired,
                                             prominent: shown.count == 1)
                             }
                         }
