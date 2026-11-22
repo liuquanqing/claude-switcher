@@ -15,7 +15,7 @@ extension Color {
     static let stroke = Color(hex: 0x35332E)
     static let hairline = Color.white.opacity(0.07)
     static let hairlineStrong = Color.white.opacity(0.14)
-    static let txt = Color(hex: 0xECE8DF)
+    static let txt = Color(hex: 0xF2EFE8)
     static let sub = Color(hex: 0x9B958B)
     static let claude = Color(hex: 0xD97757)
     static let good = Color(hex: 0x6EC287)
