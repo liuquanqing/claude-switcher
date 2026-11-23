@@ -642,10 +642,10 @@ struct TerminalProtectionCard: View {
                                 .lineLimit(1).truncationMode(.tail).layoutPriority(-1)
                                 .padding(.leading, 2)
                         }
-                        Spacer(minLength: 6)
                         if statusColor == .good, let exit {
                             exitTag(exit)
                         }
+                        Spacer(minLength: 6)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
@@ -695,17 +695,17 @@ struct TerminalProtectionCard: View {
         HStack(spacing: 4) {
             Text(country)
                 .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
-                .foregroundColor(.txt.opacity(0.76))
+                .foregroundColor(.txt.opacity(0.86))
             Text("·")
                 .font(.system(size: 10))
-                .foregroundColor(.sub.opacity(0.55))
+                .foregroundColor(.sub.opacity(0.5))
             Text("TUN")
                 .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .foregroundColor(.txt.opacity(0.76))
+                .foregroundColor(.txt.opacity(0.66))
                 .lineLimit(1)
         }
         .padding(.horizontal, 8).frame(height: 20)
-        .background(Capsule().fill(Color.white.opacity(0.04)))
+        .background(Capsule().fill(Color.white.opacity(0.045)))
         .overlay(Capsule().stroke(Color.hairline, lineWidth: 1))
         .help(t("protection.observedExit", arguments: ["country": country]))
         .accessibilityLabel(t("protection.observedExit", arguments: ["country": country]))
