@@ -81,7 +81,8 @@ extension SessionTransferService {
                 let destination = try Disk.json(change.after)
                 items.append(SessionTransferReceiptItem(name: change.name, title: destination["title"] as? String ?? change.title, kind: change.kind,
                     cwd: destination["cwd"] as? String,
-                    beforeHash: change.before.map(Disk.hash), afterHash: Disk.hash(change.after), beforeFile: beforeFile, afterFile: afterFile))
+                    beforeHash: change.before.map(Disk.hash), afterHash: Disk.hash(change.after), beforeFile: beforeFile, afterFile: afterFile,
+                    parkedFrom: change.parkedFrom))
             }
             var receipt = SessionTransferReceipt(version: 1, id: id, createdAt: Date(), target: plan.targetScope,
                 targetName: plan.target.endpoint.name, items: items, state: .copying, undoRequested: false, message: nil)

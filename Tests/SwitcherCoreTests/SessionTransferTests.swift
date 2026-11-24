@@ -84,7 +84,7 @@ final class SessionTransferTests: FixtureTest {
     func testContinuationListAndInventedProofNeverAuthorizeOverwrite() throws {
         try index(cli: "new-cli", turns: 2, extras: ["priorCliSessionIds": ["old-cli"], "fixtureProof": ["targetHasNoProgressAfterJoin": true]])
         try index(cli: "old-cli", turns: 120, space: target)
-        XCTAssertEqual(try service.rows(source: source, target: target, updateExisting: true)[0].kind, .blocked)
+        XCTAssertEqual(try service.rows(source: source, target: target, updateExisting: true)[0].kind, .fork)
         XCTAssertThrowsError(try plan(updates: true))
     }
     func testLogicalDuplicateUnderDifferentFilenameIsSkipped() throws {
@@ -119,7 +119,8 @@ final class SessionTransferTests: FixtureTest {
         try index(space: target); try writeJSON(["archived": ["logical-one"]], target.directory.appendingPathComponent("archived-sessions.idx"))
         XCTAssertEqual(try onlyRow().kind, .skip, "A target archive list entry counts as archived on the target")
         try index(extras: ["isArchived": false])
-        XCTAssertEqual(try onlyRow().kind, .blocked, "Archived only in the target keeps the target state")
+        XCTAssertEqual(try onlyRow().kind, .skip, "Archived only in the target is skipped to respect target archive")
+        XCTAssertThrowsError(try plan(updates: true))
     }
     func testIdenticalProgressWithoutTurnCountIsSynced() throws {
         try index(turns: nil); let file = try index(turns: nil, space: target), before = try bytes(file, in: target)
@@ -168,20 +169,26 @@ final class SessionTransferTests: FixtureTest {
         XCTAssertEqual(try service.restore(receipt.id, to: target, undo: true).state, .undone); XCTAssertEqual(try bytes(file, in: target), before)
     }
     func testContinuationWithoutEvidenceOrAfterForkStaysPending() throws {
-        let fork = "两边各自聊过，可能已分叉，不覆盖。"
         let cases: [(String, () throws -> String, String)] = [
-            ("missing switch time", { try self.continuationPair(sourceExtras: ["priorCliSessionLeftAt": ["first-cli": 1]]) }, "缺少切换记录，无法确认是否分叉，不覆盖。"),
-            ("target active after switch", { try self.continuationPair(targetTime: self.joinedAt + 1000) }, fork),
-            ("old segment written after switch", { try self.continuationPair(oldTranscriptAt: self.joinedAt + 1000) }, fork),
-            ("target has more turns", { try self.continuationPair(targetTurns: 200) }, fork),
-            ("target chain differs", { try self.continuationPair(targetPrior: ["other-cli"]) }, "无法确认是同一段对话，不覆盖。")
+            ("missing switch time", { try self.continuationPair(sourceExtras: ["priorCliSessionLeftAt": ["first-cli": 1]]) }, "缺少切换时刻，无法确认是否分叉，请按分叉处理。"),
+            ("target active after switch", { try self.continuationPair(targetTime: self.joinedAt + 1000) }, "目标在来源离开旧链后继续聊过，已分叉。"),
+            ("old segment written after switch", { try self.continuationPair(oldTranscriptAt: self.joinedAt + 1000) }, "旧链原文在切换后仍有写入，已分叉。"),
+            ("target chain differs", { try self.continuationPair(targetPrior: ["other-cli"]) }, "历史链前缀不一致，已分叉。")
         ]
         for (label, make, reason) in cases {
             let file = try make(), before = try bytes(file, in: target)
             let row = try onlyRow()
-            XCTAssertEqual(row.kind, .blocked, label); XCTAssertEqual(row.reason, reason, label); XCTAssertFalse(row.continuation, label)
+            XCTAssertEqual(row.kind, .fork, label); XCTAssertEqual(row.reason, reason, label); XCTAssertFalse(row.continuation, label)
+            XCTAssertNotNil(row.fork, label)
             XCTAssertThrowsError(try plan([file], updates: true), label); XCTAssertEqual(try bytes(file, in: target), before, label)
         }
+        // Per Section 3: completedTurns are per-identity and never determine fork or newer.
+        // Target with more turns but lastActivityAt <= leftAt is a valid linear continuation.
+        let linearWithMoreTargetTurns = try continuationPair(targetTurns: 200)
+        let linearRow = try onlyRow()
+        XCTAssertEqual(linearRow.kind, .update)
+        XCTAssertTrue(linearRow.continuation)
+        XCTAssertNoThrow(try plan([linearWithMoreTargetTurns], updates: true))
     }
     func testOldSegmentAppendAfterPlanInvalidatesContinuation() throws {
         let file = try continuationPair(), before = try bytes(file, in: target), approved = try plan([file], updates: true)
@@ -197,7 +204,8 @@ final class SessionTransferTests: FixtureTest {
                                               ofItemAtPath: transcripts.appendingPathComponent("project/old-cli.jsonl").path)
         XCTAssertEqual(try onlyRow().kind, .skip); XCTAssertEqual(try onlyRow().reason, "目标进度较新，保留目标。")
         try index(cli: "old-cli", turns: 125, time: joinedAt + 1000)
-        XCTAssertEqual(try onlyRow().kind, .blocked); XCTAssertEqual(try onlyRow().reason, "两边各自聊过，可能已分叉，不覆盖。")
+        XCTAssertEqual(try onlyRow().kind, .fork); XCTAssertEqual(try onlyRow().reason, "来源在目标离开旧链后继续聊过，已分叉。")
+        XCTAssertNotNil(try onlyRow().fork)
         XCTAssertThrowsError(try plan([file], updates: true))
     }
     func testMalformedArchiveListStopsInsteadOfAssumingEmpty() throws {

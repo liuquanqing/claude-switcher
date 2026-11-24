@@ -24,7 +24,13 @@ enum SessionTransferDemo {
             try Data("{\"sessionId\":\"\(cli)\",\"message\":\"FICTIONAL TEST ONLY\"}\n".utf8).write(to: transcripts.appendingPathComponent(cli + ".jsonl"))
             if let old {
                 var target = base; target["completedTurns"] = old; target["lastActivityAt"] = now - (old > turns ? 0 : 600_000)
-                if id == "chain" { target["cliSessionId"] = "cli-previous" }
+                if id == "chain" {
+                    target["cliSessionId"] = "cli-previous"
+                    let previous = transcripts.appendingPathComponent("cli-previous.jsonl")
+                    if !fm.fileExists(atPath: previous.path) {
+                        try Data("{\"sessionId\":\"cli-previous\",\"message\":\"FICTIONAL TEST ONLY\"}\n".utf8).write(to: previous)
+                    }
+                }
                 try json(target, b.appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_\(id).json"))
             }
         }

@@ -300,7 +300,7 @@ struct CopyThreadsView: View {
     }
 
     private var canSwapDirection: Bool {
-        !controller.isWorking && !controller.sourceID.isEmpty && !controller.targetID.isEmpty &&
+        !controller.isWorking && !controller.isWaitingForQuit && !controller.sourceID.isEmpty && !controller.targetID.isEmpty &&
             controller.sourceID != controller.targetID
     }
 
@@ -309,8 +309,10 @@ struct CopyThreadsView: View {
     }
 
     private var plannedRows: [SessionTransferRow] {
-        controller.rows.filter { row in
-            controller.picked.contains(row.id) &&
+        let activeForks = controller.activeForkIDs
+        return controller.rows.filter { row in
+            if row.kind == .fork { return activeForks.contains(row.id) }
+            return controller.picked.contains(row.id) &&
                 (row.kind == .add || (row.kind == .update && controller.updateExisting))
         }
     }
@@ -320,10 +322,11 @@ struct CopyThreadsView: View {
         let added = plannedRows.filter { $0.kind == .add }.count
         let updated = plannedRows.filter { $0.kind == .update && !$0.continuation }.count
         let continued = plannedRows.filter(\.continuation).count
+        let forks = plannedRows.filter { $0.kind == .fork }.count
         let visibleIDs = Set(controller.visibleRows.map(\.id))
         let outsideCount = plannedRows.filter { !visibleIDs.contains($0.id) }.count
         var parts = [text("selectedCount", arguments: ["selected": String(plannedRows.count)])]
-        for (key, count) in [("summaryAdded", added), ("summaryUpdated", updated), ("summaryContinued", continued)] where count > 0 {
+        for (key, count) in [("summaryAdded", added), ("summaryUpdated", updated), ("summaryContinued", continued), ("summaryForks", forks)] where count > 0 {
             parts.append(text(key, arguments: ["count": String(count)]))
         }
         let summary = parts.joined(separator: " · ")
@@ -406,7 +409,9 @@ struct CopyThreadsView: View {
                     .foregroundColor(.sub)
                     .frame(maxWidth: .infinity, minHeight: 180, maxHeight: .infinity)
             } else {
-                if let error = controller.errorMessage {
+                if controller.isWaitingForQuit {
+                    waitForQuitBanner
+                } else if let error = controller.errorMessage {
                     message(generated(error), color: .bad)
                 } else if let status = visibleStatusMessage {
                     message(status, color: .sub)
@@ -485,94 +490,191 @@ struct CopyThreadsView: View {
     }
 
     private var directionEditor: some View {
-        HStack(alignment: .top, spacing: 10) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text(text("from"))
-                        .frame(width: directionLabelWidth, alignment: .leading)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.sub)
-                    picker(text("from"), selection: sourceBinding, options: controller.locations)
-                        .labelsHidden()
-                    if !controller.sourceID.isEmpty && controller.sourceID == controller.currentEndpointID {
-                        Text(text("currentAccount"))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.claude)
-                    }
-                }
-                if controller.sourceSpaces.count > 1 {
+        let srcOption = controller.locations.first { $0.id == controller.sourceID }
+        let dstOption = controller.locations.first { $0.id == controller.targetID }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
-                        Text(text("sourceSpace"))
+                        Text(text("from"))
                             .frame(width: directionLabelWidth, alignment: .leading)
-                            .font(.system(size: 11))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.sub)
-                        TransferSpacePicker(label: text("sourceSpace"), selection: sourceSpaceBinding,
-                                            options: controller.sourceSpaces, language: controller.language)
+                        picker(text("from"), selection: sourceBinding, options: controller.locations)
+                            .labelsHidden()
+                        if !controller.sourceID.isEmpty && controller.sourceID == controller.currentEndpointID {
+                            Text(text("currentAccount"))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.claude)
+                        }
+                        if srcOption?.isNewest == true {
+                            Text(text("newestBadge"))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.good)
+                        }
+                    }
+                    if controller.sourceSpaces.count > 1 {
+                        HStack(spacing: 6) {
+                            Text(text("sourceSpace"))
+                                .frame(width: directionLabelWidth, alignment: .leading)
+                                .font(.system(size: 11))
+                                .foregroundColor(.sub)
+                            TransferSpacePicker(label: text("sourceSpace"), selection: sourceSpaceBinding,
+                                                options: controller.sourceSpaces, language: controller.language)
+                        }
                     }
                 }
-            }
-            Button { controller.swapDirection() } label: {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 13, weight: .medium))
-                    .frame(width: 24, height: 24)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .foregroundColor(.sub)
-            .padding(.top, 2)
-            .help(text("swapDirection"))
-            .accessibilityLabel(Text(text("swapDirection")))
-            .disabled(!canSwapDirection)
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 6) {
-                    Text(text("to"))
-                        .frame(width: directionLabelWidth, alignment: .leading)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.sub)
-                    picker(text("to"), selection: targetBinding, options: controller.locations, placeholder: text("chooseTarget"))
-                        .labelsHidden()
-                    if !controller.targetID.isEmpty && controller.targetID == controller.currentEndpointID {
-                        Text(text("currentAccount"))
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.claude)
-                    }
+                Button { controller.swapDirection() } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
                 }
-                if controller.targetSpaces.count > 1 {
+                .buttonStyle(.borderless)
+                .foregroundColor(.sub)
+                .padding(.top, 2)
+                .help(text("swapDirection"))
+                .accessibilityLabel(Text(text("swapDirection")))
+                .disabled(!canSwapDirection)
+                VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) {
-                        Text(text("targetSpace"))
+                        Text(text("to"))
                             .frame(width: directionLabelWidth, alignment: .leading)
-                            .font(.system(size: 11))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.sub)
-                        TransferSpacePicker(label: text("targetSpace"), selection: targetSpaceBinding,
-                                            options: controller.targetSpaces, language: controller.language)
+                        picker(text("to"), selection: targetBinding, options: controller.locations, placeholder: text("chooseTarget"))
+                            .labelsHidden()
+                        if !controller.targetID.isEmpty && controller.targetID == controller.currentEndpointID {
+                            Text(text("currentAccount"))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.claude)
+                        }
+                        if dstOption?.isNewest == true {
+                            Text(text("newestBadge"))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.good)
+                        }
+                    }
+                    if controller.targetSpaces.count > 1 {
+                        HStack(spacing: 6) {
+                            Text(text("targetSpace"))
+                                .frame(width: directionLabelWidth, alignment: .leading)
+                                .font(.system(size: 11))
+                                .foregroundColor(.sub)
+                            TransferSpacePicker(label: text("targetSpace"), selection: targetSpaceBinding,
+                                                options: controller.targetSpaces, language: controller.language)
+                        }
                     }
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            if !controller.targetID.isEmpty && !controller.targetSpaceID.isEmpty {
+                HStack(spacing: 6) {
+                    Image(systemName: controller.targetIsActive && controller.desktopRunning ? "clock.badge.exclamationmark" : "checkmark.shield")
+                        .font(.system(size: 10))
+                        .foregroundColor(controller.targetIsActive && controller.desktopRunning ? .warn : .sub)
+                    Text(targetTimingHint)
+                        .font(.system(size: 11))
+                        .foregroundColor(controller.targetIsActive && controller.desktopRunning ? .warn : .sub)
+                }
+                .padding(.leading, directionLabelWidth + 6)
+            }
         }
-        .disabled(controller.isWorking)
+        .disabled(controller.isWorking || controller.isWaitingForQuit)
+    }
+
+    private var targetTimingHint: String {
+        guard controller.targetIsActive else { return text("parkedTargetHint") }
+        return text(controller.desktopRunning ? "activeTargetRunningHint" : "activeTargetIdleHint")
+    }
+
+    private var waitForQuitBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView().controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                switch controller.waitPhase {
+                case .waitingForQuit:
+                    Text(text("waitingForQuitTitle"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.txt)
+                    Text(text("waitingForQuitDetail"))
+                        .font(.system(size: 11))
+                        .foregroundColor(.sub)
+                case .settling(let sec):
+                    Text(text("settlingTitle", arguments: ["seconds": String(sec)]))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.claude)
+                    Text(text("settlingDetail"))
+                        .font(.system(size: 11))
+                        .foregroundColor(.sub)
+                case .writing:
+                    Text(text("writingTitle"))
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.txt)
+                case .idle:
+                    EmptyView()
+                }
+            }
+            Spacer(minLength: 8)
+            if controller.waitPhase != .writing {
+                Button(text("cancelWait")) { controller.cancelWaiting() }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .background(RoundedRectangle(cornerRadius: 9).fill(Color.cardHi))
+        .overlay(RoundedRectangle(cornerRadius: 9).stroke(Color.claude.opacity(0.35), lineWidth: 1))
+    }
+
+    private var cutoffPickerTag: Int {
+        switch controller.cutoffMode {
+        case .auto: return -1
+        case .days(let d): return d
+        case .custom: return -2
+        case .all: return 0
+        }
+    }
+
+    private var autoCutoffLabel: String {
+        if let date = controller.inferredNewSinceDate {
+            return text("newAutoCutoff", arguments: ["date": shortMonthDay(date)])
+        }
+        return text("newAutoAll")
     }
 
     private var searchAndUpdate: some View {
         HStack(spacing: 12) {
             TextField(text("search"), text: $controller.query)
                 .textFieldStyle(.roundedBorder)
-                .disabled(controller.isWorking)
+                .disabled(controller.isWorking || controller.isWaitingForQuit)
             if !controller.isShowingCopyResult {
                 Text(text("newDateLabel"))
                     .font(.system(size: 11))
                     .foregroundColor(.sub)
                     .fixedSize()
                     .padding(.trailing, -6)
-                Picker(text("newDateRange"), selection: Binding(get: { controller.newSessionAgeDays ?? 0 }, set: { controller.setNewSessionAge($0 == 0 ? nil : $0) })) {
+                Picker(text("newDateRange"), selection: Binding(get: { cutoffPickerTag }, set: { tag in
+                    switch tag {
+                    case -1: controller.setUseAutoCutoff()
+                    case 0: controller.setNewSessionAge(nil)
+                    case 7, 30, 90: controller.setNewSessionAge(tag)
+                    default: break
+                    }
+                })) {
+                    Text(autoCutoffLabel).tag(-1)
+                    if case .custom(let date) = controller.cutoffMode {
+                        Text(shortMonthDay(date)).tag(-2)
+                    }
                     Text(text("newLastWeek")).tag(7)
                     Text(text("newLastMonth")).tag(30)
                     Text(text("newLastQuarter")).tag(90)
                     Text(text("newAllDates")).tag(0)
                 }
                 .labelsHidden()
-                .frame(width: controller.language == "en" ? 142 : 112)
-                .disabled(controller.isWorking)
+                .frame(width: controller.language == "en" ? 156 : 138)
+                .disabled(controller.isWorking || controller.isWaitingForQuit)
                 .help(text("newDateRangeHelp"))
                 .accessibilityLabel(text("newDateRange"))
                 Button { controller.showsCustomNewDate.toggle() } label: {
@@ -583,9 +685,9 @@ struct CopyThreadsView: View {
                 .foregroundColor(.sub)
                 .help(text("customNewDate"))
                 .accessibilityLabel(text("customNewDate"))
-                .disabled(controller.isWorking)
+                .disabled(controller.isWorking || controller.isWaitingForQuit)
                 .popover(isPresented: $controller.showsCustomNewDate, arrowEdge: .bottom) {
-                    DatePicker(text("customNewDate"), selection: Binding(get: { controller.customNewSince ?? Date() }, set: { date in controller.setCustomNewDate(date) }), displayedComponents: .date)
+                    DatePicker(text("customNewDate"), selection: Binding(get: { controller.customNewSince ?? controller.inferredNewSinceDate ?? Date() }, set: { date in controller.setCustomNewDate(date) }), displayedComponents: .date)
                         .datePickerStyle(.graphical)
                         .labelsHidden()
                         .padding(10)
@@ -619,44 +721,58 @@ struct CopyThreadsView: View {
         }
     }
 
-    private enum RowGroup { case actionable, notCopied, settled }
+    private enum RowGroup { case add, overwrite, fork, skip }
 
     private func group(_ row: SessionTransferRow) -> RowGroup {
         switch row.kind {
-        case .add, .update: return .actionable
-        case .blocked: return .notCopied
-        case .skip: return .settled
+        case .add: return .add
+        case .update: return .overwrite
+        case .fork: return .fork
+        case .skip, .blocked: return .skip
         }
     }
 
     private var sessionList: some View {
         let rows = controller.visibleRows
-        let actionable = rows.filter { group($0) == .actionable }
-        let notCopied = rows.filter { group($0) == .notCopied }
-        let settled = rows.filter { group($0) == .settled }
-        let settledOpen = showsSettled || !controller.query.isEmpty
+        let additions = rows.filter { $0.kind == .add }
+        let overwrites = rows.filter { $0.kind == .update }
+        let forks = rows.filter { $0.kind == .fork }
+        let skipped = rows.filter { $0.kind == .skip || $0.kind == .blocked }
+        let hasBlocked = skipped.contains { $0.kind == .blocked }
+        let skippedOpen = showsSettled || !controller.query.isEmpty || hasBlocked
         let hiddenOlder = controller.hiddenOlderAdditionsCount
         return ScrollView {
             LazyVStack(alignment: .leading, spacing: 2) {
-                if !rows.isEmpty || hiddenOlder > 0 {
-                    groupHeader(text(controller.isShowingCopyResult ? "groupResult" : "groupActionable"), count: actionable.count)
-                    ForEach(actionable) { sessionRow($0) }
-                    if actionable.isEmpty {
+                if controller.isShowingCopyResult {
+                    if !rows.isEmpty {
+                        groupHeader(text("groupResult"), count: rows.count)
+                        ForEach(rows) { sessionRow($0) }
+                    }
+                } else {
+                    if !additions.isEmpty {
+                        groupHeader(text("groupAdd"), count: additions.count)
+                        ForEach(additions) { sessionRow($0) }
+                    }
+                    if !overwrites.isEmpty {
+                        groupHeader(text("groupOverwrite"), count: overwrites.count)
+                        ForEach(overwrites) { sessionRow($0) }
+                    }
+                    if !forks.isEmpty {
+                        groupHeader(text("groupFork"), count: forks.count, help: text("groupForkHelp"))
+                        ForEach(forks) { forkRow($0) }
+                    }
+                    if additions.isEmpty && overwrites.isEmpty && forks.isEmpty && (!rows.isEmpty || hiddenOlder > 0) {
                         Text(text("groupEmpty"))
                             .font(.system(size: 12))
                             .foregroundColor(.sub)
                             .padding(.leading, rowTextInset)
-                            .padding(.vertical, 6)
+                            .padding(.vertical, 8)
                     }
                     if hiddenOlder > 0 { hiddenAdditionsRow(hiddenOlder) }
-                }
-                if !notCopied.isEmpty {
-                    groupHeader(text("groupNotCopied"), count: notCopied.count, help: text("groupNotCopiedHelp"))
-                    ForEach(notCopied) { sessionRow($0) }
-                }
-                if !settled.isEmpty {
-                    settledHeader(count: settled.count, open: settledOpen)
-                    if settledOpen { ForEach(settled) { sessionRow($0) } }
+                    if !skipped.isEmpty {
+                        settledHeader(count: skipped.count, open: skippedOpen)
+                        if skippedOpen { ForEach(skipped) { sessionRow($0) } }
+                    }
                 }
             }
             .padding(.horizontal, 4)
@@ -673,6 +789,86 @@ struct CopyThreadsView: View {
                     .foregroundColor(.sub)
             }
         }
+    }
+
+    private func forkRow(_ row: SessionTransferRow) -> some View {
+        let resolution = controller.forkResolutions[row.id] ?? .skip
+        let isActive = resolution != .skip
+        let fork = row.fork
+        let srcTime = shortDateTime(fork?.sourceLastTurnAt ?? fork?.sourceLastActivityAt ?? row.lastActivity)
+        let dstTime = shortDateTime(fork?.targetLastTurnAt ?? fork?.targetLastActivityAt ?? row.lastActivity)
+        let branchSummary = text("forkBranches", arguments: ["source": srcTime, "target": dstTime])
+        return HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "arrow.triangle.branch")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(isActive ? .claude : .sub)
+                .frame(width: 20, height: 20)
+                .accessibilityLabel(Text(text("groupFork")))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(row.title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(isActive ? .txt : .sub)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(row.title)
+                Text(row.cwd)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.sub)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(row.cwd)
+                HStack(spacing: 8) {
+                    Text(branchSummary)
+                        .font(.system(size: 11).monospacedDigit())
+                        .foregroundColor(.txt.opacity(0.82))
+                    if resolution == .takeSource {
+                        Text(text("forkWillParkTarget"))
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.sub)
+                    } else if resolution == .keepTarget {
+                        Text(text("forkWillParkSource"))
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.sub)
+                    }
+                }
+                Text(generated(row.reason))
+                    .font(.system(size: 11))
+                    .foregroundColor(Color.txt.opacity(0.68))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .help(generated(row.reason))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Picker("", selection: Binding(
+                get: { controller.forkResolutions[row.id] ?? .skip },
+                set: { controller.setForkResolution(row.id, $0) }
+            )) {
+                Text(text("forkTakeSource")).tag(SessionForkResolution.takeSource)
+                Text(text("forkKeepTarget")).tag(SessionForkResolution.keepTarget)
+                Text(text("forkSkip")).tag(SessionForkResolution.skip)
+            }
+            .labelsHidden()
+            .frame(width: controller.language == "en" ? 116 : 98)
+            .disabled(controller.isWorking || controller.isWaitingForQuit)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 7).fill(isActive ? Color.cardHi : Color.clear))
+        .contentShape(Rectangle())
+    }
+
+    private func shortMonthDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "M/d"
+        return formatter.string(from: date)
+    }
+
+    private func shortDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
     }
 
     /// Leading inset that lines secondary lines up with row titles (row padding + mark column + spacing).
@@ -702,7 +898,7 @@ struct CopyThreadsView: View {
                 Image(systemName: open ? "chevron.down" : "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
                     .frame(width: 10)
-                Text(text("groupSettled"))
+                Text(text("groupSkip"))
                     .font(.system(size: 11, weight: .semibold))
                 Text(String(count))
                     .font(.system(size: 11).monospacedDigit())
@@ -716,7 +912,7 @@ struct CopyThreadsView: View {
         .padding(.horizontal, 9)
         .padding(.top, 10)
         .padding(.bottom, 2)
-        .help(text("groupSettledHelp"))
+        .help(text("groupSkipHelp"))
         .accessibilityAddTraits(.isHeader)
         .accessibilityValue(Text(text(open ? "expanded" : "collapsed")))
     }
@@ -764,7 +960,7 @@ struct CopyThreadsView: View {
         let path = result?.cwd ?? row.cwd
         let isPicked = !controller.isShowingCopyResult && controller.picked.contains(row.id)
         let showsOriginalTitle = result.map { $0.title != row.title } ?? false
-        let settled = group(row) == .settled
+        let settled = group(row) == .skip
         let status = rowStatus(row, result: result)
         return HStack(alignment: .top, spacing: 10) {
             leadingMark(row)
@@ -853,14 +1049,20 @@ struct CopyThreadsView: View {
                         .foregroundColor(.sub)
                 }
                 Spacer(minLength: 4)
-                Button(plannedRows.isEmpty ? text("copy") : text("copyCount", arguments: ["count": String(plannedRows.count)])) {
+                Button(syncButtonLabel) {
                     Task { await controller.copySelected() }
                 }
                 .buttonStyle(ImportProminentButtonStyle())
                 .fixedSize()
-                .disabled(!controller.canCopy || controller.isWorking)
+                .disabled(!controller.canCopy || controller.isWorking || controller.isWaitingForQuit)
             }
         }
+    }
+
+    private var syncButtonLabel: String {
+        guard !plannedRows.isEmpty else { return text("sync") }
+        let key = (controller.targetIsActive && controller.desktopRunning) ? "waitAndSyncCount" : "syncCount"
+        return text(key, arguments: ["count": String(plannedRows.count)])
     }
 
     private var sourceBinding: Binding<String> {
@@ -952,6 +1154,7 @@ struct CopyThreadsView: View {
     }
 
     private func skipStatus(_ row: SessionTransferRow) -> String? {
+        if row.skippedByCutoff { return text("skipCutoff") }
         switch row.reason {
         case "目标已同步，无需重复复制。": return text("skipSynced")
         case "目标进度较新，保留目标。": return text("skipTargetNewer")
@@ -959,27 +1162,30 @@ struct CopyThreadsView: View {
         case "目标已有同一会话，保留目标条目。": return text("skipExisting")
         case "两边都已归档或删除，保持现状。": return text("skipBothRemoved")
         case "来源已归档或删除，不复制。": return text("skipSourceRemoved")
+        case "目标已有条目引用同一正文链，跳过以避免重复。": return text("skipDuplicateChain")
         default: return nil
         }
     }
 
     private func shouldShowReason(_ row: SessionTransferRow) -> Bool {
         guard !row.reason.isEmpty else { return false }
-        return row.kind == .blocked || (row.continuation && !controller.isShowingCopyResult) || (row.kind == .skip && skipStatus(row) == nil)
+        return !controller.isShowingCopyResult || row.kind == .blocked
     }
 
     /// Group headers carry the state, so blocked rows need no repeated label; their reason line explains why.
     private func rowStatus(_ row: SessionTransferRow, result: TransferSessionItem?) -> String? {
         if let result {
+            if result.parkedFrom != nil { return text("resultParked") }
             switch result.kind {
             case .add: return text("resultAdded")
             case .update: return text(row.continuation ? "resultContinued" : "resultUpdated")
-            case .skip, .blocked: return text("notCopied")
+            case .fork, .skip, .blocked: return text("notCopied")
             }
         }
         switch row.kind {
         case .add: return text(controller.isShowingCopyResult ? "notCopied" : "willAdd")
         case .update: return text(controller.isShowingCopyResult ? "notCopied" : row.continuation ? "willContinue" : "willUpdate")
+        case .fork: return nil
         case .skip: return skipStatus(row) ?? text("skipRetained")
         case .blocked: return nil
         }
@@ -1005,28 +1211,31 @@ struct CopyThreadsView: View {
         let items = operation.items
         switch operation.state {
         case .completed:
-            let addedCount = items.filter { $0.kind == .add }.count
-            let updatedCount = items.filter { $0.kind == .update }.count
+            let addedCount = operation.addedCount
+            let updatedCount = operation.updatedCount
+            let parkedCount = operation.parkedCount
+            let parkedSuffix = parkedCount > 0
+                ? " · " + text("summaryParked", arguments: ["count": String(parkedCount)]) : ""
             if addedCount > 0 && updatedCount > 0 {
                 return (text("copyCompleted"), text("copiedMixed", arguments: [
                     "target": operation.targetName,
                     "added": String(addedCount),
                     "updated": String(updatedCount)
-                ]), .good)
+                ]) + parkedSuffix, .good)
             }
             if addedCount > 0 {
                 let key = addedCount == 1 ? "copiedAddedOne" : "copiedAddedMany"
                 return (text("copyCompleted"), text(key, arguments: [
                     "target": operation.targetName,
                     "count": String(addedCount)
-                ]), .good)
+                ]) + parkedSuffix, .good)
             }
             if updatedCount > 0 {
                 let key = updatedCount == 1 ? "copiedUpdatedOne" : "copiedUpdatedMany"
                 return (text("copyCompleted"), text(key, arguments: [
                     "target": operation.targetName,
                     "count": String(updatedCount)
-                ]), .good)
+                ]) + parkedSuffix, .good)
             }
             return (text("copyCompleted"), generated(operation.summary), .good)
         case .undone:
@@ -1047,33 +1256,57 @@ struct CopyThreadsView: View {
 
     private func completionSummary(_ operation: SessionTransferOperation) -> some View {
         let content = operationContent(operation)
-        return HStack(alignment: .top, spacing: 9) {
-            Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: 13))
-                .foregroundColor(.good)
-                .padding(.top, 1)
-                .accessibilityHidden(true)
-            Text(content.summary)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.txt)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .layoutPriority(1)
-                .help(content.summary)
-            Button(text("viewBackup")) { controller.showBackup() }
-                .buttonStyle(.link)
-                .font(.system(size: 11))
-                .foregroundColor(.sub)
-                .fixedSize()
-                .disabled(controller.isWorking)
-            if operation.canUndo {
-                Button(text("undo")) { controller.requestUndo() }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundColor(.good)
+                    .padding(.top, 1)
+                    .accessibilityHidden(true)
+                Text(content.summary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.txt)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
+                    .help(content.summary)
+                Button(text("viewBackup")) { controller.showBackup() }
                     .buttonStyle(.link)
                     .font(.system(size: 11))
                     .foregroundColor(.sub)
                     .fixedSize()
                     .disabled(controller.isWorking)
+                if operation.canUndo {
+                    Button(text("undo")) { controller.requestUndo() }
+                        .buttonStyle(.link)
+                        .font(.system(size: 11))
+                        .foregroundColor(.sub)
+                        .fixedSize()
+                        .disabled(controller.isWorking)
+                }
+            }
+            if let verification = controller.lastVerification {
+                HStack(spacing: 6) {
+                    Image(systemName: verification.passed ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(verification.passed ? .good : .bad)
+                    Text(verification.summary)
+                        .font(.system(size: 11))
+                        .foregroundColor(verification.passed ? .sub : .bad)
+                }
+                .padding(.leading, 22)
+            }
+            if controller.reopenCountdown > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                        .font(.system(size: 11))
+                        .foregroundColor(.warn)
+                    Text(text("reopenNotice", arguments: ["seconds": String(controller.reopenCountdown)]))
+                        .font(.system(size: 11))
+                        .foregroundColor(.warn)
+                }
+                .padding(.leading, 22)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1155,6 +1388,9 @@ struct CopyThreadsView: View {
     private func confirmationCopy(_ confirmation: SessionTransferConfirmation) -> (title: String, message: String, button: String, items: [TransferSessionItem]) {
         switch confirmation.kind {
         case "copy":
+            if confirmation.canWaitForQuit || confirmation.parkedCount > 0 {
+                return (generated(confirmation.title), generated(confirmation.message), generated(confirmation.buttonTitle), confirmation.items)
+            }
             let updates = confirmation.items.filter { $0.kind == .update }
             let body = text("confirmCopyBody", arguments: [
                 "added": String(confirmation.addedCount),
@@ -1183,9 +1419,17 @@ struct CopyThreadsView: View {
                 .foregroundColor(.sub)
                 .fixedSize(horizontal: false, vertical: true)
             if !content.items.isEmpty {
-                sessionList(content.items)
+                sessionList(content.items, showKind: confirmation.parkedCount > 0)
             }
             HStack {
+                if confirmation.canWaitForQuit {
+                    Button(text("writeNowButton")) {
+                        Task { await controller.confirmAction() }
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11))
+                    .foregroundColor(.sub)
+                }
                 Spacer()
                 Button(text(confirmation.kind == "preserve" ? "return" : "cancel")) {
                     if confirmation.kind == "preserve" {
@@ -1196,12 +1440,19 @@ struct CopyThreadsView: View {
                 }
                 .keyboardShortcut(.cancelAction)
                 .focused($modalCancelFocused)
-                Button(content.button) {
-                    Task { await controller.confirmAction() }
+                if confirmation.canWaitForQuit {
+                    Button(text("waitForQuitButton")) {
+                        controller.waitForQuitAndSync()
+                    }
+                    .buttonStyle(ImportProminentButtonStyle())
+                } else {
+                    Button(content.button) {
+                        Task { await controller.confirmAction() }
+                    }
+                    .buttonStyle(confirmation.kind == "preserve"
+                        ? ImportProminentButtonStyle(tint: .bad)
+                        : ImportProminentButtonStyle())
                 }
-                .buttonStyle(confirmation.kind == "preserve"
-                    ? ImportProminentButtonStyle(tint: .bad)
-                    : ImportProminentButtonStyle())
             }
             if confirmation.kind == "recovery" {
                 Divider().overlay(Color.stroke)
@@ -1302,7 +1553,7 @@ struct CopyThreadsView: View {
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundColor(.txt)
                         }
-                        if showKind, let label = backupItemKind(item.kind) {
+                        if showKind, let label = backupItemKind(item) {
                             Text(label)
                                 .font(.system(size: 10))
                                 .foregroundColor(.sub)
@@ -1319,11 +1570,12 @@ struct CopyThreadsView: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(Color.card.opacity(0.6)))
     }
 
-    private func backupItemKind(_ kind: SessionTransferKind) -> String? {
-        switch kind {
+    private func backupItemKind(_ item: TransferSessionItem) -> String? {
+        if item.parkedFrom != nil { return text("backupParked") }
+        switch item.kind {
         case .add: return text("backupNew")
         case .update: return text("backupUpdate")
-        case .skip, .blocked: return nil
+        case .fork, .skip, .blocked: return nil
         }
     }
 }
@@ -1360,7 +1612,10 @@ enum CopyWindow {
     static var window: NSWindow?
     private static var delegate: CopyWindowDelegate?
     private static var controllers: [ObjectIdentifier: SessionTransferController] = [:]
-    static func isWorking(for store: Store) -> Bool { controllers[ObjectIdentifier(store)]?.isWorking == true }
+    static func isWorking(for store: Store) -> Bool {
+        guard let c = controllers[ObjectIdentifier(store)] else { return false }
+        return c.isWorking || c.isWaitingForQuit
+    }
 
     static func controller(for store: Store) -> SessionTransferController {
         let key = ObjectIdentifier(store)

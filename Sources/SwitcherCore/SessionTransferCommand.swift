@@ -9,6 +9,8 @@ public struct SessionTransferRequest: Codable, Sendable {
     public let backups: URL
     public let selected: [String]
     public let updateExisting: Bool
+    public let newSince: Date?
+    public let forkResolutions: [String: SessionForkResolution]?
     public let sourceIdentities: [String: String]
     public let expectedFingerprint: String
 
@@ -32,6 +34,8 @@ public struct SessionTransferRequest: Codable, Sendable {
     public init(plan: SessionTransferPlan, transcripts: URL, backups: URL) throws {
         version = 1; source = plan.source; target = plan.target; self.transcripts = transcripts; self.backups = backups
         selected = plan.selected.sorted(); updateExisting = plan.updateExisting
+        newSince = plan.newSince
+        forkResolutions = plan.forkResolutions.isEmpty ? nil : plan.forkResolutions
         sourceIdentities = Dictionary(uniqueKeysWithValues: plan.rows.filter { plan.selected.contains($0.id) }.map { ($0.id, $0.identity) })
         expectedFingerprint = try Self.fingerprint(plan, transcripts: transcripts, backups: backups)
     }
@@ -58,7 +62,8 @@ public struct SessionTransferRequest: Codable, Sendable {
         try validate()
         let service = SessionTransferService(transcripts: transcripts, backups: backups)
         let plan = try service.plan(source: source, target: target, selected: Set(selected), updateExisting: updateExisting,
-                                    expectedSourceIdentities: sourceIdentities)
+                                    expectedSourceIdentities: sourceIdentities, newSince: newSince,
+                                    forkResolutions: forkResolutions ?? [:])
         guard try Self.fingerprint(plan, transcripts: transcripts, backups: backups) == expectedFingerprint else {
             throw SessionTransferFailure("导出后来源、目标或档案已变化，请回软件重新检查并导出；本次未复制。")
         }
@@ -120,19 +125,24 @@ public enum SessionTransferCommand {
             if verb == "plan" {
                 return try JSONSerialization.data(withJSONObject: ["status": "ready", "fingerprint": request.expectedFingerprint,
                     "source": request.source.endpoint.name, "target": request.target.endpoint.name,
-                    "added": plan.addedCount, "updated": plan.updatedCount,
+                    "added": plan.addedCount, "updated": plan.updatedCount, "parked": plan.parkedCount,
                     "sessions": plan.rows.filter { plan.selected.contains($0.id) }.map { ["title": $0.title, "cwd": $0.cwd, "action": $0.kind.rawValue] }], options: [.sortedKeys, .prettyPrinted])
             }
             guard options["--expect"] == request.expectedFingerprint else { throw SessionTransferFailure("必须明确提供这份请求的预检指纹，未开始复制。") }
-            return try encode(service.execute(plan, requireIdle: requireIdle))
+            let receipt = try service.execute(plan, requireIdle: requireIdle)
+            let verification = try service.verifyAfterExecute(receipt, in: request.target)
+            return try encode(receipt, verification: verification)
         }
         guard let rawID = options["--receipt"], let id = UUID(uuidString: rawID)?.uuidString else { throw SessionTransferFailure("请指定执行结果中的 receiptID。") }
         return try encode(service.restore(id, to: request.target, undo: verb == "undo", requireIdle: requireIdle))
     }
-    static func encode(_ receipt: SessionTransferReceipt) throws -> Data {
+    static func encode(_ receipt: SessionTransferReceipt, verification: SessionTransferVerification? = nil) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         var object = try JSONSerialization.jsonObject(with: encoder.encode(receipt)) as! [String: Any]
         object["receiptID"] = receipt.id
+        if let verification {
+            object["verification"] = try JSONSerialization.jsonObject(with: encoder.encode(verification))
+        }
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }
 }
