@@ -22,8 +22,9 @@ private enum ApplicationUpdateLocalization {
             "detail.checking": "正在检查更新…",
             "detail.current": "当前版本已是最新版。",
             "detail.available": "当前 {current} · 下载并安装后自动重启",
-            "detail.downloading": "正在下载并校验安装包…",
-            "detail.verifying": "下载完成，正在校验签名与完整性…",
+            "detail.downloading": "正在下载更新…",
+            "detail.downloadingSized": "正在下载更新 · {size}",
+            "detail.verifying": "下载完成，正在校验安装包…",
             "detail.ready": "已通过校验，可以安装并重启切换器。",
             "detail.installing": "正在安装新版本并自动重启…",
             "detail.installingCard": "正在替换应用并准备重启，请稍候…",
@@ -31,7 +32,7 @@ private enum ApplicationUpdateLocalization {
             "detail.failedDownload": "下载或校验未完成，请重试。",
             "detail.failedInstall": "更新未完成，可重试安装。",
             "download.progress": "下载进度",
-            "download.verifying": "正在校验",
+            "download.verifying": "正在校验签名与完整性，请稍候…",
             "failure.unknown": "未提供详细原因。",
             "action.releaseNotes": "发布说明",
             "action.later": "稍后",
@@ -61,8 +62,9 @@ private enum ApplicationUpdateLocalization {
             "detail.checking": "Checking for updates…",
             "detail.current": "This version is up to date.",
             "detail.available": "Current {current} · Relaunches after installation",
-            "detail.downloading": "Downloading and verifying update package…",
-            "detail.verifying": "Downloaded. Verifying signature and integrity…",
+            "detail.downloading": "Downloading update…",
+            "detail.downloadingSized": "Downloading update · {size}",
+            "detail.verifying": "Downloaded. Verifying package…",
             "detail.ready": "Verified and ready to install and relaunch.",
             "detail.installing": "Installing update and relaunching…",
             "detail.installingCard": "Replacing the app and preparing to relaunch…",
@@ -70,7 +72,7 @@ private enum ApplicationUpdateLocalization {
             "detail.failedDownload": "The download or verification didn’t finish. Try again.",
             "detail.failedInstall": "The update didn’t finish. You can retry installation.",
             "download.progress": "Download progress",
-            "download.verifying": "Verifying package",
+            "download.verifying": "Verifying signature and integrity…",
             "failure.unknown": "No details were provided.",
             "action.releaseNotes": "Release Notes",
             "action.later": "Later",
@@ -216,7 +218,11 @@ struct ApplicationUpdateView: View {
         case .available:
             return t("detail.available", arguments: ["current": updater.currentVersion])
         case .downloading:
-            return t(isVerifyingDownload ? "detail.verifying" : "detail.downloading")
+            if isVerifyingDownload { return t("detail.verifying") }
+            if let sizeText = assetSizeText {
+                return t("detail.downloadingSized", arguments: ["size": sizeText])
+            }
+            return t("detail.downloading")
         case .ready: return t("detail.ready")
         case .installing: return t("detail.installing")
         case .failed:
@@ -249,27 +255,27 @@ struct ApplicationUpdateView: View {
             }
 
             if updater.phase == .downloading {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
-                        if isVerifyingDownload {
-                            ProgressView().controlSize(.mini)
+                Group {
+                    if isVerifyingDownload {
+                        HStack(spacing: 9) {
+                            ProgressView().controlSize(.small)
+                            Text(t("download.verifying"))
+                                .font(.system(size: 11.5))
+                                .foregroundColor(.txt.opacity(0.82))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: 0)
                         }
-                        Text(t(isVerifyingDownload ? "download.verifying" : "download.progress"))
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.sub)
-                        if let sizeText = assetSizeText {
-                            Text("· \(sizeText)")
-                                .font(.system(size: 10.5).monospacedDigit())
-                                .foregroundColor(.sub.opacity(0.72))
+                    } else {
+                        HStack(spacing: 10) {
+                            Bar(value: downloadProgress * 100, color: .claude, track: Color.white.opacity(0.09), height: 5)
+                                .accessibilityLabel(t("download.progress"))
+                                .accessibilityValue(downloadProgressText)
+                            Text(downloadProgressText)
+                                .font(.system(size: 11.5, weight: .semibold, design: .rounded).monospacedDigit())
+                                .foregroundColor(.txt.opacity(0.86))
+                                .frame(minWidth: 34, alignment: .trailing)
                         }
-                        Spacer(minLength: 8)
-                        Text(downloadProgressText)
-                            .font(.system(size: 11.5, weight: .semibold, design: .rounded).monospacedDigit())
-                            .foregroundColor(.txt.opacity(0.88))
                     }
-                    Bar(value: downloadProgress * 100, color: .claude, track: Color.white.opacity(0.09), height: 5)
-                        .accessibilityLabel(t("download.progress"))
-                        .accessibilityValue(downloadProgressText)
                 }
                 .padding(12)
                 .background(RoundedRectangle(cornerRadius: 10).fill(Color.card))
