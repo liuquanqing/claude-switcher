@@ -49,6 +49,11 @@ struct Snapshot: Codable {
     var extraEnabled: Bool?
     var fetchedAt: Date
     var identity: CLIIdentity { CLIIdentity(accountID: accountID, organizationID: organizationID, email: email) }
+    /// Primary usage window for the menu bar: 5-hour limit first, falling back to weekly limits
+    /// for accounts/plans without a 5-hour window (matching the card's metric priority).
+    var primaryUsageWindow: Window? {
+        session ?? weekly ?? weeklyFable ?? weeklySonnet ?? weeklyOpus
+    }
 }
 
 enum ProfileUsageState: Equatable, Sendable { case notRequested, loading, cached, loaded, blocked, loginRequired, failed }
@@ -785,12 +790,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    static func menuBarTitle(scope: DesktopProtectionScope, current: String, snapshot: Snapshot?) -> String {
+        let initial = current.prefix(1).uppercased()
+        guard scope == .subscription else {
+            return scope == .api ? " API" : " \(initial)"
+        }
+        let remaining = left(snapshot?.primaryUsageWindow)
+        return remaining.map { " \(initial) · \(pct($0))%" } ?? " \(initial)"
+    }
+
     @MainActor func updateTitle() {
         guard let b = item.button else { return }
         let scope = store.protection.desktopScope
-        let sl = scope == .subscription ? left(store.active?.snapshot?.session) : nil
-        let initial = store.current.prefix(1).uppercased()
-        b.title = scope == .api ? " API" : sl.map { " \(initial) · \(pct($0))%" } ?? " \(initial)"
+        b.title = Self.menuBarTitle(scope: scope, current: store.current, snapshot: store.active?.snapshot)
         b.image = NSImage(systemSymbolName: "sparkle", accessibilityDescription: "Claude Switcher")
         b.imagePosition = .imageLeading
         // The menu-bar title already conveys the state. Avoid a redundant

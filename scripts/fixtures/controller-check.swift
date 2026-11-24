@@ -1298,6 +1298,20 @@ actor FixtureGuardWorker: GuardWorking {
   passiveStore.lastRefresh = passiveTime
   for _ in 0..<3 { passiveStore.panelWillOpen() }
   require(passiveStore.lastRefresh == passiveTime && !passiveStore.cliStatusRefreshing && passiveStore.cliStatus == .matched, "opening a panel is passive and never starts a full CLI refresh")
+  let weeklyOnlySnap = Snapshot(session: nil, weekly: Window(used: 18, resetsAt: nil), fetchedAt: Date())
+  let sessionAndWeeklySnap = Snapshot(session: Window(used: 28, resetsAt: nil), weekly: Window(used: 18, resetsAt: nil), fetchedAt: Date())
+  let modelWeeklyOnlySnap = Snapshot(session: nil, weekly: nil, weeklyOpus: Window(used: 40, resetsAt: nil), fetchedAt: Date())
+  let emptySnap = Snapshot(fetchedAt: Date())
+  require(AppDelegate.menuBarTitle(scope: .subscription, current: "Personal", snapshot: sessionAndWeeklySnap) == " P · 72%",
+          "menu bar prefers 5-hour remaining percentage when present")
+  require(AppDelegate.menuBarTitle(scope: .subscription, current: "Personal", snapshot: weeklyOnlySnap) == " P · 82%",
+          "menu bar falls back to weekly remaining percentage for accounts without a 5-hour limit")
+  require(AppDelegate.menuBarTitle(scope: .subscription, current: "Personal", snapshot: modelWeeklyOnlySnap) == " P · 60%",
+          "menu bar falls back to model weekly limit when 5-hour and overall weekly are absent")
+  require(AppDelegate.menuBarTitle(scope: .subscription, current: "Personal", snapshot: emptySnap) == " P",
+          "menu bar omits percentage when no usage windows exist")
+  require(AppDelegate.menuBarTitle(scope: .api, current: "Personal", snapshot: weeklyOnlySnap) == " API",
+          "menu bar shows API in API mode regardless of subscription snapshot")
   checks += try await nativeUsageOutputChecks()
   checks += try await accountUsageQueryChecks()
   checks += try await unifiedControlsChecks()
