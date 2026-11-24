@@ -764,7 +764,10 @@ actor SessionTransferWorker {
                     // Claude Desktop flushes its sidebar index files on quit, changing target `before` hashes.
                     // Re-plan on the settled on-disk state and proceed automatically only if every change stays
                     // within the exact scope the user confirmed (same files, action kinds, and parkedFrom).
-                    let sourceIdentities = Dictionary(uniqueKeysWithValues: plan.rows.filter { plan.selected.contains($0.id) }.map { ($0.id, $0.identity) })
+                    let sourceIdentities = Dictionary(
+                        plan.rows.filter { plan.selected.contains($0.id) }.map { ($0.id, $0.identity) },
+                        uniquingKeysWith: { _, latest in latest }
+                    )
                     let freshPlan: SessionTransferPlan
                     do {
                         freshPlan = try await self.worker.plan(
@@ -789,7 +792,10 @@ actor SessionTransferWorker {
                         self.errorMessage = nil
                         return
                     }
-                    let confirmedActions = Dictionary(uniqueKeysWithValues: plan.changes.map { ($0.name, "\($0.kind.rawValue)|\($0.parkedFrom ?? "")") })
+                    let confirmedActions = Dictionary(
+                        plan.changes.map { ($0.name, "\($0.kind.rawValue)|\($0.parkedFrom ?? "")") },
+                        uniquingKeysWith: { _, latest in latest }
+                    )
                     let withinConfirmedScope = freshPlan.changes.allSatisfy { change in
                         confirmedActions[change.name] == "\(change.kind.rawValue)|\(change.parkedFrom ?? "")"
                     }

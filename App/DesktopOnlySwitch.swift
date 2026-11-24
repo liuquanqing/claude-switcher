@@ -127,7 +127,9 @@ struct DesktopOnlySwitchOffer: Equatable {
             let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
             // Renew an expired saved CLI backup via the official CLI before swapping the default login,
             // so switching back to a profile after >8h seamlessly follows without manual /login.
-            try await prepareTargetCLIRecovery(target: targetProfile, io: io)
+            // `requireUsableLogin: true` is required because `CLIDefaultMirror.follow` requires a fresh
+            // usable access token rather than accepting a merely trusted expired backup.
+            try await prepareTargetCLIRecovery(target: targetProfile, io: io, requireUsableLogin: true)
             guard try await stillSameDesktop() else {
                 throw SafetyError("目标桌面的登录或配置已变化，终端登录保持原样。")
             }
