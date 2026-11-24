@@ -142,8 +142,8 @@ import SwitcherCore
         }
     }
 
-    private func prepareTargetCLIRecovery(target: CLIProfileIdentity, io: NativeCLIStorage,
-                                          requireUsableLogin: Bool = false) async throws {
+    func prepareTargetCLIRecovery(target: CLIProfileIdentity, io: NativeCLIStorage,
+                                  requireUsableLogin: Bool = false) async throws {
         do {
             _ = try await CLIBackupRecovery.prepare(target: target, io: io, requireUsableLogin: requireUsableLogin, renew: { login, identity in
                 let proxy = try await self.checkedCLIProxy()
@@ -178,6 +178,7 @@ import SwitcherCore
             && (result.metadataOnly && (cliStandaloneVerified || cliStatus == .reported || cliStatus == .matched && result.profile == current)
                 || result.status == .reported && cliStatus == .matched && result.profile == current)
         cliObservedIdentity = result.identity
+        cliConnection.refreshLocalRecord()
         if preserveCompleted {
             cliProfile = result.profile; cliEmail = result.email
             return // Retain the original verification time; metadata is not a new check.
@@ -195,6 +196,7 @@ import SwitcherCore
         cliObservedIdentity = identity
         cliProfile = name; cliEmail = identity.email; cliStatusDetail = nil
         cliStatus = .reported; cliStandaloneVerified = false; cliStatusCheckedAt = Date()
+        cliConnection.refreshLocalRecord()
     }
 
     func invalidateCLIStatus() {

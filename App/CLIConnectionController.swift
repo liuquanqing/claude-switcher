@@ -86,6 +86,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     func refreshLocalRecord() {
         guard let context else { localRecord = .unconfirmed; return }
         let observed = operations.localRecord(context.identity, binding)
+        objectWillChange.send()
         guard observed != localRecord else { return }
         localRecord = observed
         if phase == .matched {

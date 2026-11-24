@@ -529,8 +529,8 @@ actor FixtureGuardWorker: GuardWorking {
   require(spacePreview.targetSpaces.first(where: { $0.space.organization == "org-old" })?.accountName == "Demo User"
           && spacePreview.targetSpaces.filter { !$0.matchesProfile }.allSatisfy { $0.organizationName == nil && $0.profileName == nil },
           "an account name may identify its group without reusing an organization or profile name for another space")
-  require(spacePreview.targetSpaces.count == 3 && spacePreview.targetSpaceID.isEmpty && !spacePreview.canCopy,
-          "profile evidence changes presentation only, not explicit destination selection")
+  require(spacePreview.targetSpaces.count == 3 && spacePreview.targetSpaceID == exactSpace.first?.id,
+          "unique exact account+organization match auto-selects the profile's Code space so preview loads immediately")
   require(spacePreview.targetSpaces.filter { $0.space.account == "account-personal" }
             .allSatisfy { $0.accountEmail == "fixture@example.invalid" }
           && spacePreview.targetSpaces.filter { $0.space.account != "account-personal" }

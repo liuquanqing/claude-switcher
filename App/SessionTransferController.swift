@@ -543,8 +543,14 @@ actor SessionTransferWorker {
             if !locations.contains(where: { $0.id == targetID }) { targetID = "" }
             let a = spaces[sourceID] ?? [], b = spaces[targetID] ?? []
             sourceSpaces = loaded.options[sourceID] ?? []; targetSpaces = loaded.options[targetID] ?? []
-            if !a.contains(where: { $0.id == sourceSpaceID }) { sourceSpaceID = a.count == 1 ? a[0].id : "" }
-            if !b.contains(where: { $0.id == targetSpaceID }) { targetSpaceID = b.count == 1 ? b[0].id : "" }
+            func preferredSpaceID(_ options: [TransferSpaceOption]) -> String {
+                if options.count == 1 { return options[0].id }
+                let exact = options.filter(\.matchesProfile)
+                if exact.count == 1 { return exact[0].id }
+                return ""
+            }
+            if !a.contains(where: { $0.id == sourceSpaceID }) { sourceSpaceID = preferredSpaceID(sourceSpaces) }
+            if !b.contains(where: { $0.id == targetSpaceID }) { targetSpaceID = preferredSpaceID(targetSpaces) }
             if let last = preferredReceipt(loaded.receipts) { display(last, environment: env) } else { latestReceipt = nil; lastOperation = nil }
             if targetID.isEmpty {
                 rows = []; picked = []; forkResolutions = [:]; inferredNewSinceDate = nil
@@ -635,11 +641,15 @@ actor SessionTransferWorker {
                 let msg = activeAndRunning
                     ? "将\(parts.joined(separator: "、"))。目标账号当前正在运行 Claude，写入期间会锁定切档，可等待你退出 Claude 后自动安全写入。"
                     : "将\(parts.joined(separator: "、"))。旧索引会先自动备份，聊天原文不变。"
+                let orderedItems = items.filter(\.continuation)
+                    + items.filter { !$0.continuation && $0.kind == .update }
+                    + items.filter { $0.parkedFrom != nil }
+                    + items.filter { !$0.continuation && $0.kind == .add && $0.parkedFrom == nil }
                 confirmation = SessionTransferConfirmation(
                     title: title, message: msg,
                     buttonTitle: activeAndRunning ? "立即尝试写入" : "确认同步",
                     kind: "copy",
-                    items: items.filter(\.continuation) + items.filter { !$0.continuation },
+                    items: orderedItems,
                     addedCount: plan.addedCount, updatedCount: plan.updatedCount,
                     continuationCount: items.filter(\.continuation).count,
                     parkedCount: plan.parkedCount,

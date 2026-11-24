@@ -194,7 +194,7 @@ final class Store: ObservableObject {
     @Published var cliStandaloneVerified = false
     @Published var cliStatusRefreshing = false
     @Published var cliStatusCheckedAt: Date?
-    var cliObservedIdentity: CLIIdentity?
+    @Published var cliObservedIdentity: CLIIdentity?
     var cliStatusGeneration = 0
     var cliScopeObservation: AnyCancellable?
     @Published var desktopOnlyOffer: DesktopOnlySwitchOffer?

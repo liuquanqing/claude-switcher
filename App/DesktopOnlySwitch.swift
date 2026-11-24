@@ -118,9 +118,14 @@ struct DesktopOnlySwitchOffer: Equatable {
                     && DesktopModeInspector.read(support: support) == .subscription
                     && self.cliConfiguration().allowsSubscriptionMutation
             }
+            let targetProfile = CLIProfileIdentity(name: target, identity: identity)
+            // Renew an expired saved CLI backup via the official CLI before swapping the default login,
+            // so switching back to a profile after >8h seamlessly follows without manual /login.
+            try await prepareTargetCLIRecovery(target: targetProfile, io: io)
+            busy = "正在同步默认终端登录…"
             let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
             let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: io),
-                target: CLIProfileIdentity(name: target, identity: identity), profiles: profiles, home: home, repository: repository,
+                target: targetProfile, profiles: profiles, home: home, repository: repository,
                 storeFor: { Self.isolatedStore($0, allowInteraction: true) },
                 journalURL: protection.files.directory.appendingPathComponent("cli-transcript-links.json"),
                 remote: { try await self.checkedCLIIdentity($0) },
