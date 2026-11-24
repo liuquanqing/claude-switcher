@@ -10,8 +10,8 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
-RELEASE = "1.3.8-rc.5"
-BUILD = "20261124.2.5"
+RELEASE = "1.3.8-rc.6"
+BUILD = "20261124.2.6"
 DR_BASELINE_DIRECTORY = ROOT / "dist/developer-id/1.3.6-rc.6-final"
 DR_BASELINE_APP_NAME = "Claude Switcher Preview.app"
 BUNDLE_ID = "dev.claudeswitcher.candidate"
