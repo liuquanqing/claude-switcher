@@ -402,6 +402,18 @@ actor FixtureGuardWorker: GuardWorking {
   require(try await reader.read(directory: desktopFixture) == nil, "missing desktop config is explicit absence")
   try JSONSerialization.data(withJSONObject: ["oauth:tokenCacheV2": "djEwSrospCyl4cv7QqCVRvA38J7NacG9Jc+5WvvH+TOD+ATgAMH/Y7vHThEbpksvJ59iP+LaVgiXDyT60Xm3TxOzEtrN2HFDwlxIST89w6N2i/CxzIVHueysMVH0E8mQuCZp"]).write(to: sourceConfig)
   require(try await reader.read(directory: desktopFixture) == "fixture-desktop-token", "retained Electron v10 format matches independent OpenSSL fixture")
+  let mixedCache: [String: Any] = [
+   "version": 2,
+   "revoked": NSNull(),
+   "org:user:profile": ["token": "fixture-mixed-token", "expiresAt": 4_102_444_800_000]
+  ]
+  require(try DesktopTokenReader.extractProfileToken(from: mixedCache, allowExpired: false, now: 1_700_000_000_000) == "fixture-mixed-token",
+          "desktop token cache tolerates non-dictionary metadata and null entries alongside user:profile tokens")
+  let nestedCache: [String: Any] = [
+   "entries": [["scopes": ["user:profile", "user:inference"], "accessToken": "fixture-nested-token", "expiresAt": 4_102_444_800_000]]
+  ]
+  require(try DesktopTokenReader.extractProfileToken(from: nestedCache, allowExpired: false, now: 1_700_000_000_000) == "fixture-nested-token",
+          "desktop token cache extracts nested or array-shaped user:profile entries")
   try JSONSerialization.data(withJSONObject: ["oauth:tokenCacheV2": "djEw"]).write(to: sourceConfig)
   var malformedRejected = false
   do { _ = try await reader.read(directory: desktopFixture) } catch { malformedRejected = true }
@@ -510,8 +522,8 @@ actor FixtureGuardWorker: GuardWorking {
   await spacePreview.refresh()
   spacePreview.setTarget("profile:Personal"); try await settled(spacePreview)
   let exactSpace = spacePreview.targetSpaces.filter(\.matchesProfile)
-  require(exactSpace.count == 1 && exactSpace.first?.title == "接口异常与重试处理" && exactSpace.first?.count == 3,
-          "only a full account and organization match gets the profile label and the local index preview")
+  require(exactSpace.count == 1 && exactSpace.first?.title == "接口异常与重试处理" && exactSpace.first?.count == 4,
+          "only a full account and organization match gets the profile label and the local index preview (including parked fork branch)")
   require(exactSpace.first?.profileName == "Personal" && exactSpace.first?.accountName == "Demo User"
           && exactSpace.first?.organizationName == "Demo Studio", "a named space shows the saved profile and matching local names")
   require(spacePreview.targetSpaces.first(where: { $0.space.organization == "org-old" })?.accountName == "Demo User"
@@ -575,7 +587,9 @@ actor FixtureGuardWorker: GuardWorking {
   let requestFolder = exportFixture.1.appendingPathComponent("session-transfer-requests")
   let exported = try FileManager.default.contentsOfDirectory(at: requestFolder, includingPropertiesForKeys: nil)
   let request = try SessionTransferRequest.load(from: exported[0]); _ = try request.checkedPlan()
-  require(request.selected == ["local_api.json", "local_ui.json"] && request.updateExisting == true, "local request preserves the exact selected addition and update intent")
+  require(request.selected == ["local_api.json", "local_chain.json", "local_ui.json"] && request.updateExisting == true
+          && request.forkResolutions?["local_chain.json"] == .keepTarget,
+          "local request preserves the exact selected additions, updates, and fork resolutions")
   let missingHelperController = SessionTransferController(store: Store(demo: true), testEnvironment: exportFixture.0, commandURL: exportFixture.1.appendingPathComponent("missing-helper"))
   try await chooseBusinessToPersonal(missingHelperController)
   let missingInstructions = await missingHelperController.generateInstructions()
@@ -744,21 +758,66 @@ actor FixtureGuardWorker: GuardWorking {
   try JSONSerialization.data(withJSONObject: ["sessionId": "logical-old", "cliSessionId": "cli-ui", "title": "120 天前的旧记录", "cwd": "/demo/old", "completedTurns": 4, "lastActivityAt": Date().addingTimeInterval(-120 * 86400).timeIntervalSince1970 * 1000]).write(to: datedRoot.appendingPathComponent("local_old.json"))
   let datedSelection = SessionTransferController(store: Store(demo: true), testEnvironment: datedFixture.0)
   try await chooseBusinessToPersonal(datedSelection)
-  require(datedSelection.newSessionAgeDays == 30 && datedSelection.visibleRows.count == 4 && datedSelection.picked == ["local_ui.json", "local_api.json"],
-          "the default month keeps a new session and an older existing conversation update")
-  datedSelection.setNewSessionAge(90)
-  require(datedSelection.visibleRows.count == 4 && datedSelection.picked == ["local_ui.json", "local_api.json"],
-          "all dates reveals older additions without removing safe updates")
-  datedSelection.setNewSessionAge(7)
-  require(!datedSelection.visibleRows.contains { $0.id == "local_old.json" } && !datedSelection.picked.contains("local_old.json"),
-          "a short new-session window hides older additions but never hides the existing update")
-  require(datedSelection.hiddenOlderAdditionsCount == 1, "the list reports how many older additions the date window hides")
+  require(datedSelection.cutoffMode == .auto && datedSelection.inferredNewSinceDate != nil
+          && datedSelection.picked == ["local_ui.json", "local_api.json"],
+          "auto cutoff infers target's earliest active session and excludes older additions while keeping updates")
+  require(datedSelection.rows.first(where: { $0.id == "local_old.json" })?.skippedByCutoff == true
+          && datedSelection.hiddenOlderAdditionsCount == 1,
+          "older additions appear explicitly as cutoff-skipped rows with reason")
+  datedSelection.setNewSessionAge(90); try await settled(datedSelection)
+  require(datedSelection.rows.first(where: { $0.id == "local_old.json" })?.skippedByCutoff == true
+          && datedSelection.picked == ["local_ui.json", "local_api.json"],
+          "90-day cutoff still excludes a 120-day addition without removing safe updates")
+  datedSelection.setNewSessionAge(7); try await settled(datedSelection)
+  require(datedSelection.rows.first(where: { $0.id == "local_old.json" })?.skippedByCutoff == true
+          && !datedSelection.picked.contains("local_old.json"),
+          "a short new-session window skips older additions explicitly without hiding existing updates")
+  require(datedSelection.hiddenOlderAdditionsCount == 1, "the list reports how many older additions the date window skips")
   datedSelection.setPicked("local_api.json", selected: false)
-  datedSelection.setNewSessionAge(90)
+  datedSelection.setNewSessionAge(90); try await settled(datedSelection)
   require(datedSelection.picked == ["local_ui.json"], "changing date scope preserves a manual update deselection")
-  datedSelection.setNewSessionAge(nil)
+  datedSelection.setNewSessionAge(nil); try await settled(datedSelection)
   require(datedSelection.picked == ["local_ui.json"], "returning to all dates does not reselect a cancelled update")
-  require(datedSelection.hiddenOlderAdditionsCount == 0, "all dates leaves no hidden additions to report")
+  require(datedSelection.rows.first(where: { $0.id == "local_old.json" })?.kind == .add
+          && datedSelection.hiddenOlderAdditionsCount == 0,
+          "clearing cutoff to all dates unlocks older additions")
+
+  // Built-in wait-for-quit, Switcher profile lock, settle countdown, automatic verification, and cancel
+  let waitFixture = try SessionTransferDemo.environment()
+  defer { try? FileManager.default.removeItem(at: waitFixture.1) }
+  let waitEnv = SessionTransferEnvironment(endpoints: waitFixture.0.endpoints, activeEndpointIDs: ["profile:Personal"],
+      transcripts: waitFixture.0.transcripts, backups: waitFixture.0.backups)
+  final class RunningBox: @unchecked Sendable { var running = true }
+  let runningBox = RunningBox()
+  let waitStore = Store(demo: true)
+  let waitController = SessionTransferController(store: waitStore, testEnvironment: waitEnv,
+      worker: SessionTransferWorker(runningProbe: { runningBox.running }),
+      waitPollNanoseconds: 10_000_000, settleSeconds: 2, reopenSeconds: 3)
+  try await chooseBusinessToPersonal(waitController)
+  require(waitController.targetIsActive && waitController.desktopRunning, "active target reports running Claude Desktop")
+  require(waitController.forkResolutions["local_chain.json"] == .keepTarget, "fork defaults to later branch")
+  waitController.setForkResolution("local_chain.json", .takeSource)
+  require(waitController.forkResolutions["local_chain.json"] == .takeSource, "user can override individual fork resolution")
+  await waitController.copySelected()
+  require(waitController.confirmation?.canWaitForQuit == true && waitController.confirmation?.parkedCount == 1,
+          "active running target offers wait-for-quit and reports parked fork branch")
+  waitController.waitForQuitAndSync()
+  require(waitController.isWaitingForQuit && waitStore.busy != nil, "waiting for quit locks Switcher profile switching")
+  waitController.cancelWaiting()
+  require(!waitController.isWaitingForQuit && waitStore.busy == nil && !FileManager.default.fileExists(atPath: waitEnv.backups.path),
+          "cancelling wait unlocks Switcher immediately with zero writes")
+  await waitController.copySelected()
+  waitController.waitForQuitAndSync()
+  try await Task.sleep(nanoseconds: 30_000_000)
+  runningBox.running = false
+  try await waitUntil("wait-for-quit finishes settling, writes, and verifies") {
+      !waitController.isWaitingForQuit && !waitController.isWorking && waitController.isShowingCopyResult
+  }
+  require(waitStore.busy == nil && waitController.lastVerification?.passed == true
+          && waitController.lastOperation?.parkedCount == 1 && waitController.reopenCountdown > 0,
+          "post-quit sync settles, writes with backup, passes automatic verification, and starts reopen countdown")
+  waitController.requestUndo(); waitController.dismissConfirmation(); await waitController.confirmAction(); try await settled(waitController)
+  require(waitController.lastOperation?.state == .undone, "one-click undo cleanly reverts both overwritten and parked fork files")
   let continuationFixture = try SessionTransferDemo.environment(scenario: "continuation")
   defer { try? FileManager.default.removeItem(at: continuationFixture.1) }
   let continuing = SessionTransferController(store: Store(demo: true), testEnvironment: continuationFixture.0)
