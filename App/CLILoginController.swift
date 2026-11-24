@@ -178,14 +178,15 @@ import SwitcherCore
             && (result.metadataOnly && (cliStandaloneVerified || cliStatus == .reported || cliStatus == .matched && result.profile == current)
                 || result.status == .reported && cliStatus == .matched && result.profile == current)
         cliObservedIdentity = result.identity
-        cliConnection.refreshLocalRecord()
         if preserveCompleted {
             cliProfile = result.profile; cliEmail = result.email
+            cliConnection.refreshLocalRecord()
             return // Retain the original verification time; metadata is not a new check.
         }
         cliProfile = result.profile; cliEmail = result.email; cliStatusDetail = result.detail
         cliStatus = result.status; cliStandaloneVerified = result.standaloneVerified; cliStatusCheckedAt = result.metadataOnly ? nil : Date()
         if result.status == .matched { cliFollowPending = nil }
+        cliConnection.refreshLocalRecord()
     }
 
     func publishLinkedDefaultCLIReport(_ identity: CLIIdentity, profile name: String) {
@@ -204,6 +205,7 @@ import SwitcherCore
         cliObservedIdentity = nil
         cliProfile = nil; cliEmail = nil; cliStatusDetail = nil
         cliStatus = .unverified; cliStandaloneVerified = false; cliStatusCheckedAt = nil
+        cliConnection.refreshLocalRecord()
     }
 
     func observeCLIStatusScope() {

@@ -44,6 +44,7 @@ final class SessionSyncReplayTests: FixtureTest {
         priorCliSessionIds: [String]? = nil,
         priorCliSessionLeftAt: [String: Int64]? = nil,
         spawnedFrom: [String: Any]? = nil,
+        extra: [String: Any] = [:],
         isArchived: Bool = false,
         space: SessionTransferSpace? = nil,
         transcriptMtimeMs: Int64? = nil
@@ -64,6 +65,7 @@ final class SessionSyncReplayTests: FixtureTest {
         if let priorCliSessionIds { obj["priorCliSessionIds"] = priorCliSessionIds }
         if let priorCliSessionLeftAt { obj["priorCliSessionLeftAt"] = priorCliSessionLeftAt }
         if let spawnedFrom { obj["spawnedFrom"] = spawnedFrom }
+        for (k, v) in extra { obj[k] = v }
         try writeJSON(obj, dest.directory.appendingPathComponent(file))
         let allClis = [cli] + (priorCliSessionIds ?? [])
         for c in allClis {
@@ -438,5 +440,57 @@ final class SessionSyncReplayTests: FixtureTest {
         let deadCheck = try service.verifyAfterExecute(receipt, in: target)
         XCTAssertFalse(deadCheck.passed)
         XCTAssertEqual(deadCheck.deadTranscripts, [a])
+    }
+
+    // MARK: - Review hardening guards
+    func testForkTakeSourceRejectedWhenUpdateExistingDisabled() throws {
+        let t: Int64 = 1_794_920_000_000
+        let file = try writeEntry("fork-no-upd", title: "禁用覆盖", cli: "cli-src-nu", turns: 12, lastActivityAt: t + 5000, space: source)
+        try writeEntry("fork-no-upd", title: "禁用覆盖", cli: "cli-dst-nu", turns: 8, lastActivityAt: t, space: target)
+        XCTAssertThrowsError(try service.plan(
+            source: source, target: target, selected: [file], updateExisting: false,
+            forkResolutions: [file: .takeSource]
+        ))
+    }
+
+    func testForkTakeSourceBlockedBeforeWriteWhenAnotherActiveTargetHoldsSourceCli() throws {
+        let t: Int64 = 1_794_930_000_000
+        let file = try writeEntry("fork-clash", title: "重复链防护", cli: "cli-shared-src", turns: 15, lastActivityAt: t + 5000, space: source)
+        try writeEntry("fork-clash", title: "重复链防护", cli: "cli-target-own", turns: 10, lastActivityAt: t, space: target)
+        try writeEntry("old-clone", title: "重复链防护｜旧分支 cli-shar（c86b）", cli: "cli-shared-src", turns: 15, lastActivityAt: t + 5000, space: target)
+        XCTAssertThrowsError(try service.plan(
+            source: source, target: target, selected: [file], updateExisting: true,
+            forkResolutions: [file: .takeSource]
+        ))
+    }
+
+    func testForkParkedCloneStripsSpawnedFromNameAndUnsupportedBindingForkIsBlocked() throws {
+        let t: Int64 = 1_794_940_000_000
+        let file = try writeEntry(
+            "fork-spawn", title: "带派生名", cli: "cli-sp-src", turns: 10, lastActivityAt: t + 5000,
+            extra: ["spawnedFrom": ["sessionId": "parent-1", "name": "dup-name"]], space: source
+        )
+        try writeEntry(
+            "fork-spawn", title: "带派生名", cli: "cli-sp-dst", turns: 9, lastActivityAt: t,
+            extra: ["spawnedFrom": ["sessionId": "parent-1", "name": "dup-name"]], space: target
+        )
+        let plan = try service.plan(
+            source: source, target: target, selected: [file], updateExisting: true,
+            forkResolutions: [file: .takeSource]
+        )
+        let parkedChange: SessionTransferChange = try XCTUnwrap(plan.changes.first { $0.parkedFrom == file })
+        let parkedObj = try Disk.json(parkedChange.after)
+        let parkedSpawn = try XCTUnwrap(parkedObj["spawnedFrom"] as? [String: Any])
+        XCTAssertNil(parkedSpawn["name"], "Parked clone must strip spawnedFrom.name to avoid duplicate addressing")
+        XCTAssertEqual(parkedSpawn["sessionId"] as? String, "parent-1")
+
+        // Unsupported binding on fork source must be blocked at preview time.
+        let boundFile = try writeEntry(
+            "fork-bound", title: "带绑定字段", cli: "cli-bound-src", turns: 10, lastActivityAt: t + 5000,
+            extra: ["accountUuid": "should-not-cross-space"], space: source
+        )
+        try writeEntry("fork-bound", title: "带绑定字段", cli: "cli-bound-dst", turns: 9, lastActivityAt: t, space: target)
+        let rows = try service.rows(source: source, target: target, updateExisting: true)
+        XCTAssertEqual(rows.first { $0.id == boundFile }?.kind, .blocked)
     }
 }

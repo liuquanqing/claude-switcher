@@ -119,11 +119,19 @@ struct DesktopOnlySwitchOffer: Equatable {
                     && self.cliConfiguration().allowsSubscriptionMutation
             }
             let targetProfile = CLIProfileIdentity(name: target, identity: identity)
+            // Snapshot profiles and verify desktop/configuration gate right before AND after async CLI renewal
+            // so renewal never runs outside subscription-mutation mode or against a stale profile snapshot.
+            guard try await stillSameDesktop() else {
+                throw SafetyError("目标桌面的登录或配置已变化，终端登录保持原样。")
+            }
+            let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
             // Renew an expired saved CLI backup via the official CLI before swapping the default login,
             // so switching back to a profile after >8h seamlessly follows without manual /login.
             try await prepareTargetCLIRecovery(target: targetProfile, io: io)
+            guard try await stillSameDesktop() else {
+                throw SafetyError("目标桌面的登录或配置已变化，终端登录保持原样。")
+            }
             busy = "正在同步默认终端登录…"
-            let profiles = self.profiles.map { CLIProfileIdentity(name: $0.name, identity: $0.snapshot?.identity) }
             let outcome = try await CLIDefaultMirror.follow(transaction: CLITransaction(io: io),
                 target: targetProfile, profiles: profiles, home: home, repository: repository,
                 storeFor: { Self.isolatedStore($0, allowInteraction: true) },

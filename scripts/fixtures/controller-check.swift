@@ -414,6 +414,20 @@ actor FixtureGuardWorker: GuardWorking {
   ]
   require(try DesktopTokenReader.extractProfileToken(from: nestedCache, allowExpired: false, now: 1_700_000_000_000) == "fixture-nested-token",
           "desktop token cache extracts nested or array-shaped user:profile entries")
+  let edgeCache: [String: Any] = [
+   "bool:user:profile": ["token": "bad-bool", "expiresAt": true],
+   "nan:user:profile": ["token": "bad-nan", "expiresAt": Double.nan],
+   "inf:user:profile": ["token": "bad-inf", "expiresAt": Double.infinity],
+   "empty:user:profile": ["token": "", "expiresAt": 4_102_444_800_000],
+   "expired:user:profile": ["token": "expired-token", "expiresAt": 1_600_000_000_000],
+   "valid:user:profile": ["token": "valid-token", "accessToken": "alt-token", "expiresAt": 4_102_444_800_000],
+   "deep": ["l2": ["l3": ["l4": ["l5": ["l6:user:profile": ["token": "too-deep", "expiresAt": 4_200_000_000_000]]]]]]
+  ]
+  require(try DesktopTokenReader.extractProfileToken(from: edgeCache, allowExpired: false, now: 1_700_000_000_000) == "valid-token",
+          "desktop token cache rejects boolean/NaN/Infinity/empty/depth-5/expired entries and prefers token over accessToken")
+  var scalarRejected = false
+  do { _ = try DesktopTokenReader.extractProfileToken(from: "scalar-root", allowExpired: false, now: 1_700_000_000_000) } catch { scalarRejected = true }
+  require(scalarRejected, "scalar tokenCacheV2 root is still rejected as incompatible")
   try JSONSerialization.data(withJSONObject: ["oauth:tokenCacheV2": "djEw"]).write(to: sourceConfig)
   var malformedRejected = false
   do { _ = try await reader.read(directory: desktopFixture) } catch { malformedRejected = true }
@@ -809,13 +823,19 @@ actor FixtureGuardWorker: GuardWorking {
   await waitController.copySelected()
   waitController.waitForQuitAndSync()
   try await Task.sleep(nanoseconds: 30_000_000)
+  // Simulate Claude Desktop touching target index metadata on exit (same scope, new before-hash).
+  let flushedTargetFile = waitEnv.endpoints.first { $0.id == "profile:Personal" }!.root
+      .appendingPathComponent("claude-code-sessions/account-personal/org-personal/local_chain.json")
+  var flushedObj = try JSONSerialization.jsonObject(with: Data(contentsOf: flushedTargetFile)) as! [String: Any]
+  flushedObj["lastWindowFlush"] = 1
+  try JSONSerialization.data(withJSONObject: flushedObj, options: [.sortedKeys]).write(to: flushedTargetFile)
   runningBox.running = false
-  try await waitUntil("wait-for-quit finishes settling, writes, and verifies") {
+  try await waitUntil("wait-for-quit re-plans after quit flush, writes, and verifies") {
       !waitController.isWaitingForQuit && !waitController.isWorking && waitController.isShowingCopyResult
   }
   require(waitStore.busy == nil && waitController.lastVerification?.passed == true
           && waitController.lastOperation?.parkedCount == 1 && waitController.reopenCountdown > 0,
-          "post-quit sync settles, writes with backup, passes automatic verification, and starts reopen countdown")
+          "post-quit sync re-plans around quit-flush hash changes, writes with backup, passes verification, and starts reopen countdown")
   waitController.requestUndo(); waitController.dismissConfirmation(); await waitController.confirmAction(); try await settled(waitController)
   require(waitController.lastOperation?.state == .undone, "one-click undo cleanly reverts both overwritten and parked fork files")
   let continuationFixture = try SessionTransferDemo.environment(scenario: "continuation")

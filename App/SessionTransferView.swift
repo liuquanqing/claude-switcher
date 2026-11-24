@@ -1296,6 +1296,16 @@ struct CopyThreadsView: View {
                         .foregroundColor(verification.passed ? .sub : .bad)
                 }
                 .padding(.leading, 22)
+            } else if let verificationError = controller.lastVerificationError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.bad)
+                    Text("写后核对未能完成：\(verificationError)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.bad)
+                }
+                .padding(.leading, 22)
             }
             if controller.reopenCountdown > 0 {
                 HStack(spacing: 6) {

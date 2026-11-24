@@ -270,6 +270,7 @@ actor SessionTransferWorker {
     @Published private(set) var confirmation: SessionTransferConfirmation?
     @Published private(set) var lastOperation: SessionTransferOperation?
     @Published private(set) var lastVerification: SessionTransferVerification?
+    @Published private(set) var lastVerificationError: String?
     @Published private(set) var backupInformation: String?
     @Published private(set) var backupItems: [TransferSessionItem] = []
     @Published private(set) var handoffInformation: String?
@@ -433,6 +434,7 @@ actor SessionTransferWorker {
     private func clearSelection() {
         completedSnapshot = nil
         lastVerification = nil
+        lastVerificationError = nil
         picked = []; forkResolutions = [:]; pendingPlan = nil; pendingRestore = nil; pendingPreserve = nil; confirmation = nil
         preselectMissing = true
         errorMessage = nil; statusMessage = nil; operationStatus = nil
@@ -599,7 +601,16 @@ actor SessionTransferWorker {
                     forkResolutions[row.id] = row.fork?.defaultResolution ?? .skip
                 }
             }
-            statusMessage = operationStatus; errorMessage = historyError
+            statusMessage = operationStatus
+            if let historyError {
+                errorMessage = historyError
+            } else if isShowingCopyResult, let verificationError = lastVerificationError {
+                errorMessage = "写后核对未能完成：\(verificationError)"
+            } else if isShowingCopyResult, let verification = lastVerification, !verification.passed {
+                errorMessage = verification.summary
+            } else {
+                errorMessage = nil
+            }
         } catch {
             guard refreshID == token else { return }
             rows = []; picked = []; forkResolutions = [:]; errorMessage = error.localizedDescription
@@ -681,6 +692,7 @@ actor SessionTransferWorker {
                 try beginWrite(); defer { endWrite() }
                 let result = try await worker.restore(current, id: restore.0, space: space, undo: restore.1)
                 lastVerification = nil
+                lastVerificationError = nil
                 display(result, environment: current); operationStatus = restore.1 ? "已撤销上次复制。" : "已恢复上次未完成的变更。"; statusMessage = operationStatus
                 picked = []
             } else if let id = pendingPreserve {
@@ -745,7 +757,52 @@ actor SessionTransferWorker {
                     guard !Task.isCancelled else { return }
                     self.waitPhase = .writing
                     self.store.busy = "正在同步并核对会话索引…"
-                    try await self.performExecuteLocked(plan, environment: env)
+                    let fresh = try self.makeEnvironment()
+                    guard fresh.endpoints == env.endpoints else {
+                        throw SessionTransferFailure("账号档案已变化，请重新选择。")
+                    }
+                    // Claude Desktop flushes its sidebar index files on quit, changing target `before` hashes.
+                    // Re-plan on the settled on-disk state and proceed automatically only if every change stays
+                    // within the exact scope the user confirmed (same files, action kinds, and parkedFrom).
+                    let sourceIdentities = Dictionary(uniqueKeysWithValues: plan.rows.filter { plan.selected.contains($0.id) }.map { ($0.id, $0.identity) })
+                    let freshPlan: SessionTransferPlan
+                    do {
+                        freshPlan = try await self.worker.plan(
+                            fresh,
+                            source: plan.source,
+                            target: plan.target,
+                            selected: plan.selected,
+                            updates: plan.updateExisting,
+                            expectedSourceIdentities: sourceIdentities,
+                            newSince: plan.newSince,
+                            forkResolutions: plan.forkResolutions
+                        )
+                    } catch {
+                        let alreadyCaughtUp = error.localizedDescription.contains("无需复制")
+                        self.isWorking = true
+                        self.waitPhase = .idle
+                        self.endWrite()
+                        await self.refresh()
+                        self.statusMessage = alreadyCaughtUp
+                            ? "Claude 退出期间目标会话已更新为最新，无需再写入。"
+                            : "Claude 退出期间目标会话发生变化，已刷新列表，请重新核对并确认。"
+                        self.errorMessage = nil
+                        return
+                    }
+                    let confirmedActions = Dictionary(uniqueKeysWithValues: plan.changes.map { ($0.name, "\($0.kind.rawValue)|\($0.parkedFrom ?? "")") })
+                    let withinConfirmedScope = freshPlan.changes.allSatisfy { change in
+                        confirmedActions[change.name] == "\(change.kind.rawValue)|\(change.parkedFrom ?? "")"
+                    }
+                    guard withinConfirmedScope else {
+                        self.isWorking = true
+                        self.waitPhase = .idle
+                        self.endWrite()
+                        await self.refresh()
+                        self.statusMessage = "Claude 退出期间目标会话发生变化，已刷新列表，请重新核对并确认。"
+                        self.errorMessage = nil
+                        return
+                    }
+                    try await self.performExecuteLocked(freshPlan, environment: fresh)
                     self.isWorking = true
                     self.waitPhase = .idle
                     self.endWrite()
@@ -796,16 +853,32 @@ actor SessionTransferWorker {
         let fresh = try makeEnvironment()
         guard fresh.endpoints == env.endpoints else { throw SessionTransferFailure("账号档案已变化，请重新选择。") }
         let result = try await worker.execute(fresh, plan)
-        let verification = try? await worker.verify(fresh, receipt: result, target: plan.target)
+        let verification: SessionTransferVerification?
+        var verificationError: String?
+        do {
+            verification = try await worker.verify(fresh, receipt: result, target: plan.target)
+        } catch {
+            verification = nil
+            verificationError = error.localizedDescription
+        }
         lastVerification = verification
+        lastVerificationError = verificationError
         display(result, environment: fresh); picked = []
         completedSnapshot = SessionCopyResultSnapshot(operationID: result.id, sourceSpaceID: plan.source.id,
             targetSpaceID: plan.target.id, rows: plan.rows, forkResolutions: plan.forkResolutions)
         query = ""
-        if result.parkedCount > 0 {
-            operationStatus = "已复制\(result.addedCount)条、更新\(result.updatedCount)条、另存旧分支\(result.parkedCount)条会话。"
+        let summaryPrefix = result.parkedCount > 0
+            ? "已复制\(result.addedCount)条、更新\(result.updatedCount)条、另存旧分支\(result.parkedCount)条会话"
+            : "已复制\(result.addedCount)条、更新\(result.updatedCount)条会话"
+        if let verification, !verification.passed {
+            operationStatus = "\(summaryPrefix)，但写后核对发现异常，请核对或撤销。"
+            errorMessage = verification.summary
+        } else if let verificationError {
+            operationStatus = "\(summaryPrefix)，但写后核对未能完成，请核对或撤销。"
+            errorMessage = "写后核对未能完成：\(verificationError)"
         } else {
-            operationStatus = "已复制\(result.addedCount)条、更新\(result.updatedCount)条会话。"
+            operationStatus = "\(summaryPrefix)。"
+            errorMessage = nil
         }
         statusMessage = operationStatus
         if fresh.activeEndpointIDs.contains(plan.target.endpoint.id) && reopenSeconds > 0 {

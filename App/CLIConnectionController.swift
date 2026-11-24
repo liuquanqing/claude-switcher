@@ -68,6 +68,7 @@ enum CLITerminalIntent: Equatable { case open, signIn }
     }
     private var context: CLIConnectionContext?
     private var generation = 0
+    private var lastObservedPreferredChoice: CLIBindingChoice?
     init(operations: CLIConnectionOperations) { self.operations = operations }
 
     func contextDidChange() {
@@ -78,19 +79,31 @@ enum CLITerminalIntent: Equatable { case open, signIn }
         expectedProfile = observed?.profile ?? ""; clearFeedback(); defaultMatches = false; defaultLoginAvailable = false
         checkedAt = nil; localRecord = .unconfirmed
         do { binding = try observed.flatMap { try operations.load($0.identity) } }
-        catch { binding = nil; choice = nil; phase = .failed; detail = error.localizedDescription; return }
+        catch { binding = nil; choice = nil; phase = .failed; detail = error.localizedDescription; lastObservedPreferredChoice = nil; return }
         choice = binding?.choice
         if let observed { localRecord = operations.localRecord(observed.identity, binding) }
         phase = binding == nil ? .unlinked : .unconfirmed
+        lastObservedPreferredChoice = preferredChoice
     }
     func refreshLocalRecord() {
-        guard let context else { localRecord = .unconfirmed; return }
+        guard let context else {
+            localRecord = .unconfirmed
+            lastObservedPreferredChoice = nil
+            return
+        }
         let observed = operations.localRecord(context.identity, binding)
-        objectWillChange.send()
-        guard observed != localRecord else { return }
-        localRecord = observed
-        if phase == .matched {
-            generation += 1; phase = .unconfirmed; checkedAt = nil
+        if observed != localRecord {
+            localRecord = observed
+            if phase == .matched {
+                generation += 1; phase = .unconfirmed; checkedAt = nil
+            }
+            lastObservedPreferredChoice = preferredChoice
+            return
+        }
+        let currentChoice = preferredChoice
+        if currentChoice != lastObservedPreferredChoice {
+            lastObservedPreferredChoice = currentChoice
+            objectWillChange.send()
         }
     }
     private func stillCurrent(_ captured: CLIConnectionContext, generation: Int) -> Bool {

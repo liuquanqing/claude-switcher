@@ -257,6 +257,12 @@ public struct SessionTransferService {
     func continuation(_ source: Index, from old: Index, updates: Bool) throws -> (SessionTransferKind, String, Data?, SessionForkDetails?) {
         guard old.cwd == source.cwd else { return (.blocked, "两边项目路径不同，不覆盖。", nil, nil) }
         let details = forkDetails(source, target: old)
+        func forkOrBlocked(_ reason: String) -> (SessionTransferKind, String, Data?, SessionForkDetails?) {
+            if Self.unsupportedBindings.contains(where: { source.object[$0] != nil }) {
+                return (.blocked, "此索引含未适配的账号或认证绑定，暂不自动跨空间复制。", nil, nil)
+            }
+            return (.fork, reason, nil, details)
+        }
         // Target moved on from source's chain? Only "target ahead" if source stopped before target left it (R3: 11-10 BP).
         if let targetChain = old.priorCliSessionIds, targetChain.contains(source.cli) {
             if let leftAt = old.priorCliSessionLeftAt[source.cli],
@@ -265,7 +271,7 @@ public struct SessionTransferService {
                try modifiedMilliseconds(sourceTranscript) <= leftAt {
                 return (.skip, "目标进度较新，保留目标。", nil, nil)
             }
-            return (.fork, "来源在目标离开旧链后继续聊过，已分叉。", nil, details)
+            return forkOrBlocked("来源在目标离开旧链后继续聊过，已分叉。")
         }
         // Source moved on from target's chain? Only linear continuation if target stopped <= leftAt (R1 & R7).
         // Never compare completedTurns across identities: turn counters are per-identity and incomparable.
@@ -274,20 +280,20 @@ public struct SessionTransferService {
                 guard let oldPriorList = oldPrior as? [String],
                       let idx = chain.firstIndex(of: old.cli),
                       Array(chain.prefix(idx)) == oldPriorList else {
-                    return (.fork, "历史链前缀不一致，已分叉。", nil, details)
+                    return forkOrBlocked("历史链前缀不一致，已分叉。")
                 }
             }
             guard let leftAt = source.priorCliSessionLeftAt[old.cli] else {
-                return (.fork, "缺少切换时刻，无法确认是否分叉，请按分叉处理。", nil, details)
+                return forkOrBlocked("缺少切换时刻，无法确认是否分叉，请按分叉处理。")
             }
             guard let dd = old.time else {
-                return (.fork, "目标缺少活动时间，无法确认是否分叉，请按分叉处理。", nil, details)
+                return forkOrBlocked("目标缺少活动时间，无法确认是否分叉，请按分叉处理。")
             }
             guard dd <= leftAt else {
-                return (.fork, "目标在来源离开旧链后继续聊过，已分叉。", nil, details)
+                return forkOrBlocked("目标在来源离开旧链后继续聊过，已分叉。")
             }
             if let oldTranscript = try transcript(old.cli), try modifiedMilliseconds(oldTranscript) > leftAt {
-                return (.fork, "旧链原文在切换后仍有写入，已分叉。", nil, details)
+                return forkOrBlocked("旧链原文在切换后仍有写入，已分叉。")
             }
             guard updates else { return (.skip, "目标停在旧记录；开启更新后可接上。", nil, nil) }
             var object = old.object
@@ -297,7 +303,7 @@ public struct SessionTransferService {
             return (.update, "来源换了新记录继续聊过，勾选后目标会接上，标题与设置保留。", try Disk.encode(object), nil)
         }
         // Neither chain contains the other -> FORK (Section 3).
-        return (.fork, "两边对话链互不相关，已分叉。", nil, details)
+        return forkOrBlocked("两边对话链互不相关，已分叉。")
     }
     func row(_ index: Index, _ kind: SessionTransferKind, _ reason: String, continuation: Bool = false,
              fork: SessionForkDetails? = nil, skippedByCutoff: Bool = false) -> SessionTransferRow {
@@ -470,6 +476,9 @@ public struct SessionTransferService {
             case .skip: break
             }
         }
+        if !updateExisting && !activeForkTakeSource.isEmpty {
+            throw SessionTransferFailure("未开启更新已有会话时，不能以源覆盖分叉条目。")
+        }
         var changes: [SessionTransferChange] = []
         var overwrittenTargetNames: Set<String> = activeForkTakeSource
         var incomingClis: Set<String> = []
@@ -480,13 +489,29 @@ public struct SessionTransferService {
                 if let item = state.source.indexes[name] { incomingClis.insert(item.cli) }
             }
         }
-        for name in activeForkTakeSource {
-            if let item = state.source.indexes[name] { incomingClis.insert(item.cli) }
+        // Fail closed before writing if takeSource would duplicate a cliSessionId already owned by another active target entry.
+        let untouchedActiveTargetClis = Set(state.target.indexes.values
+            .filter { !overwrittenTargetNames.contains($0.name) && !removed($0, in: state.target) }
+            .map(\.cli))
+        for name in activeForkTakeSource.sorted() {
+            if let item = state.source.indexes[name] {
+                if untouchedActiveTargetClis.contains(item.cli) {
+                    throw SessionTransferFailure("目标中已有另一条活跃会话引用同一正文链，请先检查旧分支条目后再覆盖。")
+                }
+                incomingClis.insert(item.cli)
+            }
         }
         // Chains still reachable in target after this sync (untouched target entries + incoming active entries).
+        // Per Section 3, any target entry referencing the losing cliSessionId keeps it reachable.
         var reachable: Set<String> = Set(state.target.indexes.values.filter { !overwrittenTargetNames.contains($0.name) }.map(\.cli))
         reachable.formUnion(incomingClis)
         var usedNames: Set<String> = Set(changes.map(\.name))
+        func stripSpawnedFromName(_ object: inout [String: Any]) {
+            if var spawned = object["spawnedFrom"] as? [String: Any] {
+                spawned.removeValue(forKey: "name")
+                object["spawnedFrom"] = spawned
+            }
+        }
         for name in selected.sorted() {
             guard let row = chosenRows.first(where: { $0.id == name }), row.kind == .fork,
                   let srcItem = state.source.indexes[name], let dstItem = state.target.indexes[name] else { continue }
@@ -499,6 +524,7 @@ public struct SessionTransferService {
                 if !reachable.contains(dstItem.cli) {
                     let cloneID = allocateCloneID(seed: "\(name)\n\(dstItem.cli)\n\(target.account)\ntakeSource", usedNames: &usedNames, target: state.target)
                     var cloneObj = dstItem.object
+                    stripSpawnedFromName(&cloneObj)
                     let cloneTitle = Self.parkedTitle(base: dstItem.title, cli: dstItem.cli, account: target.account)
                     cloneObj["sessionId"] = cloneID
                     cloneObj["title"] = cloneTitle
@@ -510,6 +536,7 @@ public struct SessionTransferService {
             } else if activeForkKeepTarget.contains(name) {
                 if !reachable.contains(srcItem.cli) {
                     var cloneObj = try sanitizedCopy(srcItem)
+                    stripSpawnedFromName(&cloneObj)
                     let cloneID = allocateCloneID(seed: "\(name)\n\(srcItem.cli)\n\(source.account)\nkeepTarget", usedNames: &usedNames, target: state.target)
                     let cloneTitle = Self.parkedTitle(base: srcItem.title, cli: srcItem.cli, account: source.account)
                     cloneObj["sessionId"] = cloneID

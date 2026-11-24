@@ -130,18 +130,28 @@ public enum SessionTransferCommand {
             }
             guard options["--expect"] == request.expectedFingerprint else { throw SessionTransferFailure("必须明确提供这份请求的预检指纹，未开始复制。") }
             let receipt = try service.execute(plan, requireIdle: requireIdle)
-            let verification = try service.verifyAfterExecute(receipt, in: request.target)
-            return try encode(receipt, verification: verification)
+            let verification: SessionTransferVerification?
+            var verificationError: String?
+            do {
+                verification = try service.verifyAfterExecute(receipt, in: request.target)
+            } catch {
+                verification = nil
+                verificationError = error.localizedDescription
+            }
+            return try encode(receipt, verification: verification, verificationError: verificationError)
         }
         guard let rawID = options["--receipt"], let id = UUID(uuidString: rawID)?.uuidString else { throw SessionTransferFailure("请指定执行结果中的 receiptID。") }
         return try encode(service.restore(id, to: request.target, undo: verb == "undo", requireIdle: requireIdle))
     }
-    static func encode(_ receipt: SessionTransferReceipt, verification: SessionTransferVerification? = nil) throws -> Data {
+    static func encode(_ receipt: SessionTransferReceipt, verification: SessionTransferVerification? = nil, verificationError: String? = nil) throws -> Data {
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         var object = try JSONSerialization.jsonObject(with: encoder.encode(receipt)) as! [String: Any]
         object["receiptID"] = receipt.id
         if let verification {
             object["verification"] = try JSONSerialization.jsonObject(with: encoder.encode(verification))
+        }
+        if let verificationError {
+            object["verificationError"] = verificationError
         }
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }
