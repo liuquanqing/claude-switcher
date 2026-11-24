@@ -73,8 +73,10 @@ struct LocalAccountObservation: Equatable {
         defer { automaticRefreshInProgress = false }
         // Metadata observation is cheap. Only the active subscription desktop
         // gets a bounded, silent usage request when the sample is due.
+        // Never read the foreign file-based "Claude Code-credentials" keychain item
+        // from background polling: macOS login.keychain-db ignores interactionNotAllowed
+        // on ACL prompts after Claude Code recreates the item on token refresh.
         _ = await observeAccountMetadata()
-        await maintainCurrentCLIBackup()
         guard protection.desktopScope == .subscription, claudeRunning || panelIsVisible(),
               protection.enabled, let profile = active, profile.signedIn || localAccountObservation?.desktopAccountID != nil else { return }
         let name = current, now = Date()

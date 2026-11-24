@@ -305,5 +305,10 @@ import SwitcherCore
     let quietlyWait=await nearExpiry.recoverCurrentCLI(io:io,context:{true},gate:{preconditionFailure("no near-expiry warning needs a network probe")},native:{preconditionFailure("no silent capability")},nativeIsSilent:false,verify:{_ in identity},now:fixtureNow)
     require(quietlyWait == .notNeeded && nearExpiry.banner==nil && nearExpiry.cliStatus == .matched,
             "a usable near-expiry login does not generate a false recovery warning while ordinary CLI sessions can still renew it")
+    let autoRefreshSource = try String(contentsOfFile: "App/AutomaticAccountRefresh.swift", encoding: .utf8)
+    require(!autoRefreshSource.contains("maintainCurrentCLIBackup(")
+            && !autoRefreshSource.contains("backupCurrentDefaultCLI(")
+            && !autoRefreshSource.contains("recoverCurrentCLI("),
+            "background automaticRefresh must never touch the foreign file-based Claude Code-credentials keychain item")
     return checks
 }
